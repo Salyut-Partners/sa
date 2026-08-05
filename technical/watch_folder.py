@@ -99,6 +99,13 @@ def main() -> None:
     parser.add_argument("--keep-ass", action="store_true")
     args = parser.parse_args()
 
+    missing = subtitle_styler.missing_dependencies()
+    if missing:
+        print("Оточення застаріло: немає " + ", ".join(missing))
+        print("Найчастіше це після git pull — код оновився, бібліотеки ні.")
+        print(f"\nПолагодь одним рядком:\n  cd {ROOT} && ./setup.sh\n")
+        raise SystemExit(1)
+
     work = args.processed / ".working"
     for folder in (args.inbox, args.output, args.processed, work):
         folder.mkdir(parents=True, exist_ok=True)

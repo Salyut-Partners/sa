@@ -70,8 +70,8 @@ else
 fi
 info "перевіряю бібліотеки…"
 technical/.venv/bin/pip install --quiet --upgrade pip >/dev/null 2>&1
-technical/.venv/bin/pip install --quiet mlx-whisper fonttools || die "не вдалося поставити бібліотеки"
-ok "mlx-whisper і fonttools"
+technical/.venv/bin/pip install --quiet -r technical/requirements.txt || die "не вдалося поставити бібліотеки"
+ok "бібліотеки з requirements.txt"
 
 # 7. Жирний шрифт із варіативного
 if [ -f technical/fonts/MontserratSubs.ttf ]; then

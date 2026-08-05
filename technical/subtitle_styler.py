@@ -241,6 +241,34 @@ def inline_colour(colour: str) -> str:
     return f"&H{digits[-6:]}&"
 
 
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+
+SETUP_HINT = ("Схоже, оточення застаріло після оновлення коду.\n"
+              "Перезапусти встановлення — воно доставить, чого бракує:\n"
+              f"  cd {PROJECT_DIR} && ./setup.sh")
+
+
+def load_ttfont():
+    """fontTools зʼявився в залежностях пізніше за перші установки. Якщо його
+    немає, треба сказати що робити, а не валитися стектрейсом посеред файлу."""
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError as exc:
+        raise RuntimeError(f"не встановлено fontTools.\n{SETUP_HINT}") from exc
+    return TTFont
+
+
+def missing_dependencies() -> list[str]:
+    """Чого бракує в оточенні. Перевіряється на старті, а не посеред обробки."""
+    missing = []
+    for module, package in (("mlx_whisper", "mlx-whisper"), ("fontTools", "fonttools")):
+        try:
+            __import__(module)
+        except ImportError:
+            missing.append(package)
+    return missing
+
+
 _FONT_INDEX: "dict[str, Path] | None" = None
 
 
@@ -254,7 +282,7 @@ def font_index() -> dict[str, Path]:
     if _FONT_INDEX is not None:
         return _FONT_INDEX
 
-    from fontTools.ttLib import TTFont
+    TTFont = load_ttfont()
 
     index: dict[str, Path] = {}
     for path in sorted(FONTS_DIR.glob("*")):
@@ -282,7 +310,7 @@ class FontMetrics:
     _cache: dict[str, "FontMetrics"] = {}
 
     def __init__(self, path: Path):
-        from fontTools.ttLib import TTFont
+        TTFont = load_ttfont()
 
         font = TTFont(str(path), lazy=True)
         self.upem = font["head"].unitsPerEm
