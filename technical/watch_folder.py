@@ -90,7 +90,8 @@ def main() -> None:
     parser.add_argument("--style", default=subtitle_styler.DEFAULT_STYLE,
                         choices=sorted(subtitle_styler.STYLES),
                         help="стиль для відео, покладених у корінь inbox")
-    parser.add_argument("--font", default=subtitle_styler.DEFAULT_FONT)
+    parser.add_argument("--font", default=None,
+                        help="перекрити шрифт стилів (за замовчуванням — той, що в стилі)")
     parser.add_argument("--inbox", type=Path, default=ROOT / "inbox")
     parser.add_argument("--output", type=Path, default=ROOT / "output")
     parser.add_argument("--processed", type=Path, default=ROOT / "processed")
@@ -106,7 +107,7 @@ def main() -> None:
 
     failed: set[Path] = set()
     print(f"Слідкую за {args.inbox}")
-    print(f"Мова: {args.lang or 'авто'} | шрифт: {args.font}")
+    print(f"Мова: {args.lang or 'авто'} | шрифт: {args.font or 'за стилем'}")
     print("Підтеки inbox = стилі:")
     for style in sorted(subtitle_styler.STYLES):
         mark = "  (також корінь inbox)" if style == args.style else ""

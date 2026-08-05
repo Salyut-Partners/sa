@@ -241,6 +241,40 @@ def inline_colour(colour: str) -> str:
     return f"&H{digits[-6:]}&"
 
 
+_FONT_INDEX: "dict[str, Path] | None" = None
+
+
+def font_index() -> dict[str, Path]:
+    """Назва сімʼї шрифту -> файл у fonts/.
+
+    Стиль задає шрифт назвою (її ж бачить libass), а нам для обміру тексту
+    потрібен сам файл. Тому один раз читаємо name-таблиці всіх шрифтів у теці.
+    """
+    global _FONT_INDEX
+    if _FONT_INDEX is not None:
+        return _FONT_INDEX
+
+    from fontTools.ttLib import TTFont
+
+    index: dict[str, Path] = {}
+    for path in sorted(FONTS_DIR.glob("*")):
+        if path.suffix.lower() not in (".ttf", ".otf"):
+            continue
+        try:
+            font = TTFont(str(path), lazy=True)
+            for record in font["name"].names:
+                if record.nameID in (1, 16):  # сімʼя і типографічна сімʼя
+                    index.setdefault(str(record).strip().lower(), path)
+        except Exception:
+            continue  # биті чи екзотичні файли просто пропускаємо
+    _FONT_INDEX = index
+    return index
+
+
+def font_file(family: str) -> "Path | None":
+    return font_index().get(family.strip().lower())
+
+
 class FontMetrics:
     """Міряє ширину тексту за таблицями шрифту — потрібно, щоб самим малювати
     плашку із заокругленими кутами (libass уміє тільки прямокутну)."""
@@ -322,7 +356,17 @@ def build_ass(chunks: list[list[dict]], width: int, height: int, style: dict, fo
     back = style.get("shadow_colour", "&H80000000")
     fill = style.get("fill")
     radius = size * style["radius_ratio"] if "radius_ratio" in style else None
-    metrics = FontMetrics.load(FONTS_DIR / "MontserratSubs.ttf") if radius else None
+    metrics = None
+    if radius:
+        # Міряти треба саме той шрифт, яким стиль малюється, інакше плашка зʼїде.
+        path = font_file(font)
+        if path is None:
+            raise RuntimeError(
+                f"стиль просить заокруглену плашку шрифтом «{font}», але файлу з такою\n"
+                f"назвою сімʼї немає в {FONTS_DIR}.\n"
+                f"Знайдені шрифти: {', '.join(sorted(font_index())) or '(жодного)'}"
+            )
+        metrics = FontMetrics.load(path)
 
     common = f"{font},{size}"
     tail = f"2,{margin_h},{margin_h},{margin_v},1"
@@ -473,10 +517,14 @@ def burn(video: Path, ass_path: Path, output: Path) -> None:
 
 
 def process(video: Path, output: Path, lang: str | None, style_name: str,
-            font: str = DEFAULT_FONT,
+            font: "str | None" = None,
             keep_ass: bool = False) -> Path:
+    """font=None означає «взяти зі стилю»; явно переданий перекриває стиль."""
     style = STYLES[style_name]
+    font = font or style.get("font") or DEFAULT_FONT
 
+    if font != DEFAULT_FONT:
+        print(f"  → шрифт: {font}", flush=True)
     print(f"  → транскрибую ({lang or 'автовизначення мови'})…", flush=True)
     segments = transcribe(video, lang)
     words = collect_words(segments)
@@ -514,7 +562,8 @@ def main() -> int:
     parser.add_argument("-o", "--output", type=Path)
     parser.add_argument("--lang", default=None, help="en, uk, ru… (за замовчуванням — автовизначення)")
     parser.add_argument("--style", default="karaoke", choices=sorted(STYLES))
-    parser.add_argument("--font", default=DEFAULT_FONT)
+    parser.add_argument("--font", default=None,
+                        help="перекрити шрифт стилю (за замовчуванням — той, що в стилі)")
     parser.add_argument("--keep-ass", action="store_true", help="зберегти .ass поруч із відео")
     args = parser.parse_args()
 
