@@ -1,0 +1,20 @@
+# Віртуальне оточення — 1 ГБ, ставиться через setup.sh
+technical/.venv/
+technical/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Робочі відео — не код
+inbox/**/*.mp4
+inbox/**/*.mov
+inbox/**/*.m4v
+inbox/**/*.mkv
+inbox/**/*.webm
+inbox/**/*.avi
+output/
+processed/
+
+# Проміжні файли субтитрів
+*.ass
+
+.DS_Store
