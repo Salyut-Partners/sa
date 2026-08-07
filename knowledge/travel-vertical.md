@@ -3,7 +3,6 @@ status: зі-слів-партнера
 source: session3-strategy-creo
 date: 2026-08-07
 last_confirmed: 2026-07-01
-vertical: сезонка
 ---
 
 # Путівки: вертикаль обсягу, не маржі

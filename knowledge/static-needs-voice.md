@@ -3,7 +3,6 @@ status: зі-слів-партнера
 source: session4-audit-creo
 date: 2026-08-07
 last_confirmed: 2026-07-02
-traffic_source: TikTok
 ---
 
 # Статика без озвучки на TikTok не працює

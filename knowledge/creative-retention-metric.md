@@ -3,7 +3,6 @@ status: зі-слів-партнера
 source: session6-mentoring
 date: 2026-08-07
 last_confirmed: 2026-08-06
-traffic_source: TikTok
 ---
 
 # Утримання як діагностика креативу
