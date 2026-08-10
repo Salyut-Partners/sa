@@ -49,7 +49,7 @@
 
 ## 6. Комплаєнс — що не можна
 
-- [[rules-index]] — карта з 32 правил. Почати з
+- [[rules-index]] — карта з 33 правил. Почати з
   [[cmp-001-obicyanka-vykonuyetsya-na-lendingu]]: з нього випливає майже все
   інше.
 - Якщо працюєш із фінансами — [[cmp-030-finansy-informaciynyy-ton]] і
