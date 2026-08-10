@@ -1,7 +1,7 @@
 ---
 vertical: оренда
 geo: PT
-language: французька
+language: португальська
 traffic_source: TikTok
 outcome: зайшла
 source: запуск-artem
@@ -13,8 +13,7 @@ last_confirmed: 2026-08-10
 
 Два запуски Артема на Португалію з **повністю однаковою зв'язкою** (стаття
 про оренду з викупом у Португалії, useconsumer.com/preview/19733; кути й
-скрипт — як у [[orenda-fr-vykup-bez-banku]]; мова — французька, зі слів
-байера).
+скрипт — як у [[orenda-fr-vykup-bez-banku]], португальською).
 
 **Цифри.**
 - Перший запуск (`pt-hou-tg-1`, 23–27.07): спенд $78, ROI **+48%**, але
