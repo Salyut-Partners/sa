@@ -33,7 +33,7 @@
 | Тека | Що | Обсяг |
 |---|---|---|
 | `knowledge/` | дистильовані знання: платформа, збірка зв'язки, креативи, комплаєнс на практиці, скейл | 68 нотаток, ~24 000 слів |
-| `compliance/` | правила провайдера, кожне з `id` формату `CMP-NNN` | 32 правила + карта, ~2 700 слів |
+| `compliance/` | правила провайдера, кожне з `id` формату `CMP-NNN` | 33 правила + карта, ~2 900 слів |
 | `bundles/` | зв'язки — запущені комбінації з результатом | **порожня**, наповнюється байерами |
 
 Разом ~32 000 слів. Дистильовано з ~68 000 слів сирцю: шість сесій із партнером
@@ -164,8 +164,8 @@ for f in $(find compliance knowledge -name "*.md"); do
 for f in knowledge/*.md; do n=$(basename "$f" .md); [ "$n" = "knowledge-map" ] && continue
   grep -q "\[\[$n\]\]" knowledge/knowledge-map.md || echo "✗ не в карті: $n"; done
 
-# 5. фасети зв'язок не протекли в знання
-grep -ln "^vertical:\|^geo:\|^language:\|^traffic_source:\|^outcome:" knowledge/*.md
+# 5. фасети зв'язок не протекли в знання і правила
+grep -ln "^vertical:\|^geo:\|^language:\|^traffic_source:\|^outcome:" knowledge/*.md compliance/*.md compliance/*/*.md
 
 # 6. поле stale ніде не з'явилось
 grep -rn "^stale:" --include="*.md" .

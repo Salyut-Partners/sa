@@ -4,7 +4,6 @@ status: зі-слів-партнера
 source: raf_compliance
 date: 2026-08-07
 last_confirmed: 2026-06-01
-vertical: dental
 ---
 
 # Не спотворювати стоматологічне покриття за Medicare

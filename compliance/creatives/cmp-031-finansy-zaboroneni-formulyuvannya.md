@@ -4,7 +4,6 @@ status: зі-слів-партнера
 source: finance_article
 date: 2026-08-07
 last_confirmed: 2026-06-01
-vertical: фінанси
 ---
 
 # Заборонені формулювання у фінансовій вертикалі
