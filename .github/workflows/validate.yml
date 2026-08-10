@@ -1,0 +1,14 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Інваріанти бази (DESIGN.md) і front-matter
+        run: bash scripts/validate.sh
