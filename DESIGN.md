@@ -145,15 +145,24 @@ last_confirmed: 2026-08-07
 
 ### Як перевірити
 
+Канонічна реалізація всіх перевірок — **`scripts/validate.sh`** (інваріанти
+нижче плюс словники front-matter і формати дат). Його ж ганяє GitHub Action
+`.github/workflows/validate.yml` на кожному PR і пуші в `main`. Локально:
+`bash scripts/validate.sh`.
+
+Команди нижче — ті самі перевірки поштучно, для ручного дебагу.
+`.claude/` виключається скрізь — це тека скілів, не нотатки; `CLAUDE.md`
+виключено з wikilink-перевірки, бо згадує синтаксис `[[...]]` як текст.
+
 ```bash
 cd ~/Documents/Claude/Projects/sa-knowledge
 
 # 1. дублі імен
-find . -name "*.md" -not -path "./.git/*" -exec basename {} \; | sort | uniq -d
+find . -name "*.md" -not -path "./.git/*" -not -path "./.claude/*" -exec basename {} \; | sort | uniq -d
 
 # 2. биті wikilink'и (цей файл виключено — у ньому лежить сам скрипт)
-for l in $(grep -rho '\[\[[^]|]*' --include="*.md" --exclude=DESIGN.md . | sed 's/\[\[//' | sort -u); do
-  find . -name "$l.md" -not -path "./.git/*" | grep -q . || echo "✗ [[$l]]"; done
+for l in $(grep -rho '\[\[[^]|]*' --include="*.md" --exclude=DESIGN.md --exclude=CLAUDE.md --exclude-dir=.claude . | sed 's/\[\[//' | sort -u); do
+  find . -name "$l.md" -not -path "./.git/*" -not -path "./.claude/*" | grep -q . || echo "✗ [[$l]]"; done
 
 # 3. обов'язкові поля
 for f in $(find compliance knowledge -name "*.md"); do
