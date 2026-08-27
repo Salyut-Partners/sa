@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layerStateAt, posterTime } from './timing.ts';
+import { layerStateAt, posterTime, timingIssues } from './timing.ts';
 import type { Timing } from './types.ts';
 
 const timing = (over: Partial<Timing> = {}): Timing => ({
@@ -89,5 +89,67 @@ describe('posterTime', () => {
 
   it('is zero when everything is on screen from the first frame', () => {
     expect(posterTime([timing({ appearAt: 0, enterDuration: 0 })], 10)).toBe(0);
+  });
+});
+
+describe('timingIssues', () => {
+  it('finds nothing wrong with a layer that opens at the start and runs to the end', () => {
+    expect(timingIssues(timing(), 10)).toEqual([]);
+  });
+
+  it('finds nothing wrong with a window that sits inside the video', () => {
+    expect(timingIssues(timing({ appearAt: 2, hideAt: 8 }), 10)).toEqual([]);
+  });
+
+  it('reports a layer that appears once the video is already over', () => {
+    expect(timingIssues(timing({ appearAt: 12 }), 10)).toEqual(['appears-after-end']);
+  });
+
+  it('counts appearing exactly at the duration as after the end', () => {
+    // The last frame rendered is at duration - 1/fps, so a layer that opens on
+    // the duration itself is in no frame at all.
+    expect(timingIssues(timing({ appearAt: 10 }), 10)).toEqual(['appears-after-end']);
+  });
+
+  it('says only that the layer never appears, not everything downstream of it', () => {
+    expect(timingIssues(timing({ appearAt: 12, hideAt: 11, enterDuration: 5 }), 10))
+      .toEqual(['appears-after-end']);
+  });
+
+  it('reports a window that closes before it opens', () => {
+    expect(timingIssues(timing({ appearAt: 5, hideAt: 3 }), 10)).toEqual(['never-visible']);
+  });
+
+  it('reports a window that closes the instant it opens', () => {
+    expect(timingIssues(timing({ appearAt: 5, hideAt: 5 }), 10)).toEqual(['never-visible']);
+  });
+
+  it('reports a hide that falls past the end of the video', () => {
+    expect(timingIssues(timing({ hideAt: 14 }), 10)).toEqual(['hides-after-end']);
+  });
+
+  it('treats an open end as reaching the end rather than running past it', () => {
+    expect(timingIssues(timing({ hideAt: null }), 10)).toEqual([]);
+  });
+
+  it('reports an entrance the hide cuts off', () => {
+    expect(timingIssues(timing({ appearAt: 3, hideAt: 3.2, enterDuration: 0.4 }), 10))
+      .toEqual(['entrance-cut-off']);
+  });
+
+  it('reports an entrance the end of the video cuts off', () => {
+    expect(timingIssues(timing({ appearAt: 9.8, enterDuration: 0.4 }), 10))
+      .toEqual(['entrance-cut-off']);
+  });
+
+  it('reports both a hide past the end and the entrance it leaves unfinished', () => {
+    expect(timingIssues(timing({ appearAt: 9.9, hideAt: 12, enterDuration: 0.4 }), 10))
+      .toEqual(['hides-after-end', 'entrance-cut-off']);
+  });
+
+  it('is judged against the duration as it is now, not as it was', () => {
+    const t = timing({ appearAt: 12 });
+    expect(timingIssues(t, 10)).toEqual(['appears-after-end']);
+    expect(timingIssues(t, 18)).toEqual([]);
   });
 });

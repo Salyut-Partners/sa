@@ -3,7 +3,7 @@
 // gets back either a value it can show or `mixed`, and it writes through the same
 // commands whichever it got.
 import { photoById } from './project.ts';
-import type { ButtonLayer, Photo, Project } from './types.ts';
+import type { ButtonLayer, Photo, Project, Rect, Timing } from './types.ts';
 
 /**
  * What the selection agrees on. `mixed` is a first-class answer, not a null:
@@ -42,17 +42,55 @@ export function photoField<K extends FlatKeys<Photo>>(
   return shared(photos.map(p => p![key]));
 }
 
+/**
+ * The button at one slot across the selection, or nothing if some photo does
+ * not have that slot. A photo without the slot disagrees with one that has it —
+ * the honest answer is mixed, and the panel then offers to write the value onto
+ * all of them.
+ */
+function buttonsAt(
+  project: Project,
+  ids: readonly string[],
+  index: number,
+): readonly ButtonLayer[] | null {
+  const buttons = ids.map(id => photoById(project, id)?.buttons[index]);
+  return buttons.every((b): b is ButtonLayer => b !== undefined) ? buttons : null;
+}
+
 export function buttonField<K extends FlatKeys<ButtonLayer>>(
   project: Project,
   ids: readonly string[],
   index: number,
   key: K,
 ): Shared<ButtonLayer[K]> {
-  const buttons = ids.map(id => photoById(project, id)?.buttons[index]);
-  // A photo without that slot disagrees with one that has it — the honest answer
-  // is mixed, and the panel then offers to write the value onto all of them.
-  if (buttons.some(b => b === undefined)) return MIXED;
-  return shared(buttons.map(b => b![key]));
+  const buttons = buttonsAt(project, ids, index);
+  return buttons === null ? MIXED : shared(buttons.map(b => b[key]));
+}
+
+/**
+ * One coordinate of a button, not the whole rect. Geometry and timing are read a
+ * number at a time for the same reason the flat fields are: the panel puts each
+ * one in its own box, and two equal rects are still two objects — comparing them
+ * whole would answer mixed for a selection that agrees.
+ */
+export function buttonRectField<K extends FlatKeys<Rect>>(
+  project: Project,
+  ids: readonly string[],
+  index: number,
+  key: K,
+): Shared<Rect[K]> {
+  const buttons = buttonsAt(project, ids, index);
+  return buttons === null ? MIXED : shared(buttons.map(b => b.rect[key]));
+}
+
+export function buttonTimingField<K extends FlatKeys<Timing>>(
+  project: Project,
+  ids: readonly string[],
+  index: number,
+  key: K,
+): Shared<Timing[K]> {
+  const buttons = buttonsAt(project, ids, index);
+  return buttons === null ? MIXED : shared(buttons.map(b => b.timing[key]));
 }
 
 /**

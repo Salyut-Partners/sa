@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { clampRect, toPixels } from './canvas.ts';
+import { clampRect, nudgeRect, toPixels } from './canvas.ts';
 import type { CanvasSize, Rect } from './types.ts';
 
 const CANVAS: CanvasSize = { width: 1080, height: 1920 };
+const MIN = { w: 12, h: 3 };
 
 describe('toPixels', () => {
   it('resolves percent geometry against the canvas', () => {
@@ -45,5 +46,33 @@ describe('clampRect', () => {
 
   it('caps a rect that is larger than the canvas', () => {
     expect(clampRect({ x: 5, y: 5, w: 140, h: 300 }, MIN)).toEqual({ x: 0, y: 0, w: 100, h: 100 });
+  });
+});
+
+describe('nudgeRect', () => {
+  const rect = { x: 10, y: 20, w: 30, h: 10 };
+
+  it('moves the rect by whole canvas pixels, whatever the percentages work out to', () => {
+    // One pixel of 1080 is 0.0926%, and "по пікселю" has to mean the pixel the
+    // video is made of — not a percentage that happens to look round.
+    expect(nudgeRect(rect, { x: 1, y: 0 }, CANVAS, MIN).x).toBeCloseTo(10 + 100 / 1080, 10);
+    expect(nudgeRect(rect, { x: 0, y: 1 }, CANVAS, MIN).y).toBeCloseTo(20 + 100 / 1920, 10);
+  });
+
+  it('moves the other way for a negative step', () => {
+    expect(nudgeRect(rect, { x: -10, y: 0 }, CANVAS, MIN).x).toBeCloseTo(10 - 1000 / 1080, 10);
+  });
+
+  it('leaves the size alone', () => {
+    const moved = nudgeRect(rect, { x: 5, y: 5 }, CANVAS, MIN);
+    expect(moved.w).toBe(rect.w);
+    expect(moved.h).toBe(rect.h);
+  });
+
+  it('stops at the edge of the canvas rather than walking off it', () => {
+    expect(nudgeRect({ x: 0, y: 0, w: 30, h: 10 }, { x: -20, y: -20 }, CANVAS, MIN))
+      .toEqual({ x: 0, y: 0, w: 30, h: 10 });
+    expect(nudgeRect({ x: 70, y: 90, w: 30, h: 10 }, { x: 200, y: 200 }, CANVAS, MIN))
+      .toEqual({ x: 70, y: 90, w: 30, h: 10 });
   });
 });

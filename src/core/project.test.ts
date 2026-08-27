@@ -143,12 +143,185 @@ describe('button commands', () => {
     expect(p.photos[0]!.buttons).toHaveLength(1);
   });
 
+  it('writes one coordinate without disturbing the rest of the rect', () => {
+    // Typing into the X box is not a drag: it says where the button starts, not
+    // where it starts and how big it is. Under a selection, sending the whole
+    // rect would push the active photo geometry onto photos that were only
+    // meant to line up on one axis.
+    const p = apply(withPhotos('a'), { type: 'button/add', ids: ['a'], index: 0, button: button('btn') });
+    const before = p.photos[0]!.buttons[0]!.rect;
+    const moved = apply(p, { type: 'button/patch', ids: ['a'], index: 0, patch: { rect: { x: 4 } } });
+    expect(moved.photos[0]!.buttons[0]!.rect).toEqual({ ...before, x: 4 });
+  });
+
+  it('writes one part of the window without disturbing the rest of it', () => {
+    const p = apply(withPhotos('a'), { type: 'button/add', ids: ['a'], index: 0, button: button('btn') });
+    const retimed = apply(p, {
+      type: 'button/patch', ids: ['a'], index: 0, patch: { timing: { appearAt: 3 } },
+    });
+    expect(retimed.photos[0]!.buttons[0]!.timing).toEqual({
+      appearAt: 3, hideAt: null, enter: 'fade', enterDuration: 0.4,
+    });
+  });
+
+  it('leaves each photo the window parts the broadcast did not name', () => {
+    let p = apply(withPhotos('a', 'b'), {
+      type: 'button/add', ids: ['a', 'b'], index: 0, button: button('btn'),
+    });
+    p = apply(p, { type: 'button/patch', ids: ['b'], index: 0, patch: { timing: { enter: 'pop' } } });
+    const retimed = apply(p, {
+      type: 'button/patch', ids: ['a', 'b'], index: 0, patch: { timing: { appearAt: 2 } },
+    });
+    expect(retimed.photos.map(x => x.buttons[0]!.timing.appearAt)).toEqual([2, 2]);
+    expect(retimed.photos.map(x => x.buttons[0]!.timing.enter)).toEqual(['fade', 'pop']);
+  });
+
+  it('nudges the button at that slot by whole canvas pixels', () => {
+    const p = apply(withPhotos('a'), { type: 'button/add', ids: ['a'], index: 0, button: button('btn') });
+    const before = p.photos[0]!.buttons[0]!.rect;
+    const moved = apply(p, { type: 'button/nudge', ids: ['a'], index: 0, by: { x: 5, y: 0 } });
+    expect(moved.photos[0]!.buttons[0]!.rect.x).toBeCloseTo(before.x + 500 / 1080, 10);
+    expect(moved.photos[0]!.buttons[0]!.rect.y).toBe(before.y);
+  });
+
+  it('moves each photo its own button, rather than lining them all up on one', () => {
+    // A nudge is "a pixel left", not "put them where this one is". Writing the
+    // active photo's coordinate to the selection would snap buttons that were
+    // deliberately placed differently onto a single column.
+    let p = apply(withPhotos('a', 'b'), {
+      type: 'button/add', ids: ['a', 'b'], index: 0, button: button('btn'),
+    });
+    const start = p.photos[0]!.buttons[0]!.rect;
+    p = apply(p, { type: 'button/patch', ids: ['b'], index: 0, patch: { rect: { x: 20 } } });
+    const moved = apply(p, { type: 'button/nudge', ids: ['a', 'b'], index: 0, by: { x: 10, y: 0 } });
+    const step = 1000 / 1080;
+    expect(moved.photos[0]!.buttons[0]!.rect.x).toBeCloseTo(start.x + step, 10);
+    expect(moved.photos[1]!.buttons[0]!.rect.x).toBeCloseTo(20 + step, 10);
+  });
+
+  it('stops a nudge at the edge of the canvas', () => {
+    let p = apply(withPhotos('a'), { type: 'button/add', ids: ['a'], index: 0, button: button('btn') });
+    p = apply(p, { type: 'button/patch', ids: ['a'], index: 0, patch: { rect: { x: 0 } } });
+    const moved = apply(p, { type: 'button/nudge', ids: ['a'], index: 0, by: { x: -50, y: 0 } });
+    expect(moved.photos[0]!.buttons[0]!.rect.x).toBe(0);
+  });
+
+  it('leaves a photo without that slot alone', () => {
+    const before = unevenPair();
+    const moved = apply(before, { type: 'button/nudge', ids: ['a', 'b'], index: 1, by: { x: 5, y: 0 } });
+    expect(moved.photos[0]!.buttons).toEqual(before.photos[0]!.buttons);
+    expect(moved.photos[1]!.buttons[1]!.rect.x).not.toBe(before.photos[1]!.buttons[1]!.rect.x);
+  });
+
   it('removes the button at that slot from every targeted photo', () => {
     let p = apply(withPhotos('a', 'b'), { type: 'button/add', ids: ['a', 'b'], index: 0, button: button('one') });
     p = apply(p, { type: 'button/add', ids: ['a', 'b'], index: 1, button: { ...button('two'), text: 'ДРУГА' } });
     const cut = apply(p, { type: 'button/remove', ids: ['a', 'b'], index: 0 });
     expect(cut.photos.map(x => x.buttons.length)).toEqual([1, 1]);
     expect(cut.photos.map(x => x.buttons[0]!.text)).toEqual(['ДРУГА', 'ДРУГА']);
+  });
+
+  /** Three buttons, top to bottom of the list, on every named photo. */
+  const stacked = (...ids: string[]): Project =>
+    ['ПЕРША', 'ДРУГА', 'ТРЕТЯ'].reduce(
+      (p, text, i) => apply(p, {
+        type: 'button/add', ids, index: i, button: { ...button('b' + i), text },
+      }),
+      withPhotos(...ids),
+    );
+
+  it('moves a button down the list in every targeted photo', () => {
+    const p = apply(stacked('a', 'b'), { type: 'button/move', ids: ['a', 'b'], from: 0, to: 2 });
+    expect(p.photos.map(x => x.buttons.map(b => b.text))).toEqual([
+      ['ДРУГА', 'ТРЕТЯ', 'ПЕРША'],
+      ['ДРУГА', 'ТРЕТЯ', 'ПЕРША'],
+    ]);
+  });
+
+  it('moves a button up the list', () => {
+    const p = apply(stacked('a'), { type: 'button/move', ids: ['a'], from: 2, to: 0 });
+    expect(p.photos[0]!.buttons.map(b => b.text)).toEqual(['ТРЕТЯ', 'ПЕРША', 'ДРУГА']);
+  });
+
+  it('leaves a photo that has no such slot alone rather than moving something else', () => {
+    const p = apply(unevenPair(), { type: 'button/move', ids: ['a', 'b'], from: 1, to: 0 });
+    expect(p.photos.map(x => x.buttons.map(b => b.text))).toEqual([
+      ['ПЕРША'],
+      ['ЗАЙВА', 'ПЕРША'],
+    ]);
+  });
+
+  it('ignores a move that goes nowhere', () => {
+    const before = stacked('a');
+    expect(apply(before, { type: 'button/move', ids: ['a'], from: 1, to: 1 })).toBe(before);
+  });
+
+  it('ignores a move off the end of the list', () => {
+    const before = stacked('a');
+    expect(apply(before, { type: 'button/move', ids: ['a'], from: 0, to: 7 })).toBe(before);
+    expect(apply(before, { type: 'button/move', ids: ['a'], from: -1, to: 0 })).toBe(before);
+  });
+
+  it('duplicates a button into the slot just after it, in every targeted photo', () => {
+    const p = apply(stacked('a', 'b'), {
+      type: 'button/duplicate', ids: ['a', 'b'], index: 0, id: 'copy',
+    });
+    expect(p.photos.map(x => x.buttons.map(b => b.text))).toEqual([
+      ['ПЕРША', 'ПЕРША', 'ДРУГА', 'ТРЕТЯ'],
+      ['ПЕРША', 'ПЕРША', 'ДРУГА', 'ТРЕТЯ'],
+    ]);
+  });
+
+  it('copies each photo its own button rather than one photo button to all of them', () => {
+    const apart = apply(stacked('a', 'b'), {
+      type: 'button/patch', ids: ['b'], index: 0, patch: { text: 'ІНША' },
+    });
+    const p = apply(apart, { type: 'button/duplicate', ids: ['a', 'b'], index: 0, id: 'copy' });
+    expect(p.photos.map(x => x.buttons[1]!.text)).toEqual(['ПЕРША', 'ІНША']);
+  });
+
+  it('gives the copy its own identity, so the list can tell the two apart', () => {
+    const p = apply(stacked('a'), { type: 'button/duplicate', ids: ['a'], index: 0, id: 'copy' });
+    expect(p.photos[0]!.buttons[1]!.id).toBe('copy');
+    expect(p.photos[0]!.buttons[0]!.id).not.toBe('copy');
+  });
+
+  it('gives the copy its own geometry, so moving it leaves the original where it was', () => {
+    const p = apply(stacked('a'), { type: 'button/duplicate', ids: ['a'], index: 0, id: 'copy' });
+    const moved = apply(p, {
+      type: 'button/patch', ids: ['a'], index: 1, patch: { rect: { x: 1, y: 2, w: 3, h: 4 } },
+    });
+    expect(moved.photos[0]!.buttons[0]!.rect).not.toEqual({ x: 1, y: 2, w: 3, h: 4 });
+  });
+
+  it('leaves a photo without that slot alone rather than inventing a button for it', () => {
+    const p = apply(unevenPair(), { type: 'button/duplicate', ids: ['a', 'b'], index: 1, id: 'copy' });
+    expect(p.photos.map(x => x.buttons.map(b => b.text))).toEqual([
+      ['ПЕРША'],
+      ['ПЕРША', 'ЗАЙВА', 'ЗАЙВА'],
+    ]);
+  });
+});
+
+describe('no-op commands', () => {
+  // Identity is the signal the editor reads to tell an edit from a miss: a
+  // command that changed nothing must not take a step on the undo stack, and
+  // must not make the grid rebuild a preview.
+  it('gives the same project back when a patch lands on no button', () => {
+    const before = withPhotos('a');
+    expect(apply(before, { type: 'button/patch', ids: ['a'], index: 0, patch: { text: 'X' } }))
+      .toBe(before);
+  });
+
+  it('gives the same project back when a removal lands on no button', () => {
+    const before = withPhotos('a');
+    expect(apply(before, { type: 'button/remove', ids: ['a'], index: 0 })).toBe(before);
+  });
+
+  it('gives the same project back when the ids name nobody', () => {
+    const before = withPhotos('a');
+    expect(apply(before, { type: 'photo/patch', ids: ['ghost'], patch: { glare: false } }))
+      .toBe(before);
   });
 });
 

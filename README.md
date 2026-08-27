@@ -5,7 +5,7 @@ layers over them, generate a voice-over, export mp4 per photo and per locale.
 
 The spec lives in [`.scratch/prd-creative-factory-search.md`](.scratch/prd-creative-factory-search.md).
 
-## What works today (stage E2)
+## What works today (stage E3)
 
 Import a batch of 9:16 photos at once — the ones that do not fit are listed with
 a reason rather than failing the import. The batch lays out four to a row; a
@@ -16,9 +16,19 @@ selected cells animate; the rest sit on the frame where their composition has
 finished arriving. The batch autosaves to IndexedDB and saves to a `.json` file,
 and ⌘Z walks back through the edits — a whole drag being one step.
 
-Then: buttons on a photo, drag and size, style, colour, text, duration, and mp4
-export of the active creative. The full button and template libraries, layer
-timings, locales and the voice-over land in E3–E5.
+A photo carries as many buttons as you like. They come from a library of ten
+styles, each chip in it drawn by the renderer that will draw the video. A button
+is picked off the frame or out of the list, dragged and sized on the preview,
+typed to the pixel, nudged with the arrow keys, restyled, recoloured, refonted,
+reordered, duplicated. Each one has its own window: when it arrives, how it
+arrives, when it goes — or nothing, for one that stays to the end however long
+the video becomes. A window that falls outside the video says so. The slider
+under the grid stops the selected cells on a second, so you can check what is on
+screen at it without waiting for a render — ⌘A first, to hold the whole batch to
+the same clock.
+
+Then: mp4 export of the active creative. Templates, locales and the voice-over
+land in E4–E5.
 
 ## Running it
 

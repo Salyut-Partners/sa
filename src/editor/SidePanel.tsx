@@ -1,10 +1,15 @@
 import { defaultButton, nextSlot, photoById, type ButtonPatch, type Command } from '../core/project.ts';
-import { buttonCount, buttonField, photoField } from '../core/selection.ts';
-import type { Project } from '../core/types.ts';
-import { BUTTON_STYLES } from '../renderer/index.ts';
+import {
+  buttonCount, buttonField, buttonRectField, buttonTimingField, photoField,
+} from '../core/selection.ts';
+import { timingIssues } from '../core/timing.ts';
+import type { EnterAnimation, Project } from '../core/types.ts';
+import { BUTTON_STYLES, FONTS } from '../renderer/index.ts';
 import { FilePicker } from './FilePicker.tsx';
 import type { ImportReport } from './import-files.ts';
-import { CheckField, ColorField, TextField } from './fields.tsx';
+import {
+  CheckField, ColorField, NumberField, OptionalNumberField, SelectField, TextField,
+} from './fields.tsx';
 import { StyleLibrary } from './StylePreview.tsx';
 
 interface Props {
@@ -19,6 +24,23 @@ interface Props {
   busy: boolean;
   onExport: () => void;
 }
+
+const ENTER_ANIMATIONS: readonly { id: EnterAnimation; label: string }[] = [
+  { id: 'none', label: 'Без анімації' },
+  { id: 'fade', label: 'Проявлення' },
+  { id: 'pop', label: 'Вискок' },
+  { id: 'rise', label: 'Знизу вгору' },
+];
+
+const FONT_OPTIONS = Object.values(FONTS).map(f => ({ id: f.id, label: f.label }));
+
+/** What a broken window means, in the words the user would use for it. */
+const TIMING_COMPLAINTS = {
+  'appears-after-end': 'З’являється після кінця ролика — у відео її не буде.',
+  'never-visible': 'Зникає раніше, ніж з’являється — у відео її не буде.',
+  'hides-after-end': 'Зникає вже після кінця ролика — висітиме до кінця.',
+  'entrance-cut-off': 'Не встигає доанімуватись до зникнення.',
+} as const;
 
 export function SidePanel(props: Props) {
   const { project, dispatch, activeButton, setActiveButton } = props;
@@ -42,9 +64,27 @@ export function SidePanel(props: Props) {
       type: 'button/add',
       ids: targets,
       index,
-      button: defaultButton(crypto.randomUUID(), BUTTON_STYLES[0]!.id, index, photo.accent),
+      // Staggered by what is already on the photo in front of the user, not by
+      // the slot: on an uneven batch the slot can be 0 while the active photo
+      // already carries three buttons, and the new one would land under them.
+      button: defaultButton(
+        crypto.randomUUID(), BUTTON_STYLES[0]!.id, photo.buttons.length, photo.accent,
+      ),
     });
     setActiveButton(index);
+  };
+
+  const moveButton = (from: number, to: number): void => {
+    if (!photo || to < 0 || to >= photo.buttons.length) return;
+    dispatch({ type: 'button/move', ids: targets, from, to });
+    // The selection follows the button, not the slot: the user is still editing
+    // the thing they just moved.
+    if (activeButton === from) setActiveButton(to);
+  };
+
+  const duplicateButton = (index: number): void => {
+    dispatch({ type: 'button/duplicate', ids: targets, index, id: crypto.randomUUID() });
+    setActiveButton(index + 1);
   };
 
   return (
@@ -121,8 +161,34 @@ export function SidePanel(props: Props) {
                   onClick={() => setActiveButton(i)}
                 >
                   <span className="nm">{b.text || '(без тексту)'}</span>
+                  {/* The list is paint order, so moving down the list moves the
+                      button up the stack. The titles name the stack rather than
+                      the list: which button is on top is the reason to reorder. */}
                   <button
-                    className="rm"
+                    className="ic"
+                    title="Опустити під сусідню"
+                    disabled={i === 0}
+                    onClick={e => { e.stopPropagation(); moveButton(i, i - 1); }}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="ic"
+                    title="Підняти над сусідньою"
+                    disabled={i === photo.buttons.length - 1}
+                    onClick={e => { e.stopPropagation(); moveButton(i, i + 1); }}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    className="ic"
+                    title="Дублювати"
+                    onClick={e => { e.stopPropagation(); duplicateButton(i); }}
+                  >
+                    ⧉
+                  </button>
+                  <button
+                    className="ic rm"
                     title="Видалити"
                     onClick={e => {
                       e.stopPropagation();
@@ -135,13 +201,20 @@ export function SidePanel(props: Props) {
                 </div>
               ))}
             </div>
+            {photo.buttons.length > 1 ? (
+              <div className="note">Остання в списку лежить на кадрі зверху.</div>
+            ) : null}
             <button className="wide" style={{ marginTop: 8 }} onClick={addButton}>
               + Додати кнопку
             </button>
           </div>
 
           {button && activeButton !== null ? (
-            <>
+            // Keyed by what is being edited, so switching button or photo builds
+            // the controls afresh. A number box holds what was typed into it
+            // until it is committed, and without this that half-typed value
+            // would be sitting in the box of whatever was opened next.
+            <div key={`${project.activeId}:${activeButton}`}>
               <div className="group">
                 <div className="lab">Текст кнопки</div>
                 <TextField
@@ -156,6 +229,7 @@ export function SidePanel(props: Props) {
                   selectedId={buttonField(project, targets, activeButton, 'styleId')}
                   color={button.color}
                   text={button.text}
+                  fontId={button.fontId}
                   onPick={styleId => patchButton({ styleId })}
                 />
               </div>
@@ -167,7 +241,82 @@ export function SidePanel(props: Props) {
                   onChange={color => patchButton({ color })}
                 />
               </div>
-            </>
+
+              <div className="group">
+                <div className="lab">Шрифт</div>
+                <SelectField
+                  value={buttonField(project, targets, activeButton, 'fontId')}
+                  options={FONT_OPTIONS}
+                  onChange={fontId => patchButton({ fontId })}
+                />
+              </div>
+
+              <div className="group">
+                <div className="lab">
+                  Позиція і розмір <span className="val">% полотна</span>
+                </div>
+                <div className="row">
+                  <NumberField
+                    value={buttonRectField(project, targets, activeButton, 'x')}
+                    onChange={x => patchButton({ rect: { x } })}
+                    min={0} max={100} step={0.1} suffix="X"
+                  />
+                  <NumberField
+                    value={buttonRectField(project, targets, activeButton, 'y')}
+                    onChange={y => patchButton({ rect: { y } })}
+                    min={0} max={100} step={0.1} suffix="Y"
+                  />
+                </div>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <NumberField
+                    value={buttonRectField(project, targets, activeButton, 'w')}
+                    onChange={w => patchButton({ rect: { w } })}
+                    min={0} max={100} step={0.1} suffix="Ш"
+                  />
+                  <NumberField
+                    value={buttonRectField(project, targets, activeButton, 'h')}
+                    onChange={h => patchButton({ rect: { h } })}
+                    min={0} max={100} step={0.1} suffix="В"
+                  />
+                </div>
+                <div className="note">Стрілками — по пікселю, з Shift — по десять.</div>
+              </div>
+
+              <div className="group">
+                <div className="lab">Час на екрані</div>
+                <div className="row">
+                  <NumberField
+                    value={buttonTimingField(project, targets, activeButton, 'appearAt')}
+                    onChange={appearAt => patchButton({ timing: { appearAt } })}
+                    min={0} step={0.1} suffix="з"
+                  />
+                  <OptionalNumberField
+                    value={buttonTimingField(project, targets, activeButton, 'hideAt')}
+                    onChange={hideAt => patchButton({ timing: { hideAt } })}
+                    min={0} step={0.1}
+                    emptyLabel="до кінця"
+                  />
+                </div>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <SelectField
+                    value={buttonTimingField(project, targets, activeButton, 'enter')}
+                    options={ENTER_ANIMATIONS}
+                    onChange={enter => patchButton({ timing: { enter } })}
+                  />
+                  <NumberField
+                    value={buttonTimingField(project, targets, activeButton, 'enterDuration')}
+                    onChange={enterDuration => patchButton({ timing: { enterDuration } })}
+                    min={0} max={10} step={0.1} suffix="с"
+                  />
+                </div>
+                {/* Read off the active photo: the panel says whose values it is
+                    showing, and a warning about a window nobody can see would be
+                    worse than one about the window on screen. */}
+                {timingIssues(button.timing, project.duration).map(issue => (
+                  <div className="warn" key={issue}>{TIMING_COMPLAINTS[issue]}</div>
+                ))}
+              </div>
+            </div>
           ) : null}
 
           <hr />

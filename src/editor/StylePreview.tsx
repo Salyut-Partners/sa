@@ -4,7 +4,8 @@ import { BUTTON_STYLES, previewSpec } from '../renderer/index.ts';
 import { Clock } from './clock.ts';
 import { CreativeCell } from './CreativeCell.tsx';
 
-const CHIP_SCALE = 0.52;
+/** Sized to the panel: a chip narrower than this is a colour swatch, not a preview. */
+const CHIP_SCALE = 0.5;
 /** The catalogue chips run on their own loop — they are not part of the video. */
 const chipClock = new Clock(3);
 
@@ -13,14 +14,21 @@ interface Props {
   selectedId: Shared<string>;
   color: string;
   text: string;
+  fontId: string;
   onPick: (styleId: string) => void;
 }
 
 /** The button library: every entry drawn by the renderer that will draw the video. */
-export function StyleLibrary({ selectedId, color, text, onPick }: Props) {
+export function StyleLibrary({ selectedId, color, text, fontId, onPick }: Props) {
+  // The chips carry the button's own colour, words and face, so the catalogue
+  // answers "what would mine look like in this style", not "what does the style
+  // look like on a sample".
   const chips = useMemo(
-    () => BUTTON_STYLES.map(style => ({ style, spec: previewSpec(style.id, { color, text }) })),
-    [color, text],
+    () => BUTTON_STYLES.map(style => ({
+      style,
+      spec: previewSpec(style.id, { color, text, fontId }),
+    })),
+    [color, text, fontId],
   );
 
   return (

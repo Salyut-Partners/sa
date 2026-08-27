@@ -6,17 +6,26 @@ import { apply, createProject, MAX_PHOTOS, photoById, type Command } from '../co
 import { buildSpec } from '../core/spec.ts';
 import { posterTime } from '../core/timing.ts';
 import type { Photo, Project, Spec } from '../core/types.ts';
+import { ButtonBoxes } from './ButtonBoxes.tsx';
 import { Clock } from './clock.ts';
 import { CreativeCell } from './CreativeCell.tsx';
-import { DragBox } from './DragBox.tsx';
 import { FilePicker } from './FilePicker.tsx';
 import { importFiles, importReplacement, NOTHING_IMPORTED, type ImportReport } from './import-files.ts';
 import { explainRefusal, openProjectFile, saveProjectFile } from './project-file.ts';
 import { SidePanel } from './SidePanel.tsx';
 import { autosaver, loadAutosave, type SaveState } from './store.ts';
+import { Timeline } from './Timeline.tsx';
 
 /** Width of one grid cell in CSS pixels — four of these fit the work area. */
 const CELL_WIDTH = 260;
+
+/** Which way each arrow key moves a button, in canvas pixels. */
+const NUDGES: Record<string, { x: number; y: number } | undefined> = {
+  ArrowLeft: { x: -1, y: 0 },
+  ArrowRight: { x: 1, y: 0 },
+  ArrowUp: { x: 0, y: -1 },
+  ArrowDown: { x: 0, y: 1 },
+};
 
 interface Cell {
   photo: Photo;
@@ -141,16 +150,22 @@ export function App() {
     if (result.ok) dispatch({ type: 'photo/replace', id, name: result.name, image: result.image });
   }, [dispatch]);
 
+  /** The button being edited, as the keyboard needs it: outside React's render. */
+  const editing = useRef(activeButton);
+  editing.current = activeButton;
+
   // ------------------------------------------------------------ keyboard --
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      // Undo and select-all inside a text field belong to the text field — but
-      // only a field with a caret. Swallowing them for every input would leave
-      // Esc and ⌘A dead after the duration slider or a checkbox took focus.
+      // Undo and select-all inside a typed field belong to the field — but only
+      // one that takes typing. Swallowing them for every input would leave Esc
+      // and ⌘A dead after the duration slider or a checkbox took focus.
       // `instanceof` rather than a cast: a keydown can arrive with `window` as
       // its target, and that has no `matches`.
       const target = e.target;
-      if (target instanceof HTMLElement && target.matches('textarea, input[type=text]')) return;
+      const typing = target instanceof HTMLElement
+        && target.matches('textarea, input[type=text], input[type=number]');
+      if (typing) return;
       const meta = e.metaKey || e.ctrlKey;
 
       if (meta && e.key.toLowerCase() === 'z') {
@@ -163,11 +178,29 @@ export function App() {
         dispatch({ type: 'selection/all' });
         return;
       }
-      if (e.key === 'Escape') dispatch({ type: 'selection/one' });
+      if (e.key === 'Escape') {
+        dispatch({ type: 'selection/one' });
+        return;
+      }
+
+      const nudge = NUDGES[e.key];
+      // A slider's own arrows move the playhead; a button's move the button.
+      const onSlider = target instanceof HTMLElement && target.matches('input[type=range]');
+      if (!nudge || onSlider || editing.current === null || meta) return;
+      e.preventDefault();
+      // A step is one canvas pixel, which is what "по пікселю" has to mean when
+      // the geometry is in percent and the cell on screen is a quarter size.
+      const by = e.shiftKey ? 10 : 1;
+      dispatch({
+        type: 'button/nudge',
+        ids: latest.current.selection,
+        index: editing.current,
+        by: { x: nudge.x * by, y: nudge.y * by },
+      });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dispatch]);
+  }, [dispatch, walk]);
 
   // -------------------------------------------------------------- files --
   const onOpenFile = async (list: FileList | null): Promise<void> => {
@@ -222,10 +255,6 @@ export function App() {
       setBusy(false);
     }
   };
-
-  const activePhoto = photoById(project, project.activeId);
-  const draggedRect =
-    activePhoto && activeButton !== null ? activePhoto.buttons[activeButton]?.rect ?? null : null;
 
   return (
     <div
@@ -306,11 +335,13 @@ export function App() {
                     setActiveButton(null);
                   }}
                   overlay={
-                    photo.id === project.activeId && draggedRect ? (
-                      <DragBox
-                        rect={draggedRect}
+                    photo.id === project.activeId && photo.buttons.length > 0 ? (
+                      <ButtonBoxes
+                        buttons={photo.buttons}
+                        activeIndex={activeButton}
                         cellWidth={CELL_WIDTH}
                         cellHeight={project.canvas.height * scale}
+                        onSelect={setActiveButton}
                         onChange={rect =>
                           dispatch({
                             type: 'button/patch',
@@ -325,6 +356,7 @@ export function App() {
               ))}
             </div>
           )}
+          {cells.length > 0 ? <Timeline clock={clock} duration={project.duration} /> : null}
         </section>
 
         <SidePanel

@@ -3,6 +3,15 @@ import { clampRect } from '../core/canvas.ts';
 import { MIN_BUTTON_SIZE } from '../core/project.ts';
 import type { Rect } from '../core/types.ts';
 
+/** Percent geometry as the cell shows it. One place, so an outline and the
+ *  handles it belongs to can never land a pixel apart. */
+export const frameStyle = (rect: Rect, cellWidth: number, cellHeight: number) => ({
+  left: (rect.x / 100) * cellWidth,
+  top: (rect.y / 100) * cellHeight,
+  width: (rect.w / 100) * cellWidth,
+  height: (rect.h / 100) * cellHeight,
+});
+
 interface Props {
   rect: Rect;
   cellWidth: number;
@@ -45,12 +54,7 @@ export function DragBox({ rect, cellWidth, cellHeight, onChange }: Props) {
   return (
     <div
       className="box"
-      style={{
-        left: (rect.x / 100) * cellWidth,
-        top: (rect.y / 100) * cellHeight,
-        width: (rect.w / 100) * cellWidth,
-        height: (rect.h / 100) * cellHeight,
-      }}
+      style={frameStyle(rect, cellWidth, cellHeight)}
       onPointerDown={e => onPointerDown(e, 'move')}
       onPointerMove={onPointerMove}
       onPointerUp={stop}

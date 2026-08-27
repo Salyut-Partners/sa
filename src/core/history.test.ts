@@ -97,6 +97,30 @@ describe('coalesceKey', () => {
       .not.toBe(coalesceKey({ type: 'button/patch', ids: ['p'], index: 0, patch: { rect: { x: 0, y: 0, w: 1, h: 1 } } }));
   });
 
+  it('separates retiming when a button appears from retiming when it goes', () => {
+    // Both are `{ timing: ... }`; folding them into one step would make undo
+    // walk back past a change the user never asked it to.
+    expect(coalesceKey({ type: 'button/patch', ids: ['p'], index: 0, patch: { timing: { appearAt: 1 } } }))
+      .not.toBe(coalesceKey({ type: 'button/patch', ids: ['p'], index: 0, patch: { timing: { hideAt: 4 } } }));
+  });
+
+  it('treats nudging one coordinate repeatedly as one step', () => {
+    expect(coalesceKey({ type: 'button/patch', ids: ['p'], index: 0, patch: { rect: { x: 1 } } }))
+      .toBe(coalesceKey({ type: 'button/patch', ids: ['p'], index: 0, patch: { rect: { x: 2 } } }));
+  });
+
+  it('separates nudging sideways from nudging down', () => {
+    expect(coalesceKey({ type: 'button/patch', ids: ['p'], index: 0, patch: { rect: { x: 1 } } }))
+      .not.toBe(coalesceKey({ type: 'button/patch', ids: ['p'], index: 0, patch: { rect: { y: 1 } } }));
+  });
+
+  it('gives reordering and duplicating a step each, since each is one gesture', () => {
+    expect(coalesceKey({ type: 'button/move', ids: ['p'], from: 0, to: 1 })).toBeNull();
+    expect(coalesceKey({ type: 'button/duplicate', ids: ['p'], index: 0, id: 'c' })).toBeNull();
+    expect(isUndoable({ type: 'button/move', ids: ['p'], from: 0, to: 1 })).toBe(true);
+    expect(isUndoable({ type: 'button/duplicate', ids: ['p'], index: 0, id: 'c' })).toBe(true);
+  });
+
   it('gives adding a button its own step, since it is one gesture already', () => {
     expect(coalesceKey({ type: 'photo/remove', id: 'p' })).toBeNull();
   });

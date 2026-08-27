@@ -61,16 +61,34 @@ export function redo<T>(history: History<T>): History<T> {
 export function coalesceKey(command: Command): string | null {
   switch (command.type) {
     case 'button/patch':
-      return `button/${command.index}/${Object.keys(command.patch).sort().join(',')}`;
+      return `button/${command.index}/${fields(command.patch)}`;
+    // Held apart from a drag of the same button on purpose: a run of taps on one
+    // arrow key is one gesture, and the drag that preceded it was another.
+    case 'button/nudge':
+      return `nudge/${command.index}/${command.by.x !== 0 ? 'x' : 'y'}`;
     case 'photo/patch':
-      return `photo/${Object.keys(command.patch).sort().join(',')}`;
+      return `photo/${fields(command.patch)}`;
     case 'project/patch':
-      return `project/${Object.keys(command.patch).sort().join(',')}`;
+      return `project/${fields(command.patch)}`;
     default:
       // Adding, removing, replacing: each is already one deliberate act.
       return null;
   }
 }
+
+/**
+ * Which fields a patch names, one level into `rect` and `timing`. Naming the
+ * whole of `timing` would fold "when it arrives" and "when it goes" into one
+ * step, and undoing the second would silently walk back the first.
+ */
+const fields = (patch: Record<string, unknown>): string =>
+  Object.entries(patch)
+    .flatMap(([key, value]) =>
+      value !== null && typeof value === 'object'
+        ? Object.keys(value).map(inner => `${key}.${inner}`)
+        : [key])
+    .sort()
+    .join(',');
 
 /**
  * Whether a change belongs in the stack at all. Selection is not an edit — an

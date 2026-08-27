@@ -20,7 +20,7 @@ export const RENDERER_CSS = `
 /* flex:none is load-bearing: as a shrinkable flex item the label would be
    squeezed to the button width, and the fitting loop measures that squeezed
    width — so it would never see the overflow it exists to remove. */
-.cf-txt{position:relative;z-index:2;flex:none;color:#fff;white-space:nowrap;line-height:1}
+.cf-txt{position:relative;z-index:2;flex:none;color:inherit;white-space:nowrap;line-height:1}
 .cf-arrow{position:relative;z-index:2;flex:none}
 .cf-gloss,.cf-flash{position:absolute;inset:0;pointer-events:none}
 .cf-flash{opacity:0}

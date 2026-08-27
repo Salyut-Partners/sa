@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { apply, createProject, defaultButton } from './project.ts';
-import { buttonCount, buttonField, photoField, shared } from './selection.ts';
+import {
+  buttonCount, buttonField, buttonRectField, buttonTimingField, photoField, shared,
+} from './selection.ts';
 import type { Project } from './types.ts';
 
 const photo = (id: string) => ({ id, name: id + '.jpg', image: 'data:,' + id });
@@ -85,5 +87,53 @@ describe('buttonCount', () => {
 
   it('counts an untouched batch as agreeing on none', () => {
     expect(buttonCount(withPhotos('a', 'b'), ['a', 'b'])).toEqual({ mixed: false, value: 0 });
+  });
+});
+
+describe('buttonRectField', () => {
+  it('reads one coordinate of the button at that slot', () => {
+    const p = withButton(withPhotos('a', 'b'), ['a', 'b']);
+    expect(buttonRectField(p, ['a', 'b'], 0, 'w')).toEqual({ mixed: false, value: 73.3 });
+  });
+
+  it('goes mixed when the selection has dragged that button apart', () => {
+    let p = withButton(withPhotos('a', 'b'), ['a', 'b']);
+    p = apply(p, {
+      type: 'button/patch', ids: ['a'], index: 0, patch: { rect: { x: 4, y: 4, w: 40, h: 5 } },
+    });
+    expect(buttonRectField(p, ['a', 'b'], 0, 'x')).toEqual({ mixed: true });
+  });
+
+  it('agrees on the coordinates the drag left alone', () => {
+    let p = withButton(withPhotos('a', 'b'), ['a', 'b']);
+    const rect = p.photos[0]!.buttons[0]!.rect;
+    p = apply(p, { type: 'button/patch', ids: ['a'], index: 0, patch: { rect: { ...rect, x: 4 } } });
+    expect(buttonRectField(p, ['a', 'b'], 0, 'y')).toEqual({ mixed: false, value: rect.y });
+  });
+});
+
+describe('buttonTimingField', () => {
+  it('reads one part of the window of the button at that slot', () => {
+    const p = withButton(withPhotos('a', 'b'), ['a', 'b']);
+    expect(buttonTimingField(p, ['a', 'b'], 0, 'appearAt')).toEqual({ mixed: false, value: 0 });
+  });
+
+  it('reads an open end as a value rather than as an absence', () => {
+    const p = withButton(withPhotos('a', 'b'), ['a', 'b']);
+    expect(buttonTimingField(p, ['a', 'b'], 0, 'hideAt')).toEqual({ mixed: false, value: null });
+  });
+
+  it('goes mixed when only one of the selected buttons was retimed', () => {
+    let p = withButton(withPhotos('a', 'b'), ['a', 'b']);
+    const timing = p.photos[0]!.buttons[0]!.timing;
+    p = apply(p, {
+      type: 'button/patch', ids: ['a'], index: 0, patch: { timing: { ...timing, appearAt: 3 } },
+    });
+    expect(buttonTimingField(p, ['a', 'b'], 0, 'appearAt')).toEqual({ mixed: true });
+    expect(buttonTimingField(p, ['a', 'b'], 0, 'enter')).toEqual({ mixed: false, value: 'fade' });
+  });
+
+  it('reads a slot nobody has as mixed rather than inventing a window', () => {
+    expect(buttonTimingField(withPhotos('a'), ['a'], 0, 'appearAt')).toEqual({ mixed: true });
   });
 });

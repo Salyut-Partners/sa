@@ -1,7 +1,7 @@
 // The panel's controls, each taking a `Shared` value rather than a plain one.
 // Mixed lives here, once: a control that had to decide for itself what to show
 // when four photos disagree is a control that will eventually decide wrong.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Shared } from '../core/selection.ts';
 
 export const MIXED_LABEL = 'різні значення';
@@ -76,3 +76,134 @@ export function CheckField({ value, onChange, label }: CheckProps) {
     </label>
   );
 }
+
+interface NumberProps {
+  value: Shared<number>;
+  onChange: (value: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  suffix?: string;
+}
+
+/**
+ * A box that keeps whatever was typed until the user is finished with it.
+ *
+ * Parsing on every keystroke would turn "1" into 1 and then refuse the "." after
+ * it, so a value could never be reached by typing it left to right. The draft is
+ * what was typed; `settled` is what the model says; the model wins as soon as
+ * there is no draft.
+ */
+function useDraft(settled: string, commit: (text: string) => void) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return {
+    value: draft ?? settled,
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => setDraft(e.target.value),
+    onBlur: () => {
+      // Only what was typed. The box shows a rounded value, so committing on
+      // every blur would let clicking into a field and straight out of it write
+      // that rounding back — a button nudged to 10.0926 silently becomes 10.09,
+      // and takes a step on the undo stack for an edit nobody made.
+      if (draft !== null) commit(draft);
+      setDraft(null);
+    },
+    onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') e.currentTarget.blur();
+    },
+  };
+}
+
+export function NumberField({ value, onChange, min, max, step, suffix }: NumberProps) {
+  const box = useDraft(
+    value.mixed ? '' : String(round(value.value)),
+    text => {
+      const parsed = Number(text);
+      // An emptied box is a box the user has not finished with, not a zero.
+      if (text.trim() !== '' && Number.isFinite(parsed)) onChange(clampTo(parsed, min, max));
+    },
+  );
+
+  return (
+    <label className={'num' + (value.mixed ? ' mixed' : '')}>
+      <input
+        type="number"
+        inputMode="decimal"
+        min={min}
+        max={max}
+        step={step ?? 1}
+        placeholder={value.mixed ? MIXED_LABEL : ''}
+        {...box}
+      />
+      {suffix ? <span className="suffix">{suffix}</span> : null}
+    </label>
+  );
+}
+
+interface OptionalNumberProps {
+  value: Shared<number | null>;
+  onChange: (value: number | null) => void;
+  min?: number;
+  step?: number;
+  /** What an empty box means, spelled out where the user can read it. */
+  emptyLabel: string;
+}
+
+/**
+ * A number that may be left out. Empty is a value here rather than an unfinished
+ * one — an empty hide time is "until the end", which is the answer most buttons
+ * want, so it is worth being able to type your way back to it.
+ */
+export function OptionalNumberField(
+  { value, onChange, min, step, emptyLabel }: OptionalNumberProps,
+) {
+  const box = useDraft(
+    value.mixed || value.value === null ? '' : String(round(value.value)),
+    text => {
+      if (text.trim() === '') return onChange(null);
+      const parsed = Number(text);
+      if (Number.isFinite(parsed)) onChange(clampTo(parsed, min, undefined));
+    },
+  );
+
+  return (
+    <label className={'num' + (value.mixed ? ' mixed' : '')}>
+      <input
+        type="number"
+        inputMode="decimal"
+        min={min}
+        step={step ?? 0.1}
+        placeholder={value.mixed ? MIXED_LABEL : emptyLabel}
+        {...box}
+      />
+    </label>
+  );
+}
+
+interface SelectProps<T extends string> {
+  value: Shared<T>;
+  onChange: (value: T) => void;
+  options: readonly { id: T; label: string }[];
+}
+
+export function SelectField<T extends string>({ value, onChange, options }: SelectProps<T>) {
+  return (
+    <select
+      className={value.mixed ? 'mixed' : ''}
+      // A select has no empty state, so mixed gets an option of its own — which
+      // disappears the moment a real one is chosen, as it should.
+      value={value.mixed ? '' : value.value}
+      onChange={e => onChange(e.target.value as T)}
+    >
+      {value.mixed ? <option value="" disabled>{MIXED_LABEL}</option> : null}
+      {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+    </select>
+  );
+}
+
+/** Two decimals is finer than the eye on a preview and finer than a canvas pixel. */
+const round = (v: number): number => Math.round(v * 100) / 100;
+
+const clampTo = (v: number, min?: number, max?: number): number => {
+  const lo = min === undefined ? v : Math.max(min, v);
+  return max === undefined ? lo : Math.min(max, lo);
+};

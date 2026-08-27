@@ -34,3 +34,24 @@ export function clampRect(rect: Rect, min: { w: number; h: number }): Rect {
     h,
   };
 }
+
+/**
+ * Move a rect by whole canvas pixels.
+ *
+ * The step arrives in pixels rather than percent because that is the unit the
+ * user is thinking in — the video is 1080 wide, and nudging by "a pixel" has to
+ * mean one of those, not a round-looking fraction of a percent. Size is left
+ * alone: this moves a button, it does not reshape one.
+ */
+export function nudgeRect(
+  rect: Rect,
+  by: { x: number; y: number },
+  canvas: CanvasSize,
+  min: { w: number; h: number },
+): Rect {
+  return clampRect({
+    ...rect,
+    x: rect.x + (by.x * 100) / canvas.width,
+    y: rect.y + (by.y * 100) / canvas.height,
+  }, min);
+}

@@ -18,8 +18,10 @@ export interface CreativeHandle {
   spec: Spec;
 }
 
+// `currentColor` rather than white: the arrow is part of the label, and a style
+// that writes in the accent (or in near-black, on a white fill) needs it to follow.
 const ARROW_SVG =
-  '<svg class="cf-arrow" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" ' +
+  '<svg class="cf-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" ' +
   'stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>';
 
 /** One button's DOM, plus everything about it that does not change per frame. */
@@ -104,7 +106,10 @@ function dressButton(spec: ButtonSpec, layer: HTMLElement): ButtonParts {
   button.style.cssText =
     `border-radius:${radius}px;padding:${pad}px;background:${style.rim(a)}`;
   const innerRadius = Math.max(0, radius - pad);
-  fill.style.cssText = `border-radius:${innerRadius}px;background:${style.fill(a)}`;
+  // The ink goes on the fill, not on the label: the label and the arrow both
+  // inherit it, and the arrow is drawn in `currentColor`.
+  fill.style.cssText =
+    `border-radius:${innerRadius}px;background:${style.fill(a)};color:${style.ink(a)}`;
   gloss.style.cssText = `border-radius:${innerRadius}px;background:${style.gloss}`;
   flash.style.background =
     'linear-gradient(180deg,rgba(255,255,255,.34) 0%,rgba(255,255,255,.14) 55%,' +
@@ -112,7 +117,7 @@ function dressButton(spec: ButtonSpec, layer: HTMLElement): ButtonParts {
 
   text.textContent = font.upper ? spec.text.toUpperCase() : spec.text;
   text.style.cssText =
-    `font-family:${font.family};font-weight:${font.weight};text-shadow:${style.textShadow}`;
+    `font-family:${font.family};font-weight:${font.weight};text-shadow:${style.textShadow(a)}`;
 
   if (arrow) {
     const size = Math.round(h * 0.34);
@@ -123,6 +128,7 @@ function dressButton(spec: ButtonSpec, layer: HTMLElement): ButtonParts {
 
   const sheenWidth = Math.round(w * 0.7);
   sheen.style.width = sheenWidth + 'px';
+  sheen.style.opacity = String(style.sheen);
 
   return {
     spec, style, accent: a, layer, button, arrow, flash, sheen, sheenWidth,
@@ -142,20 +148,36 @@ function fitText(p: ButtonParts): void {
   const room =
     w - h * p.style.padRatio * 2 - h * 0.54 - (p.style.arrow ? h * 0.55 : 0);
 
-  let size = Math.round(h * font.sizeRatio);
-  const setSize = (px: number): void => {
-    text.style.fontSize = px + 'px';
-    text.style.letterSpacing = (px * p.style.letterRatio).toFixed(2) + 'px';
-  };
+  // A layer outside its window is display:none, and a hidden element measures
+  // zero wide. The re-fit that runs when the webfont lands would then see every
+  // button that has not appeared yet as fitting at its starting size, and clip
+  // its label for the whole video. Lay it out for the measurement and put it
+  // back — this is a measurement, and a measurement needs it in the layout.
+  const hidden = p.layer.style.display;
+  p.layer.style.display = '';
 
-  // offsetWidth, not getBoundingClientRect: the grid scales cells with a CSS
-  // transform, and a rect measurement would come back scaled while `room` is in
-  // canvas pixels. That mismatch let the preview clip a label the export fitted.
-  setSize(size);
-  while (size > 8 && text.offsetWidth > room) {
-    size -= 1;
+  // Still zero means nothing is laid out at all — a detached stage, or one
+  // inside a hidden panel. There is nothing to measure against, and guessing a
+  // size would throw away the fit a previous pass got right.
+  if (text.offsetWidth > 0) {
+    const setSize = (px: number): void => {
+      text.style.fontSize = px + 'px';
+      text.style.letterSpacing = (px * p.style.letterRatio).toFixed(2) + 'px';
+    };
+
+    // offsetWidth, not getBoundingClientRect: the grid scales cells with a CSS
+    // transform, and a rect measurement would come back scaled while `room` is
+    // in canvas pixels. That mismatch let the preview clip a label the export
+    // fitted.
+    let size = Math.round(h * font.sizeRatio);
     setSize(size);
+    while (size > 8 && text.offsetWidth > room) {
+      size -= 1;
+      setSize(size);
+    }
   }
+
+  p.layer.style.display = hidden;
 }
 
 function renderButton(p: ButtonParts, t: number, spec: Spec): void {
@@ -170,15 +192,27 @@ function renderButton(p: ButtonParts, t: number, spec: Spec): void {
   const style = p.style;
   const beat = (Math.sin(t * 5.2) + 1) / 2;
   p.button.style.transform = 'scale(' + (1 + style.pulse * beat) + ')';
-  p.button.style.boxShadow =
-    `0 0 ${24 + 66 * beat}px rgba(${p.accent.rgb},${(0.28 + 0.46 * beat).toFixed(3)}),` +
-    `0 0 ${8 + 22 * beat}px rgba(255,255,255,${(0.1 + 0.18 * beat).toFixed(3)}),` +
-    '0 10px 26px rgba(0,0,0,.45)';
+  p.button.style.boxShadow = haloShadow(style.halo, p.accent, beat) + style.drop(p.accent);
   if (p.arrow) {
     (p.arrow as unknown as HTMLElement).style.transform = 'translateX(' + 7 * beat + 'px)';
   }
 
   renderGlare(p, t, spec.glare);
+}
+
+/**
+ * The coloured light a button throws while it beats, ending in a comma so the
+ * style's own shadow can be appended. A style with no halo contributes nothing
+ * and is left with its shadow alone — that is what a matte button is.
+ */
+function haloShadow(strength: number, a: Accent, beat: number): string {
+  if (strength <= 0) return '';
+  return (
+    `0 0 ${((24 + 66 * beat) * strength).toFixed(1)}px ` +
+    `rgba(${a.rgb},${clamp01((0.28 + 0.46 * beat) * strength).toFixed(3)}),` +
+    `0 0 ${((8 + 22 * beat) * strength).toFixed(1)}px ` +
+    `rgba(255,255,255,${clamp01((0.1 + 0.18 * beat) * strength).toFixed(3)}),`
+  );
 }
 
 function applyEntrance(p: ButtonParts, enter: number): void {
@@ -209,7 +243,7 @@ const GLARE_PERIOD = 2.3;
 const GLARE_SPAN = 0.46;
 
 function renderGlare(p: ButtonParts, t: number, on: boolean): void {
-  if (!on) {
+  if (!on || p.style.sheen <= 0) {
     p.sheen.style.transform = 'translateX(-3000px)';
     p.flash.style.opacity = '0';
     return;
@@ -225,5 +259,6 @@ function renderGlare(p: ButtonParts, t: number, on: boolean): void {
   const travel = p.spec.rect.w + p.sheenWidth + 180;
   p.sheen.style.transform =
     'translateX(' + (-p.sheenWidth - 60 + travel * q) + 'px) skewX(-14deg)';
-  p.flash.style.opacity = (0.62 * Math.sin(Math.PI * (cycle / GLARE_SPAN))).toFixed(3);
+  p.flash.style.opacity =
+    (0.62 * p.style.sheen * Math.sin(Math.PI * (cycle / GLARE_SPAN))).toFixed(3);
 }
