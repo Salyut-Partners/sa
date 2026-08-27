@@ -1,0 +1,93 @@
+import { describe, expect, it } from 'vitest';
+import { layerStateAt, posterTime } from './timing.ts';
+import type { Timing } from './types.ts';
+
+const timing = (over: Partial<Timing> = {}): Timing => ({
+  appearAt: 0,
+  hideAt: null,
+  enter: 'fade',
+  enterDuration: 0.4,
+  ...over,
+});
+
+describe('layerStateAt', () => {
+  it('hides a layer before its appearAt', () => {
+    expect(layerStateAt(timing({ appearAt: 2 }), 1.9, 10)).toEqual({ visible: false, enter: 0 });
+  });
+
+  it('shows the layer at the very start of its entrance', () => {
+    expect(layerStateAt(timing({ appearAt: 2 }), 2, 10)).toEqual({ visible: true, enter: 0 });
+  });
+
+  it('reports entrance progress while it plays', () => {
+    const state = layerStateAt(timing({ appearAt: 2 }), 2.2, 10);
+    expect(state.visible).toBe(true);
+    expect(state.enter).toBeCloseTo(0.5, 10);
+  });
+
+  it('finishes the entrance and stays finished', () => {
+    expect(layerStateAt(timing({ appearAt: 2 }), 2.4, 10).enter).toBe(1);
+    expect(layerStateAt(timing({ appearAt: 2 }), 8, 10).enter).toBe(1);
+  });
+
+  it('treats a zero-length entrance as instant', () => {
+    expect(layerStateAt(timing({ appearAt: 2, enterDuration: 0 }), 2, 10)).toEqual({
+      visible: true, enter: 1,
+    });
+  });
+
+  it('keeps an open-ended layer on screen at the very end', () => {
+    // posterTime can return exactly the duration; clamping the open end to it
+    // would blank the whole composition on every frozen preview.
+    expect(layerStateAt(timing(), 10, 10).visible).toBe(true);
+  });
+
+  it('follows the duration when it changes, rather than the one it was set with', () => {
+    expect(layerStateAt(timing(), 17, 18).visible).toBe(true);
+  });
+
+  it('hides the layer from its hideAt onwards', () => {
+    const t = timing({ hideAt: 6 });
+    expect(layerStateAt(t, 5.9, 10).visible).toBe(true);
+    expect(layerStateAt(t, 6, 10)).toEqual({ visible: false, enter: 0 });
+    expect(layerStateAt(t, 9, 10).visible).toBe(false);
+  });
+
+  it('hides a layer whose window is inverted rather than showing it forever', () => {
+    expect(layerStateAt(timing({ appearAt: 5, hideAt: 3 }), 6, 10).visible).toBe(false);
+  });
+});
+
+describe('posterTime', () => {
+  it('falls back to 60% of the duration when there are no layers', () => {
+    expect(posterTime([], 10)).toBe(6);
+  });
+
+  it('waits for the layer entrance to finish', () => {
+    expect(posterTime([timing({ appearAt: 2, enterDuration: 0.4 })], 10)).toBe(2.4);
+  });
+
+  it('waits for the latest layer of several', () => {
+    expect(posterTime(
+      [timing({ appearAt: 1 }), timing({ appearAt: 5, enterDuration: 0.6 }), timing({ appearAt: 3 })],
+      10,
+    )).toBe(5.6);
+  });
+
+  it('waits for the last entrance to finish, not for the last one to start', () => {
+    // A layer that arrives early but enters slowly settles after one that
+    // arrives late and enters fast — the poster frame has to wait for both.
+    expect(posterTime(
+      [timing({ appearAt: 5, enterDuration: 0.4 }), timing({ appearAt: 4, enterDuration: 2 })],
+      10,
+    )).toBe(6);
+  });
+
+  it('never runs past the end of the video', () => {
+    expect(posterTime([timing({ appearAt: 12 })], 10)).toBe(10);
+  });
+
+  it('is zero when everything is on screen from the first frame', () => {
+    expect(posterTime([timing({ appearAt: 0, enterDuration: 0 })], 10)).toBe(0);
+  });
+});
