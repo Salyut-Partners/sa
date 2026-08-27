@@ -19,7 +19,9 @@ body {
   overflow: hidden;
 }
 
-#root { height: 100%; display: flex; flex-direction: column; }
+#root { height: 100%; }
+.app { height: 100%; display: flex; flex-direction: column; }
+.app.dropping { outline: 2px dashed var(--accent); outline-offset: -6px; }
 
 header {
   display: flex; align-items: center; gap: 12px;
@@ -30,7 +32,11 @@ header {
 .brand { font-weight: 700; letter-spacing: .2px; display: flex; align-items: center; gap: 9px; }
 .mark { width: 14px; height: 14px; border-radius: 4px; background: var(--accent); }
 .spacer { flex: 1; }
+.tools { display: flex; gap: 6px; margin-left: 10px; }
+.tools button { padding: 6px 10px; font-size: 13px; }
 .hint { color: var(--muted); font-variant-numeric: tabular-nums; }
+.save-state { font-size: 12px; color: var(--muted); }
+.save-state.failed { color: var(--danger); }
 
 main { flex: 1; display: flex; min-height: 0; }
 
@@ -45,7 +51,13 @@ main { flex: 1; display: flex; min-height: 0; }
   border: 2px solid transparent; cursor: pointer; background: #000;
   flex: none;
 }
-.cell.selected { border-color: var(--accent); }
+/* Two states, not one: everything in the selection takes the change, but the
+   panel's single-value controls and the drag box belong to the active cell. */
+.cell.selected { border-color: #4b3fd6; }
+.cell.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
 .cell .scaler { transform-origin: 0 0; }
 .cell .caption {
   position: absolute; left: 0; right: 0; bottom: 0;
@@ -91,6 +103,7 @@ input[type=text], select, textarea {
 input[type=range] { width: 100%; accent-color: var(--accent); }
 input[type=color] { width: 46px; height: 34px; background: none; border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
 .row { display: flex; gap: 8px; align-items: center; }
+.row .wide { flex: 1; width: auto; }
 
 button {
   font: inherit; border-radius: 7px; cursor: pointer;
@@ -103,17 +116,19 @@ button.wide { width: 100%; }
 button.link { margin-left: auto; background: none; border: none; color: var(--accent); padding: 0; font-size: 11px; text-transform: none; letter-spacing: 0; }
 
 .drop {
+  width: 100%; background: none;
   border: 1px dashed var(--line); border-radius: 9px; padding: 16px;
   text-align: center; cursor: pointer; color: var(--muted);
 }
-.drop.over { border-color: var(--accent); color: var(--ink); }
-.drop .t { color: var(--ink); }
-.drop .s { font-size: 12px; margin-top: 3px; }
+.drop .t { display: block; color: var(--ink); }
+.drop .s { display: block; font-size: 12px; margin-top: 3px; }
 
 .check { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; cursor: pointer; }
 .check input { accent-color: var(--accent); }
 
 .note { margin-top: 10px; font-size: 12px; color: var(--muted); min-height: 18px; }
+input[type=text].mixed::placeholder { color: var(--warn); font-style: italic; }
+.mixed-note { color: var(--warn); }
 .warn { margin-top: 8px; font-size: 12px; color: var(--warn); }
 .error { margin-top: 8px; font-size: 12px; color: var(--danger); }
 

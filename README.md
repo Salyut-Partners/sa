@@ -5,11 +5,20 @@ layers over them, generate a voice-over, export mp4 per photo and per locale.
 
 The spec lives in [`.scratch/prd-creative-factory-search.md`](.scratch/prd-creative-factory-search.md).
 
-## What works today (stage E1)
+## What works today (stage E2)
 
-Import a 9:16 photo, put buttons on it, drag and size them, pick a style, colour
-and text, set the duration, and export an mp4. Multi-photo grids, the full button
-and template libraries, timings UI, locales and the voice-over land in E2–E5.
+Import a batch of 9:16 photos at once — the ones that do not fit are listed with
+a reason rather than failing the import. The batch lays out four to a row; a
+click picks the photo the panel edits, ⌘-click adds another, ⌘A takes all of
+them, and every change is written to the whole selection at once. Where the
+selection disagrees, a field says so instead of showing one photo's value. Only
+selected cells animate; the rest sit on the frame where their composition has
+finished arriving. The batch autosaves to IndexedDB and saves to a `.json` file,
+and ⌘Z walks back through the edits — a whole drag being one step.
+
+Then: buttons on a photo, drag and size, style, colour, text, duration, and mp4
+export of the active creative. The full button and template libraries, layer
+timings, locales and the voice-over land in E3–E5.
 
 ## Running it
 

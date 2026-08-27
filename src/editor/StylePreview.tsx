@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import type { Shared } from '../core/selection.ts';
 import { BUTTON_STYLES, previewSpec } from '../renderer/index.ts';
 import { Clock } from './clock.ts';
 import { CreativeCell } from './CreativeCell.tsx';
@@ -8,7 +9,8 @@ const CHIP_SCALE = 0.52;
 const chipClock = new Clock(3);
 
 interface Props {
-  selectedId: string;
+  /** Shared so that a selection disagreeing on style highlights nothing. */
+  selectedId: Shared<string>;
   color: string;
   text: string;
   onPick: (styleId: string) => void;
@@ -26,7 +28,7 @@ export function StyleLibrary({ selectedId, color, text, onPick }: Props) {
       {chips.map(({ style, spec }) => (
         <button
           key={style.id}
-          className={'style-card' + (style.id === selectedId ? ' on' : '')}
+          className={'style-card' + (!selectedId.mixed && style.id === selectedId.value ? ' on' : '')}
           onClick={() => onPick(style.id)}
           type="button"
         >

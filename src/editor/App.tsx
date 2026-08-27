@@ -1,59 +1,185 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { clampRect } from '../core/canvas.ts';
-import { apply, createProject, MIN_BUTTON_SIZE, photoById, type Command } from '../core/project.ts';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  canRedo, canUndo, coalesceKey, historyOf, isUndoable, record, redo, undo, type History,
+} from '../core/history.ts';
+import { apply, createProject, MAX_PHOTOS, photoById, type Command } from '../core/project.ts';
 import { buildSpec } from '../core/spec.ts';
 import { posterTime } from '../core/timing.ts';
-import type { Project, Rect } from '../core/types.ts';
+import type { Photo, Project, Spec } from '../core/types.ts';
 import { Clock } from './clock.ts';
 import { CreativeCell } from './CreativeCell.tsx';
-import { importPhoto } from './import-photo.ts';
+import { DragBox } from './DragBox.tsx';
+import { FilePicker } from './FilePicker.tsx';
+import { importFiles, importReplacement, NOTHING_IMPORTED, type ImportReport } from './import-files.ts';
+import { explainRefusal, openProjectFile, saveProjectFile } from './project-file.ts';
 import { SidePanel } from './SidePanel.tsx';
+import { autosaver, loadAutosave, type SaveState } from './store.ts';
 
 /** Width of one grid cell in CSS pixels — four of these fit the work area. */
 const CELL_WIDTH = 260;
 
+interface Cell {
+  photo: Photo;
+  spec: Spec;
+  /** The frame this cell freezes on while it is not selected. */
+  poster: number;
+}
+
 export function App() {
-  const [project, setProject] = useState<Project>(createProject);
+  const [history, setHistory] = useState<History<Project>>(() => historyOf(createProject()));
   const [activeButton, setActiveButton] = useState<number | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
+  const [report, setReport] = useState<ImportReport>(NOTHING_IMPORTED);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [dropping, setDropping] = useState(false);
+  const [saveState, setSaveState] = useState<SaveState>('saved');
+
+  const project = history.present;
+
+  // The keyboard and the file readers run outside React's render, and both need
+  // the project as it is now rather than as it was when they were bound.
+  const latest = useRef(project);
+  latest.current = project;
+
+  /** The project-wide values that reach every Spec without touching a photo. */
+  const settings = `${project.canvas.width}x${project.canvas.height}/${project.fps}/${project.duration}`;
 
   const clock = useMemo(() => new Clock(project.duration), []);
   clock.duration = project.duration;
 
   const dispatch = useCallback((command: Command) => {
-    setProject(p => apply(p, command));
+    setHistory(h => {
+      const next = apply(h.present, command);
+      if (next === h.present) return h;
+      // Selection changes the project without being an edit: it moves the state
+      // along but leaves nothing on the stack to walk back through.
+      return isUndoable(command)
+        ? record(h, next, coalesceKey(command))
+        : { ...h, present: next, key: null };
+    });
   }, []);
+
+  /** Stepping the history. The button being edited is a position in a photo that
+   *  may not exist on the other side of the step, so it does not survive one. */
+  const walk = useCallback((step: (h: History<Project>) => History<Project>) => {
+    setHistory(step);
+    setActiveButton(null);
+  }, []);
+
+  /** Swapping the whole project — opening a file, starting over — is one undo step. */
+  const replaceProject = useCallback((next: Project) => {
+    setHistory(h => record(h, next));
+    setActiveButton(null);
+    setReport(NOTHING_IMPORTED);
+  }, []);
+
+  useEffect(() => {
+    void loadAutosave().then(saved => {
+      if (saved !== null) setHistory(historyOf(saved));
+    });
+  }, []);
+
+  const store = useMemo(() => autosaver(setSaveState), []);
+  // Selection is not part of a saved project, so clicking through the batch must
+  // not re-serialise it: the effect watches what actually lands in the file.
+  useEffect(() => {
+    store.save(project);
+    // Watched on what a saved file actually holds. Selection is not in it, so
+    // clicking through a batch must not re-serialise tens of megabytes.
+  }, [project.photos, settings, store]);
+  useEffect(() => store.stop, [store]);
 
   const scale = CELL_WIDTH / project.canvas.width;
   const selected = useMemo(() => new Set(project.selection), [project.selection]);
 
-  const cells = useMemo(
-    () => project.photos.map(photo => ({
-      photo,
-      spec: buildSpec(project, photo.id)!,
-      poster: posterTime(photo.buttons.map(b => b.timing), project.duration),
-    })),
-    [project],
-  );
+  // A cell rebuilds its whole DOM when its Spec changes, so a Spec must not be
+  // rebuilt for a photo the change did not touch. Selection alone leaves
+  // `photos` identical, and an edit replaces only the photos it edits — so
+  // clicking through a batch of twelve rebuilds nothing, and a drag rebuilds
+  // only what it is broadcast to.
+  //
+  // The cache is keyed by photo identity and thrown away whole when `settings`
+  // changes. Entries for photos that are gone go with the old map rather than
+  // holding their images alive.
+  const cache = useRef({ settings, entries: new Map<Photo, Cell>() });
 
-  // One photo at a time: importing a batch, and reporting the ones that bounced,
-  // is E2's story — the model already takes as many photos as it is given.
-  const onFile = async (files: FileList | null): Promise<void> => {
-    const file = files?.[0];
-    if (!file) return;
-    const result = await importPhoto(file);
-    if (!result.ok) {
-      setProblem(`${result.name}: ${result.reason}`);
-      setWarning(null);
-      return;
+  const cells = useMemo(() => {
+    const reusable = cache.current.settings === settings
+      ? cache.current.entries
+      : new Map<Photo, Cell>();
+    const fresh = new Map<Photo, Cell>();
+    const list = project.photos.map(photo => {
+      const entry = reusable.get(photo) ?? {
+        photo,
+        spec: buildSpec(project, photo.id)!,
+        poster: posterTime(photo.buttons.map(b => b.timing), project.duration),
+      };
+      fresh.set(photo, entry);
+      return entry;
+    });
+    cache.current = { settings, entries: fresh };
+    return list;
+  }, [project, settings]);
+
+  const onFiles = useCallback(async (list: FileList | null): Promise<void> => {
+    const files = Array.from(list ?? []);
+    if (files.length === 0) return;
+    const batch = await importFiles(files, MAX_PHOTOS - latest.current.photos.length);
+    setReport({ warnings: batch.warnings, rejected: batch.rejected });
+    if (batch.photos.length > 0) {
+      dispatch({ type: 'photo/add', photos: batch.photos });
+      setActiveButton(null);
     }
-    setProblem(null);
-    setWarning(result.warning ? `${result.name}: ${result.warning}` : null);
-    dispatch({ type: 'photo/add', photo: { id: result.id, name: result.name, image: result.image } });
-    setActiveButton(null);
+  }, [dispatch]);
+
+  const onReplace = useCallback(async (list: FileList | null): Promise<void> => {
+    const file = list?.[0];
+    const id = latest.current.activeId;
+    if (!file || id === null) return;
+    const result = await importReplacement(file);
+    setReport(result.ok ? NOTHING_IMPORTED : { warnings: [], rejected: [result.reason] });
+    if (result.ok) dispatch({ type: 'photo/replace', id, name: result.name, image: result.image });
+  }, [dispatch]);
+
+  // ------------------------------------------------------------ keyboard --
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      // Undo and select-all inside a text field belong to the text field — but
+      // only a field with a caret. Swallowing them for every input would leave
+      // Esc and ⌘A dead after the duration slider or a checkbox took focus.
+      // `instanceof` rather than a cast: a keydown can arrive with `window` as
+      // its target, and that has no `matches`.
+      const target = e.target;
+      if (target instanceof HTMLElement && target.matches('textarea, input[type=text]')) return;
+      const meta = e.metaKey || e.ctrlKey;
+
+      if (meta && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        walk(e.shiftKey ? redo : undo);
+        return;
+      }
+      if (meta && e.key.toLowerCase() === 'a' && latest.current.photos.length > 0) {
+        e.preventDefault();
+        dispatch({ type: 'selection/all' });
+        return;
+      }
+      if (e.key === 'Escape') dispatch({ type: 'selection/one' });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [dispatch]);
+
+  // -------------------------------------------------------------- files --
+  const onOpenFile = async (list: FileList | null): Promise<void> => {
+    const file = list?.[0];
+    if (!file) return;
+    const result = await openProjectFile(file);
+    if (result.ok) {
+      replaceProject(result.project);
+      setStatus(`Відкрито ${file.name}`);
+    } else {
+      setReport({ warnings: [], rejected: [`${file.name}: ${explainRefusal(result.reason)}`] });
+    }
   };
 
   const onExport = async (): Promise<void> => {
@@ -102,13 +228,54 @@ export function App() {
     activePhoto && activeButton !== null ? activePhoto.buttons[activeButton]?.rect ?? null : null;
 
   return (
-    <>
+    <div
+      className={'app' + (dropping ? ' dropping' : '')}
+      // The whole window takes a batch, not just the panel's small target.
+      onDragEnter={e => { e.preventDefault(); setDropping(true); }}
+      onDragOver={e => { e.preventDefault(); }}
+      onDragLeave={e => { if (e.currentTarget === e.target) setDropping(false); }}
+      onDrop={e => { e.preventDefault(); setDropping(false); void onFiles(e.dataTransfer.files); }}
+    >
       <header>
         <div className="brand"><span className="mark" /> Creative Factory Search</div>
+        <div className="tools">
+          <button
+            disabled={!canUndo(history)}
+            title="Скасувати (⌘Z)"
+            onClick={() => walk(undo)}
+          >
+            ↶
+          </button>
+          <button
+            disabled={!canRedo(history)}
+            title="Повторити (⇧⌘Z)"
+            onClick={() => walk(redo)}
+          >
+            ↷
+          </button>
+          <FilePicker accept="application/json,.json" onPick={onOpenFile}>Відкрити</FilePicker>
+          <button
+            onClick={() => saveProjectFile(project)}
+            disabled={project.photos.length === 0}
+          >
+            Зберегти
+          </button>
+          <button
+            onClick={() => replaceProject(createProject())}
+            disabled={project.photos.length === 0}
+          >
+            Новий
+          </button>
+        </div>
         <div className="spacer" />
+        <div className={'save-state ' + saveState}>
+          {saveState === 'failed'
+            ? 'не зберігається — збережіть у файл'
+            : saveState === 'pending' ? 'збереження…' : 'збережено'}
+        </div>
         <div className="hint">
-          {project.canvas.width} × {project.canvas.height} · {project.fps} fps ·{' '}
-          {project.duration.toFixed(1)} с
+          {project.photos.length}/{MAX_PHOTOS} фото · {project.canvas.width} ×{' '}
+          {project.canvas.height} · {project.fps} fps · {project.duration.toFixed(1)} с
         </div>
       </header>
 
@@ -117,7 +284,7 @@ export function App() {
           {cells.length === 0 ? (
             <div className="empty">
               <b>Завантажте фото</b>
-              <span>JPG або PNG, вертикальне 9:16</span>
+              <span>JPG або PNG, вертикальне 9:16 — можна одразу пачку</span>
             </div>
           ) : (
             <div className="grid">
@@ -130,9 +297,12 @@ export function App() {
                   clock={clock}
                   posterAt={poster}
                   selected={selected.has(photo.id)}
+                  active={photo.id === project.activeId}
                   caption={photo.name}
-                  onSelect={() => {
-                    dispatch({ type: 'photo/activate', id: photo.id });
+                  onSelect={additive => {
+                    dispatch(additive
+                      ? { type: 'photo/toggle', id: photo.id }
+                      : { type: 'photo/activate', id: photo.id });
                     setActiveButton(null);
                   }}
                   overlay={
@@ -162,71 +332,14 @@ export function App() {
           dispatch={dispatch}
           activeButton={activeButton}
           setActiveButton={setActiveButton}
-          onFile={onFile}
-          problem={problem}
-          warning={warning}
+          onFiles={onFiles}
+          onReplace={onReplace}
+          report={report}
           status={status}
           busy={busy}
           onExport={onExport}
         />
       </main>
-    </>
-  );
-}
-
-interface DragProps {
-  rect: Rect;
-  cellWidth: number;
-  cellHeight: number;
-  onChange: (rect: Rect) => void;
-}
-
-/**
- * The handle for moving and sizing a button. It works in percent throughout, so
- * the same gesture means the same thing whatever the cell is scaled to.
- */
-function DragBox({ rect, cellWidth, cellHeight, onChange }: DragProps) {
-  const drag = useRef<{ mode: 'move' | 'size'; x: number; y: number; from: Rect } | null>(null);
-
-  const onPointerDown = (e: React.PointerEvent, mode: 'move' | 'size'): void => {
-    e.stopPropagation();
-    e.preventDefault();
-    drag.current = { mode, x: e.clientX, y: e.clientY, from: rect };
-    (e.target as Element).setPointerCapture(e.pointerId);
-  };
-
-  const onPointerMove = (e: React.PointerEvent): void => {
-    const state = drag.current;
-    if (!state) return;
-    const dx = ((e.clientX - state.x) / cellWidth) * 100;
-    const dy = ((e.clientY - state.y) / cellHeight) * 100;
-    const next: Rect = state.mode === 'move'
-      ? { ...state.from, x: state.from.x + dx, y: state.from.y + dy }
-      : { ...state.from, w: state.from.w + dx, h: state.from.h + dy };
-    onChange(clampRect(next, MIN_BUTTON_SIZE));
-  };
-
-  const stop = (e: React.PointerEvent): void => {
-    if (!drag.current) return;
-    drag.current = null;
-    (e.target as Element).releasePointerCapture(e.pointerId);
-  };
-
-  return (
-    <div
-      className="box"
-      style={{
-        left: (rect.x / 100) * cellWidth,
-        top: (rect.y / 100) * cellHeight,
-        width: (rect.w / 100) * cellWidth,
-        height: (rect.h / 100) * cellHeight,
-      }}
-      onPointerDown={e => onPointerDown(e, 'move')}
-      onPointerMove={onPointerMove}
-      onPointerUp={stop}
-      onPointerCancel={stop}
-    >
-      <div className="grip" onPointerDown={e => onPointerDown(e, 'size')} />
     </div>
   );
 }

@@ -10,9 +10,12 @@ interface Props {
   animate: boolean;
   clock: Clock;
   posterAt: number;
+  /** In the set the panel writes to. */
   selected?: boolean;
+  /** The one the panel reads its single values from — always also selected. */
+  active?: boolean;
   caption?: string;
-  onSelect?: () => void;
+  onSelect?: (additive: boolean) => void;
   overlay?: ReactNode;
 }
 
@@ -37,9 +40,11 @@ export function CreativeCell(props: Props) {
 
   return (
     <div
-      className={'cell' + (props.selected ? ' selected' : '')}
+      className={
+        'cell' + (props.selected ? ' selected' : '') + (props.active ? ' active' : '')
+      }
       style={{ width: spec.canvas.width * scale, height: spec.canvas.height * scale }}
-      onPointerDown={props.onSelect}
+      onPointerDown={e => props.onSelect?.(e.metaKey || e.ctrlKey || e.shiftKey)}
     >
       <div className="scaler" style={{ transform: `scale(${scale})` }}>
         <div ref={stage} />

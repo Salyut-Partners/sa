@@ -1,7 +1,10 @@
-import { useRef, useState } from 'react';
-import { defaultButton, photoById, type ButtonPatch, type Command } from '../core/project.ts';
+import { defaultButton, nextSlot, photoById, type ButtonPatch, type Command } from '../core/project.ts';
+import { buttonCount, buttonField, photoField } from '../core/selection.ts';
 import type { Project } from '../core/types.ts';
 import { BUTTON_STYLES } from '../renderer/index.ts';
+import { FilePicker } from './FilePicker.tsx';
+import type { ImportReport } from './import-files.ts';
+import { CheckField, ColorField, TextField } from './fields.tsx';
 import { StyleLibrary } from './StylePreview.tsx';
 
 interface Props {
@@ -9,9 +12,9 @@ interface Props {
   dispatch: (command: Command) => void;
   activeButton: number | null;
   setActiveButton: (index: number | null) => void;
-  onFile: (files: FileList | null) => void;
-  problem: string | null;
-  warning: string | null;
+  onFiles: (files: FileList | null) => void;
+  onReplace: (files: FileList | null) => void;
+  report: ImportReport;
   status: string;
   busy: boolean;
   onExport: () => void;
@@ -20,13 +23,12 @@ interface Props {
 export function SidePanel(props: Props) {
   const { project, dispatch, activeButton, setActiveButton } = props;
   const photo = photoById(project, project.activeId);
+  /** Every write in this panel goes to the whole selection, one photo included. */
   const targets = project.selection;
-  const file = useRef<HTMLInputElement>(null);
-  const [over, setOver] = useState(false);
+  const many = targets.length > 1;
 
   const button = photo && activeButton !== null ? photo.buttons[activeButton] ?? null : null;
 
-  /** Every button control edits the same slot across the same target set. */
   const patchButton = (patch: ButtonPatch): void => {
     if (activeButton === null) return;
     dispatch({ type: 'button/patch', ids: targets, index: activeButton, patch });
@@ -34,10 +36,12 @@ export function SidePanel(props: Props) {
 
   const addButton = (): void => {
     if (!photo) return;
-    const index = photo.buttons.length;
+    // Not this photo's end — the slot the button will occupy in all of them.
+    const index = nextSlot(project, targets);
     dispatch({
       type: 'button/add',
       ids: targets,
+      index,
       button: defaultButton(crypto.randomUUID(), BUTTON_STYLES[0]!.id, index, photo.accent),
     });
     setActiveButton(index);
@@ -47,45 +51,68 @@ export function SidePanel(props: Props) {
     <aside className="side">
       <div className="group">
         <div className="lab">Фото</div>
-        <div
-          className={'drop' + (over ? ' over' : '')}
-          onClick={() => file.current?.click()}
-          onDragEnter={e => { e.preventDefault(); setOver(true); }}
-          onDragOver={e => { e.preventDefault(); setOver(true); }}
-          onDragLeave={() => setOver(false)}
-          onDrop={e => { e.preventDefault(); setOver(false); props.onFile(e.dataTransfer.files); }}
-        >
-          <div className="t">Перетягніть або натисніть</div>
-          <div className="s">{photo ? photo.name : 'вертикальне 9:16'}</div>
-        </div>
-        <input
-          ref={file}
-          type="file"
-          accept="image/*"
-          hidden
-          onChange={e => { props.onFile(e.target.files); e.target.value = ''; }}
-        />
-        {props.problem ? <div className="error">{props.problem}</div> : null}
-        {props.warning ? <div className="warn">{props.warning}</div> : null}
-        {photo ? (
-          <button
-            className="wide"
-            style={{ marginTop: 8 }}
-            onClick={() => { dispatch({ type: 'photo/remove', id: photo.id }); setActiveButton(null); }}
-          >
-            Прибрати фото
-          </button>
-        ) : null}
+        {/* Dropping is handled for the whole window, not just this target — so
+            this is only the way in by clicking. */}
+        <FilePicker className="drop" accept="image/*" multiple onPick={props.onFiles}>
+          <span className="t">Перетягніть або натисніть</span>
+          <span className="s">одразу декілька, вертикальні 9:16</span>
+        </FilePicker>
+        {props.report.rejected.map(line => <div className="error" key={line}>{line}</div>)}
+        {props.report.warnings.map(line => <div className="warn" key={line}>{line}</div>)}
       </div>
 
       {photo ? (
         <>
+          <div className="group">
+            <div className="lab">
+              Редагується
+              <span className="val">{many ? `${targets.length} фото` : photo.name}</span>
+            </div>
+            <div className="row">
+              <button
+                className="wide"
+                disabled={targets.length === project.photos.length}
+                onClick={() => dispatch({ type: 'selection/all' })}
+              >
+                Обрати всі
+              </button>
+              <button className="wide" disabled={!many} onClick={() => dispatch({ type: 'selection/one' })}>
+                Тільки це
+              </button>
+            </div>
+            {many ? (
+              <div className="note">Зміни лягають на всі {targets.length} обраних фото.</div>
+            ) : null}
+          </div>
+
+          <div className="group">
+            <div className="row">
+              <FilePicker className="wide" accept="image/*" onPick={props.onReplace}>
+                Замінити зображення
+              </FilePicker>
+              <button
+                className="wide"
+                onClick={() => {
+                  dispatch({ type: 'photo/remove', id: photo.id });
+                  setActiveButton(null);
+                }}
+              >
+                Прибрати фото
+              </button>
+            </div>
+          </div>
+
           <hr />
 
           <div className="group">
             <div className="lab">
               Кнопки <span className="val">{photo.buttons.length}</span>
             </div>
+            {many && buttonCount(project, targets).mixed ? (
+              <div className="warn">
+                У обраних фото різна кількість кнопок — вони зіставляються за позицією в списку.
+              </div>
+            ) : null}
             <div className="buttons-list">
               {photo.buttons.map((b, i) => (
                 <div
@@ -113,22 +140,20 @@ export function SidePanel(props: Props) {
             </button>
           </div>
 
-          {button ? (
+          {button && activeButton !== null ? (
             <>
               <div className="group">
                 <div className="lab">Текст кнопки</div>
-                <input
-                  type="text"
-                  spellCheck={false}
-                  value={button.text}
-                  onChange={e => patchButton({ text: e.target.value })}
+                <TextField
+                  value={buttonField(project, targets, activeButton, 'text')}
+                  onChange={text => patchButton({ text })}
                 />
               </div>
 
               <div className="group">
                 <div className="lab">Стиль</div>
                 <StyleLibrary
-                  selectedId={button.styleId}
+                  selectedId={buttonField(project, targets, activeButton, 'styleId')}
                   color={button.color}
                   text={button.text}
                   onPick={styleId => patchButton({ styleId })}
@@ -137,14 +162,10 @@ export function SidePanel(props: Props) {
 
               <div className="group">
                 <div className="lab">Колір кнопки</div>
-                <div className="row">
-                  <input
-                    type="color"
-                    value={button.color}
-                    onChange={e => patchButton({ color: e.target.value })}
-                  />
-                  <span className="hint">{button.color}</span>
-                </div>
+                <ColorField
+                  value={buttonField(project, targets, activeButton, 'color')}
+                  onChange={color => patchButton({ color })}
+                />
               </div>
             </>
           ) : null}
@@ -168,24 +189,16 @@ export function SidePanel(props: Props) {
 
           <div className="group">
             <div className="lab">Анімація</div>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={photo.glare}
-                onChange={e =>
-                  dispatch({ type: 'photo/patch', ids: targets, patch: { glare: e.target.checked } })}
-              />
-              Блік по кнопці
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={photo.pushIn}
-                onChange={e =>
-                  dispatch({ type: 'photo/patch', ids: targets, patch: { pushIn: e.target.checked } })}
-              />
-              Повільний наїзд на фон
-            </label>
+            <CheckField
+              label="Блік по кнопці"
+              value={photoField(project, targets, 'glare')}
+              onChange={glare => dispatch({ type: 'photo/patch', ids: targets, patch: { glare } })}
+            />
+            <CheckField
+              label="Повільний наїзд на фон"
+              value={photoField(project, targets, 'pushIn')}
+              onChange={pushIn => dispatch({ type: 'photo/patch', ids: targets, patch: { pushIn } })}
+            />
           </div>
 
           <hr />

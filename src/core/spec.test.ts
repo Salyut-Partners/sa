@@ -5,12 +5,13 @@ import type { Project } from './types.ts';
 
 function projectWithButton(): Project {
   let p = apply(createProject(), {
-    type: 'photo/add', photo: { id: 'a', name: 'a.jpg', image: 'data:image/jpeg;base64,zz' },
+    type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:image/jpeg;base64,zz' }],
   });
   p = apply(p, { type: 'photo/patch', ids: ['a'], patch: { accent: '#123456', pushIn: false } });
   return apply(p, {
     type: 'button/add',
     ids: ['a'],
+    index: 0,
     button: {
       ...defaultButton('b1', 'glow', 0, '#123456'),
       rect: { x: 10, y: 50, w: 50, h: 10 },
@@ -53,7 +54,7 @@ describe('buildSpec', () => {
   it('keeps buttons in their slot order', () => {
     let p = projectWithButton();
     p = apply(p, {
-      type: 'button/add', ids: ['a'],
+      type: 'button/add', ids: ['a'], index: 1,
       button: { ...defaultButton('b2', 'glow', 1, '#123456'), text: 'ДРУГА' },
     });
     expect(buildSpec(p, 'a')!.buttons.map(b => b.text)).toEqual(['КУПИТИ', 'ДРУГА']);

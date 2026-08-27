@@ -11,6 +11,13 @@ export const DEFAULT_ACCENT = '#1fa94b';
 /** Smallest a button may be dragged to, in percent of the canvas. */
 export const MIN_BUTTON_SIZE = { w: 12, h: 3 };
 
+/**
+ * How many photos one project holds. Images live inside the project as data
+ * URLs, so the ceiling is memory, not taste: a dozen 1080x1920 JPEGs is already
+ * tens of megabytes to keep in the store, autosave and export.
+ */
+export const MAX_PHOTOS = 12;
+
 export interface NewPhoto {
   id: string;
   name: string;
@@ -27,11 +34,15 @@ export type ProjectPatch = Partial<Pick<Project, 'duration' | 'fps' | 'canvas'>>
  * photo or all of them without a second code path.
  */
 export type Command =
-  | { type: 'photo/add'; photo: NewPhoto }
+  | { type: 'photo/add'; photos: readonly NewPhoto[] }
   | { type: 'photo/remove'; id: string }
+  | { type: 'photo/replace'; id: string; name: string; image: string }
   | { type: 'photo/activate'; id: string }
+  | { type: 'photo/toggle'; id: string }
+  | { type: 'selection/all' }
+  | { type: 'selection/one' }
   | { type: 'photo/patch'; ids: readonly string[]; patch: PhotoPatch }
-  | { type: 'button/add'; ids: readonly string[]; button: ButtonLayer }
+  | { type: 'button/add'; ids: readonly string[]; index: number; button: ButtonLayer }
   | { type: 'button/patch'; ids: readonly string[]; index: number; patch: ButtonPatch }
   | { type: 'button/remove'; ids: readonly string[]; index: number }
   | { type: 'project/patch'; patch: ProjectPatch };
@@ -81,6 +92,31 @@ function newPhoto(input: NewPhoto): Photo {
   };
 }
 
+const clampIndex = (index: number, length: number): number =>
+  Math.min(Math.max(0, Math.trunc(index)), length);
+
+/**
+ * Where the next button added to `ids` will land: the end of the shortest of
+ * them. Any deeper slot would not exist in every photo, and the one place a
+ * button can be added to all of them and mean the same thing is the one that
+ * does. The panel needs the same number to know which button to open for editing.
+ */
+export function nextSlot(project: Project, ids: readonly string[]): number {
+  const lengths = ids
+    .map(id => photoById(project, id))
+    .filter((p): p is Photo => p !== null)
+    .map(p => p.buttons.length);
+  return lengths.length === 0 ? 0 : Math.min(...lengths);
+}
+
+/**
+ * Selection is kept in grid order, not in the order the user clicked. The panel
+ * and every broadcast read it as a list, and a list that reorders itself under
+ * the same set of photos would make "the first selected" mean two things.
+ */
+const inGridOrder = (project: Project, ids: ReadonlySet<string>): string[] =>
+  project.photos.filter(p => ids.has(p.id)).map(p => p.id);
+
 /** Rewrite the photos named by `ids`, leaving the rest untouched. */
 function mapPhotos(
   project: Project,
@@ -94,12 +130,17 @@ function mapPhotos(
 export function apply(project: Project, command: Command): Project {
   switch (command.type) {
     case 'photo/add': {
-      const photo = newPhoto(command.photo);
+      // The ceiling is the model's, so it holds however the photos arrive. The
+      // editor checks it first in order to say what bounced; this is the backstop.
+      const room = MAX_PHOTOS - project.photos.length;
+      const added = command.photos.slice(0, Math.max(0, room)).map(newPhoto);
+      const first = added[0];
+      if (first === undefined) return project;
       return {
         ...project,
-        photos: [...project.photos, photo],
-        activeId: photo.id,
-        selection: [photo.id],
+        photos: [...project.photos, ...added],
+        activeId: first.id,
+        selection: [first.id],
       };
     }
 
@@ -108,27 +149,66 @@ export function apply(project: Project, command: Command): Project {
       if (photos.length === project.photos.length) return project;
       const stillActive = project.activeId !== null && project.activeId !== command.id;
       const activeId = stillActive ? project.activeId : (photos[0]?.id ?? null);
-      const kept = project.selection.filter(id => photos.some(p => p.id === id));
+      const left = new Set(photos.map(p => p.id));
+      const kept = project.selection.filter(id => left.has(id));
       // The active photo is always part of the selection — the side panel edits
       // the selection, so an active photo outside it would be uneditable.
       const selection = kept.length > 0 ? kept : activeId === null ? [] : [activeId];
       return { ...project, photos, activeId, selection };
     }
 
+    case 'photo/replace':
+      return mapPhotos(project, [command.id], p => ({
+        ...p,
+        name: command.name,
+        image: command.image,
+      }));
+
     case 'photo/activate': {
       if (!project.photos.some(p => p.id === command.id)) return project;
       return { ...project, activeId: command.id, selection: [command.id] };
     }
 
+    case 'photo/toggle': {
+      if (!project.photos.some(p => p.id === command.id)) return project;
+      const next = new Set(project.selection);
+      if (next.has(command.id)) {
+        // Emptying the selection would leave the panel editing nothing, so the
+        // last one standing cannot be switched off.
+        if (next.size === 1) return project;
+        next.delete(command.id);
+      } else {
+        next.add(command.id);
+      }
+      const selection = inGridOrder(project, next);
+      const activeId = next.has(project.activeId ?? '') ? project.activeId : selection[0] ?? null;
+      return { ...project, selection, activeId };
+    }
+
+    case 'selection/all':
+      return { ...project, selection: project.photos.map(p => p.id) };
+
+    case 'selection/one':
+      return { ...project, selection: project.activeId === null ? [] : [project.activeId] };
+
     case 'photo/patch':
       return mapPhotos(project, command.ids, p => ({ ...p, ...command.patch }));
 
-    case 'button/add':
-      // A fresh copy per photo: the slot is shared, the instance is not.
-      return mapPhotos(project, command.ids, p => ({
-        ...p,
-        buttons: [...p.buttons, structuredClone(command.button)],
-      }));
+    case 'button/add': {
+      // The slot is shared, the instance is not — hence a fresh copy per photo.
+      // The button goes *at* one slot rather than on each photo's end: photos in
+      // a selection are matched by position, so appending to a batch whose photos
+      // hold different numbers of buttons would put the new one at a different
+      // slot in each, and every later broadcast would edit a different button per
+      // photo. That means one index for the whole command, clamped to the
+      // shortest photo — the deepest slot that exists in all of them.
+      const at = clampIndex(command.index, nextSlot(project, command.ids));
+      return mapPhotos(project, command.ids, p => {
+        const buttons = [...p.buttons];
+        buttons.splice(at, 0, structuredClone(command.button));
+        return { ...p, buttons };
+      });
+    }
 
     case 'button/patch':
       return mapPhotos(project, command.ids, p => {

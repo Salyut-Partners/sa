@@ -4,3 +4,6 @@ export * from './timing.ts';
 export * from './image.ts';
 export * from './project.ts';
 export * from './spec.ts';
+export * from './selection.ts';
+export * from './history.ts';
+export * from './serialize.ts';
