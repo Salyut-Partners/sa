@@ -5,7 +5,7 @@ layers over them, generate a voice-over, export mp4 per photo and per locale.
 
 The spec lives in [`.scratch/prd-creative-factory-search.md`](.scratch/prd-creative-factory-search.md).
 
-## What works today (stage E4)
+## What works today (stage E5)
 
 Import a batch of 9:16 photos at once — the ones that do not fit are listed with
 a reason rather than failing the import. The batch lays out four to a row; a
@@ -32,13 +32,27 @@ chips are whole frames drawn by the same renderer: a banner listing the
 vacancies, three versions of the offer card — pills, panel, and a sheet that
 unrolls from the top — and the rate list. The form under the library is built
 from the template's own schema rather than laid out by hand, so every field it
-carries is editable, lists a line to an item. Fields nobody touches follow the
-phrase book, which ships all seven locales; a field written over says so and
-resets back with one click. The template has the same window as a button —
-appears at, hides at, entrance — and lands over the same warnings.
+carries is editable, lists a line to an item. The template has the same window as
+a button — appears at, hides at, entrance — and lands over the same warnings.
 
-Then: mp4 export of the active creative, template and buttons on the one frame.
-Locales and the voice-over land in E5.
+The strip over the grid holds the languages. Adding one shows the batch in it:
+every cell, and every chip in the template library, is redrawn from the phrase
+book, which ships all seven locales. What a field says belongs to the language
+rather than to the photo — the offer is the batch's — so a field written over
+says so, resets back with one click, and stays out of the other six languages
+until you press translate, which carries the hand-written fields and the
+voice-over script across in one step and names the provider that did it. Each
+language has its script and, if you want, a voice of its own; the panel counts
+the characters and quotes the price before you spend it, once per language
+however many photos are in the batch.
+
+Export takes the selected photos across every language ticked for release. It
+runs as a job on the server, so the editor keeps working while it goes: a bar,
+the file being made, an estimate, and a cancel. Videos that differ only in their
+soundtrack are drawn once and muxed twice, and the panel says how many frame
+walks it saved. One creative that fails leaves the rest of the batch alone and
+lands in a list of what did not come out. What comes back is an mp4 for one
+creative and a zip named by photo and language for a batch.
 
 ## Running it
 
@@ -52,8 +66,13 @@ Open <http://localhost:5181>. The editor proxies `/api` to the server.
 `npm run build && npm start` serves the built editor from the server alone, on 5180.
 
 ffmpeg and ffprobe must be on `PATH` (`brew install ffmpeg`). Chromium comes with
-Puppeteer. Keys for the voice-over and translation providers go in `.env`
-(see `.env.example`); nothing needs them before E5.
+Puppeteer.
+
+Keys go in `.env` (see `.env.example`) and none of them are required:
+`ELEVENLABS_API_KEY` for the voice-over, and either `DEEPL_API_KEY` or
+`ANTHROPIC_API_KEY` for translation. Without them the editor runs and exports
+silent creatives, and the panel says which key is missing rather than failing.
+`RENDER_CONCURRENCY` sets how many pages walk frames at once (default 2).
 
 ## Shape of the code
 
@@ -69,12 +88,20 @@ Three build units and one rule.
   in the editor.
 - **`src/editor`** — React. Owns interaction and nothing about how a creative looks.
 - **`src/server`** — Express, Puppeteer, ffmpeg. Bundles the render target from
-  source at startup, so the headless page can never drift from the editor.
+  source at startup, so the headless page can never drift from the editor. An
+  export is a job in memory: the editor posts a plan, gets an id, and watches it.
+  ElevenLabs and the translators sit behind two thin modules; a missing key is a
+  state each of them explains rather than an error the server starts with.
 
 The rule: **the preview and the export call the same renderer.** There is no
 second drawing path. Anything time-dependent inside the renderer must be derived
 from `t` — no transitions, no `requestAnimationFrame`, no wall clock — or the
 frame walk stops matching what was on screen.
+
+A corollary the export leans on: `visualKey` hashes exactly the half of a `Spec`
+that reaches the frame, and `planBatch` groups by it, so two files that share a
+key share a video. Adding a visual field to `Spec` means adding it to
+`visualParts` — otherwise a real difference silently ships the same video twice.
 
 ## Checks
 

@@ -1,5 +1,6 @@
-// Spec -> mp4. The page is driven one frame at a time: set the time, screenshot,
-// push the JPEG into ffmpeg. Nothing here decides how the creative looks.
+// Spec -> mp4, without the sound. The page is driven one frame at a time: set
+// the time, screenshot, push the JPEG into ffmpeg. Nothing here decides how the
+// creative looks, and nothing here knows about batches.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -36,22 +37,49 @@ export const tempFile = (ext: string): string =>
 
 export class SpecError extends Error {}
 
-export function assertRenderable(spec: Spec): void {
+/** Thrown when the user cancelled the job this render belonged to. */
+export class CancelledError extends Error {
+  constructor() {
+    super('скасовано');
+    this.name = 'CancelledError';
+  }
+}
+
+export function assertRenderable(spec: Spec, duration: number): void {
   if (!spec || typeof spec !== 'object') throw new SpecError('порожній spec');
   if (!spec.image) throw new SpecError('у spec немає зображення');
   const { width, height } = spec.canvas ?? {};
   if (!(width > 0 && height > 0)) throw new SpecError('некоректний розмір полотна');
   if (!(spec.fps > 0)) throw new SpecError('некоректний fps');
-  const frames = Math.round(spec.duration * spec.fps);
+  const frames = Math.round(duration * spec.fps);
   if (!(frames >= 1 && frames <= MAX_FRAMES)) throw new SpecError('тривалість поза межами');
 }
 
-/** Render `spec` into `outFile`. `origin` is where the render target is served from. */
-export async function renderSpecToFile(spec: Spec, origin: string, outFile: string): Promise<void> {
-  assertRenderable(spec);
+export interface RenderOptions {
+  /** Where the render target is served from. */
+  origin: string;
+  /**
+   * How long the video runs. Passed in rather than read off the Spec because a
+   * group's length is decided by the longest voice-over in it, which is not
+   * known until the speech has been made.
+   */
+  duration: number;
+  /** Asked between frames. A job the user has abandoned should stop, not finish. */
+  cancelled?: () => boolean;
+}
+
+/** Render one Spec into `outFile` as a silent mp4. */
+export async function renderSpecToFile(
+  spec: Spec,
+  outFile: string,
+  options: RenderOptions,
+): Promise<void> {
+  const { origin, duration, cancelled } = options;
+  assertRenderable(spec, duration);
 
   const browser = await getBrowser();
   let page: Page | null = null;
+  let encoder: ReturnType<typeof spawnEncoder> | null = null;
   try {
     page = await browser.newPage();
     await page.setViewport({
@@ -61,7 +89,9 @@ export async function renderSpecToFile(spec: Spec, origin: string, outFile: stri
     });
     await page.goto(origin + '/render.html', { waitUntil: 'networkidle0' });
     await page.evaluate(() => document.fonts.ready);
-    await page.evaluate(s => window.__init(s), spec);
+    // The page is built at the length it will be walked at, so a layer with an
+    // open end reaches the new end rather than the one the user authored at.
+    await page.evaluate(s => window.__init(s), { ...spec, duration });
     // A half-decoded background would be captured as a blank frame.
     await page.evaluate(() => {
       const img = document.querySelector<HTMLImageElement>('.cf-base');
@@ -69,19 +99,24 @@ export async function renderSpecToFile(spec: Spec, origin: string, outFile: stri
     });
     await page.evaluate(() => document.fonts.ready);
 
-    const encoder = spawnEncoder(spec.fps, outFile);
-    const frames = Math.round(spec.duration * spec.fps);
+    encoder = spawnEncoder(spec.fps, outFile);
+    const frames = Math.round(duration * spec.fps);
 
     for (let i = 0; i < frames; i++) {
+      if (cancelled?.()) throw new CancelledError();
       await page.evaluate(t => window.__render(t), i / spec.fps);
       const frame = await page.screenshot({ type: 'jpeg', quality: 95 });
       if (!encoder.stdin.write(frame)) {
-        await new Promise<void>(resolve => encoder.stdin.once('drain', () => resolve()));
+        await new Promise<void>(resolve => encoder!.stdin.once('drain', () => resolve()));
       }
     }
     encoder.stdin.end();
     await encoder.done;
+    encoder = null;
   } finally {
+    // A half-fed encoder left running would hold the temp file open and the
+    // process alive long after the job it belonged to was abandoned.
+    if (encoder) encoder.kill();
     if (page) await page.close().catch(() => {});
   }
 }

@@ -1,13 +1,13 @@
 import { fromText, type Field } from '../core/fields.ts';
+import { activeLocale } from '../core/locales.ts';
 import type { Command } from '../core/project.ts';
-import { templateEdited, templateText } from '../core/selection.ts';
-import { templateById } from '../core/templates.ts';
+import { just } from '../core/selection.ts';
+import { fieldEdited, fieldText, templateById } from '../core/templates.ts';
 import type { Project } from '../core/types.ts';
 import { TextAreaField, TextField } from './fields.tsx';
 
 interface Props {
   project: Project;
-  targets: readonly string[];
   definitionId: string;
   dispatch: (command: Command) => void;
 }
@@ -21,23 +21,28 @@ const rowsFor = (field: Field, text: string): number =>
  *
  * Nothing here names a field, a template or a kind of offer: the boxes come from
  * the record in the library, which is what lets a template be added without the
- * editor learning anything about it. Every box writes through the same broadcast
- * the rest of the panel uses, so a headline typed over four photos lands on all
- * four.
+ * editor learning anything about it.
+ *
+ * What the boxes hold belongs to the language on screen, not to the selection.
+ * The offer is the batch's — four photos advertising four different jobs is four
+ * projects — so there is nothing here for photos to disagree about, and the one
+ * disagreement that matters is between languages. Switching the language bar
+ * re-reads every box.
  */
-export function TemplateFields({ project, targets, definitionId, dispatch }: Props) {
+export function TemplateFields({ project, definitionId, dispatch }: Props) {
   const info = templateById(definitionId);
   if (info === null) return null;
+  const locale = activeLocale(project);
 
   return (
     <>
       {info.schema.map(field => {
-        const value = templateText(project, targets, field.key);
-        const edited = templateEdited(project, targets, field.key);
-        const write = (text: string): void =>
+        const text = fieldText(locale, field);
+        const edited = fieldEdited(locale, field.key);
+        const write = (typed: string): void =>
           dispatch({
-            type: 'template/field', ids: targets, key: field.key,
-            value: fromText(text, field.kind),
+            type: 'locale/field', id: locale.id, key: field.key,
+            value: fromText(typed, field.kind),
           });
 
         return (
@@ -51,19 +56,19 @@ export function TemplateFields({ project, targets, definitionId, dispatch }: Pro
                 <button
                   className="link"
                   onClick={() =>
-                    dispatch({ type: 'template/field', ids: targets, key: field.key, value: null })}
+                    dispatch({ type: 'locale/field', id: locale.id, key: field.key, value: null })}
                 >
                   скинути
                 </button>
               ) : null}
             </div>
             {field.kind === 'line'
-              ? <TextField value={value} onChange={write} />
+              ? <TextField value={just(text)} onChange={write} />
               : (
                 <TextAreaField
-                  value={value}
+                  value={just(text)}
                   onChange={write}
-                  rows={rowsFor(field, value.mixed ? '' : value.value)}
+                  rows={rowsFor(field, text)}
                   holdUntilBlur={field.kind === 'list'}
                 />
               )}

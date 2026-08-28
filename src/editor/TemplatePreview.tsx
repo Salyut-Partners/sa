@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { NO_TEMPLATE, type Shared } from '../core/selection.ts';
-import type { CanvasSize } from '../core/types.ts';
+import type { CanvasSize, Locale } from '../core/types.ts';
 import { TEMPLATE_DEFINITIONS, templatePreviewSpec } from '../renderer/index.ts';
 import { Clock } from './clock.ts';
 import { CreativeCell } from './CreativeCell.tsx';
@@ -29,6 +29,8 @@ interface Props {
   selectedId: Shared<string>;
   canvas: CanvasSize;
   color: string;
+  /** The language being worked in, so a chip reads as the frame would. */
+  locale: Locale;
   onPick: (definitionId: string | null) => void;
 }
 
@@ -37,15 +39,15 @@ interface Props {
  * video, with the words the dictionary would put on it. Reading the layouts off
  * a list of names is what this exists to end.
  */
-export function TemplateLibrary({ selectedId, canvas, color, onPick }: Props) {
+export function TemplateLibrary({ selectedId, canvas, color, locale, onPick }: Props) {
   const scale = CHIP_WIDTH / canvas.width;
 
   const chips = useMemo(
     () => TEMPLATE_DEFINITIONS.map(definition => ({
       definition,
-      spec: templatePreviewSpec(definition.id, { canvas, image: BACKDROP, color }),
+      spec: templatePreviewSpec(definition.id, { canvas, image: BACKDROP, color, locale }),
     })),
-    [canvas, color],
+    [canvas, color, locale],
   );
 
   const picked = (id: string): boolean => !selectedId.mixed && selectedId.value === id;

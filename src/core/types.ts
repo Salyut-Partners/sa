@@ -71,18 +71,15 @@ export interface ButtonLayer {
 }
 
 /**
- * The template chosen on one photo: which one, what the user typed into it, and
- * when it is on screen.
+ * The template chosen on one photo: which one, and when it is on screen.
  *
- * `values` holds only the fields edited by hand. Everything else comes from the
- * phrase book at build time, so a field nobody touched follows the dictionary
- * when the locale changes instead of freezing at whatever it said when the
- * template was picked — and "reset this field" is deleting a key, not guessing
- * what it used to say.
+ * What it *says* is not here. A field's text is the phrase book under the
+ * locale's Override, and both are keyed by field rather than by photo — the
+ * words are the offer, and the offer is the batch's, not one frame's. Which
+ * layout states it, and when that layout arrives, is the photo's own.
  */
 export interface TemplateLayer {
   definitionId: string;
-  values: Readonly<Record<string, FieldValue>>;
   timing: Timing;
 }
 
@@ -100,6 +97,27 @@ export interface Photo {
   buttons: ButtonLayer[];
 }
 
+/**
+ * One release language.
+ *
+ * It carries the two things that differ between languages and nothing else: what
+ * the voice says, and every text the user wrote over the dictionary. Both are
+ * the locale's rather than the photo's — one offer goes out in seven languages,
+ * not seven offers — which is also what lets "translate my edits" be one pass
+ * over one bag instead of a crawl over the batch.
+ */
+export interface Locale {
+  id: LocaleId;
+  /** What the voice says. Empty is a silent video, not a missing one. */
+  script: string;
+  /** This language's own voice, or null to use the project's. */
+  voiceId: string | null;
+  /** Whether it goes out in the next export. */
+  include: boolean;
+  /** Hand edits to template fields, over the phrase book. */
+  overrides: Readonly<Record<string, FieldValue>>;
+}
+
 /** Everything one working session holds. The unit of saving. */
 export interface Project {
   canvas: CanvasSize;
@@ -110,6 +128,16 @@ export interface Project {
   selection: string[];
   /** The photo the side panel reads its single-value state from. */
   activeId: string | null;
+  /** The release languages, in the order they were added. Never empty. */
+  locales: Locale[];
+  /** Which language the grid is showing. Always one the project carries. */
+  activeLocale: LocaleId;
+  /** The voice a locale that has not chosen its own speaks with. */
+  voiceId: string;
+  /** Which synthesis model — the quality-against-price dial. */
+  modelId: string;
+  /** Stretch the video to hold the voice-over rather than cutting it off. */
+  fitToVoice: boolean;
 }
 
 // ------------------------------------------------------------------- spec --
@@ -139,6 +167,10 @@ export interface TemplateSpec {
 /**
  * A flat, immutable description of exactly one video. The only input the
  * renderer accepts — it never sees a Project.
+ *
+ * The last four fields are the sound. The renderer ignores them entirely: they
+ * ride along because a Spec is one video end to end, and because the split
+ * between them and everything above is exactly what `visualKey` hashes over.
  */
 export interface Spec {
   canvas: CanvasSize;
@@ -149,4 +181,10 @@ export interface Spec {
   glare: boolean;
   template: TemplateSpec | null;
   buttons: ButtonSpec[];
+  /** Which language this one is. Not visual: the words are already resolved. */
+  locale: LocaleId;
+  /** What the voice says. Empty means no audio track at all. */
+  script: string;
+  voiceId: string;
+  modelId: string;
 }

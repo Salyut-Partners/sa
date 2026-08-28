@@ -5,9 +5,9 @@
 // merge them with the dictionary, and the core may not know about the DOM. The
 // drawing half of each record is in the renderer under the same id — adding a
 // template is a record here and a record there, and nothing in the editor.
-import { blankFor, type FieldSchema } from './fields.ts';
+import { blankFor, toText, type Field, type FieldKind, type FieldSchema } from './fields.ts';
 import { phrase } from './phrasebook.ts';
-import type { FieldValue, LocaleId, TemplateLayer, Timing } from './types.ts';
+import type { FieldValue, Locale, Timing } from './types.ts';
 
 export interface TemplateInfo {
   id: string;
@@ -103,34 +103,42 @@ export const templateById = (id: string): TemplateInfo | null =>
 
 
 /**
- * What one field of a layer says, in one locale.
+ * What one field says, in one language.
  *
  * The order is the whole design: what the user typed, under what the dictionary
  * says, under a blank of the field's own kind. A field nobody touched follows
- * the dictionary into whatever locale is asked for — which is why the values on
- * the layer hold edits only, and never a copy of the phrase they started from.
+ * the dictionary into whatever language is asked for — which is why a locale
+ * holds edits only, and never a copy of the phrase it started from.
  */
-export function fieldValue(layer: TemplateLayer, key: string, locale: LocaleId): FieldValue {
-  const typed = layer.values[key];
+export function fieldValue(locale: Locale, key: string, kind: FieldKind = 'line'): FieldValue {
+  const typed = locale.overrides[key];
   if (typed !== undefined) return typed;
-  const said = phrase(locale, key);
-  if (said !== undefined) return said;
-  const schema = templateById(layer.definitionId)?.schema ?? [];
-  return blankFor(schema.find(f => f.key === key)?.kind ?? 'line');
+  return phrase(locale.id, key) ?? blankFor(kind);
 }
 
+/** Whether the field was written by hand rather than left to the dictionary. */
+export const fieldEdited = (locale: Locale, key: string): boolean => key in locale.overrides;
+
 /**
- * Every field of the layer's current schema, resolved.
+ * What a box in the panel shows for one field. Always text, lists included: the
+ * panel edits a list a line at a time, and one control that reads every kind is
+ * one control to keep honest.
+ */
+export const fieldText = (locale: Locale, field: Field): string =>
+  toText(fieldValue(locale, field.key, field.kind));
+
+/**
+ * Every field of a template, resolved — nothing left for the renderer to look up.
  *
- * Only the current schema's: a value left behind by a template the photo used
- * to wear is kept on the layer so that swapping back restores it, but it is not
- * a field of this template and has no business reaching the renderer.
+ * Only the template's own: an override left behind by a layout the photo used to
+ * wear stays in the locale, so swapping back restores it, but it is not a field
+ * of this template and has no business reaching the frame.
  */
 export function templateFields(
-  layer: TemplateLayer,
-  locale: LocaleId,
+  definitionId: string,
+  locale: Locale,
 ): Record<string, FieldValue> {
-  const info = templateById(layer.definitionId);
+  const info = templateById(definitionId);
   if (info === null) return {};
-  return Object.fromEntries(info.schema.map(f => [f.key, fieldValue(layer, f.key, locale)]));
+  return Object.fromEntries(info.schema.map(f => [f.key, fieldValue(locale, f.key, f.kind)]));
 }

@@ -97,22 +97,37 @@ describe('buildSpec and the template', () => {
 
   it('puts what the user typed over what the dictionary says', () => {
     const p = apply(withTemplate('rates'), {
-      type: 'template/field', ids: ['a'], key: 'ratesHead', value: 'Знайди свою',
+      type: 'locale/field', id: 'en', key: 'ratesHead', value: 'Знайди свою',
     });
     expect(buildSpec(p, 'a')!.template!.fields['ratesHead']).toBe('Знайди свою');
   });
 
-  it('builds in the locale it is asked for', () => {
-    const spec = buildSpec(withTemplate('rates'), 'a', 'de')!;
-    expect(spec.template!.fields['ratesHead']).toBe('Finde diesen');
+  it('builds in the language it is asked for', () => {
+    const p = apply(withTemplate('rates'), { type: 'locale/add', id: 'de' });
+    expect(buildSpec(p, 'a', 'de')!.template!.fields['ratesHead']).toBe('Finde diesen');
+  });
+
+  it('leaves one language edit out of another', () => {
+    let p = apply(withTemplate('rates'), { type: 'locale/add', id: 'de' });
+    p = apply(p, { type: 'locale/field', id: 'de', key: 'ratesHead', value: 'Von Hand' });
+    expect(buildSpec(p, 'a', 'de')!.template!.fields['ratesHead']).toBe('Von Hand');
+    expect(buildSpec(p, 'a', 'en')!.template!.fields['ratesHead']).toBe('Find this');
+  });
+
+  it('falls back to the dictionary for a language the project does not carry', () => {
+    // A stale id in a saved file, or a chip asking for a language nobody added:
+    // a frame in plain Italian beats a frame of blanks.
+    const spec = buildSpec(withTemplate('rates'), 'a', 'it')!;
+    expect(spec.locale).toBe('it');
+    expect(spec.template!.fields['ratesHead']).toBe('Trova questo');
   });
 
   it('carries only the fields of the template on the photo now', () => {
-    // A value left behind by the template the photo used to wear is kept, so
-    // swapping back restores it — but it is not this template's field and the
-    // renderer must never see it.
+    // A value left behind by the template the photo used to wear stays on the
+    // locale, so swapping back restores it — but it is not this template's field
+    // and the renderer must never see it.
     let p = apply(withTemplate('jobs-card-pills'), {
-      type: 'template/field', ids: ['a'], key: 'disclaimer', value: 'дрібний шрифт',
+      type: 'locale/field', id: 'en', key: 'disclaimer', value: 'дрібний шрифт',
     });
     p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'rates' });
 
@@ -140,5 +155,44 @@ describe('buildSpec and the template', () => {
     const spec = buildSpec(project, 'a')!;
     spec.template!.timing.appearAt = 99;
     expect(project.photos[0]!.template!.timing.appearAt).toBe(0);
+  });
+});
+
+describe('buildSpec and the sound', () => {
+  const spoken = (): Project => {
+    let p = apply(projectWithButton(), { type: 'locale/patch', id: 'en', patch: { script: '  Hello.  ' } });
+    p = apply(p, { type: 'locale/add', id: 'de' });
+    return apply(p, { type: 'project/patch', patch: { voiceId: 'george', modelId: 'flash' } });
+  };
+
+  it('carries the script of the language it was built in', () => {
+    expect(buildSpec(spoken(), 'a', 'en')!.script).toBe('Hello.');
+    expect(buildSpec(spoken(), 'a', 'de')!.script).toBe('');
+  });
+
+  it('carries the project voice for a language that has not picked its own', () => {
+    const spec = buildSpec(spoken(), 'a', 'de')!;
+    expect(spec.voiceId).toBe('george');
+    expect(spec.modelId).toBe('flash');
+  });
+
+  it('lets a language speak with a voice of its own', () => {
+    const p = apply(spoken(), { type: 'locale/patch', id: 'de', patch: { voiceId: 'lily' } });
+    expect(buildSpec(p, 'a', 'de')!.voiceId).toBe('lily');
+    expect(buildSpec(p, 'a', 'en')!.voiceId).toBe('george');
+  });
+
+  it('builds in the language on screen when it is not told which', () => {
+    const p = apply(spoken(), { type: 'locale/activate', id: 'de' });
+    expect(buildSpec(p, 'a')!.locale).toBe('de');
+  });
+
+  it('gives a language the project does not carry no voice-over at all', () => {
+    // Reachable from a stale id in a saved file. Borrowing the script of the
+    // language on screen would ship an Italian video speaking English.
+    const spec = buildSpec(spoken(), 'a', 'it')!;
+    expect(spec.locale).toBe('it');
+    expect(spec.script).toBe('');
+    expect(spec.voiceId).toBe('george');
   });
 });

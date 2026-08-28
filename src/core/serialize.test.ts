@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { newLocale } from './locales.ts';
 import { apply, createProject, defaultButton, MAX_PHOTOS } from './project.ts';
 import { fromFile, SCHEMA_VERSION, toFile } from './serialize.ts';
-import type { Project } from './types.ts';
+import { DEFAULT_MODEL_ID } from './voice.ts';
+import type { Locale, Project } from './types.ts';
 
 function sample(): Project {
   let p = apply(createProject(), {
@@ -95,18 +97,20 @@ describe('a project file carrying templates', () => {
       type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:,a' }],
     });
     p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-panel' });
-    p = apply(p, { type: 'template/field', ids: ['a'], key: 'headline', value: 'Робота' });
-    p = apply(p, { type: 'template/field', ids: ['a'], key: 'jobs', value: ['Охорона', 'Кухня'] });
+    p = apply(p, { type: 'locale/field', id: 'en', key: 'headline', value: 'Робота' });
+    p = apply(p, { type: 'locale/field', id: 'en', key: 'jobs', value: ['Охорона', 'Кухня'] });
     return apply(p, { type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 1.5 } } });
   };
 
   it('comes back with the template, the edits and the window intact', () => {
     const result = fromFile(JSON.parse(JSON.stringify(toFile(saved()))));
     expect(result.ok).toBe(true);
-    const layer = (result as { project: Project }).project.photos[0]!.template!;
+    const project = (result as { project: Project }).project;
+    const layer = project.photos[0]!.template!;
     expect(layer.definitionId).toBe('jobs-card-panel');
-    expect(layer.values).toEqual({ headline: 'Робота', jobs: ['Охорона', 'Кухня'] });
     expect(layer.timing.appearAt).toBe(1.5);
+    expect(project.locales[0]!.overrides)
+      .toEqual({ headline: 'Робота', jobs: ['Охорона', 'Кухня'] });
   });
 
   it('opens a file written before templates existed, with none on the photos', () => {
@@ -132,5 +136,128 @@ describe('a project file carrying templates', () => {
 
   it('refuses a file from a schema this build has never seen', () => {
     expect(fromFile({ ...toFile(saved()), version: 99 })).toEqual({ ok: false, reason: 'version' });
+  });
+});
+
+describe('a project file carrying languages', () => {
+  const saved = (): Project => {
+    let p = apply(createProject(), {
+      type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:,a' }],
+    });
+    p = apply(p, { type: 'locale/add', id: 'de' });
+    p = apply(p, { type: 'locale/patch', id: 'de', patch: { script: 'Hallo.', voiceId: 'lily' } });
+    p = apply(p, { type: 'locale/patch', id: 'en', patch: { include: false } });
+    p = apply(p, { type: 'locale/field', id: 'de', key: 'cta', value: 'JETZT' });
+    return apply(p, {
+      type: 'project/patch', patch: { voiceId: 'george', modelId: 'flash', fitToVoice: false },
+    });
+  };
+
+  const reopened = (file: unknown): Project => {
+    const result = fromFile(JSON.parse(JSON.stringify(file)));
+    expect(result.ok).toBe(true);
+    return (result as { project: Project }).project;
+  };
+
+  it('comes back with every language, its script, its voice and its edits', () => {
+    const project = reopened(toFile(saved()));
+    expect(project.locales.map(l => l.id)).toEqual(['en', 'de']);
+    expect(project.locales[1]).toEqual({
+      id: 'de', script: 'Hallo.', voiceId: 'lily', include: true, overrides: { cta: 'JETZT' },
+    });
+    expect(project.locales[0]!.include).toBe(false);
+  });
+
+  it('comes back with the project voice, model and whether it stretches', () => {
+    const project = reopened(toFile(saved()));
+    expect(project.voiceId).toBe('george');
+    expect(project.modelId).toBe('flash');
+    expect(project.fitToVoice).toBe(false);
+  });
+
+  it('opens on the first language it carries, whichever one was on screen', () => {
+    // Where the cursor was is not what was made — the same reason selection is
+    // left out of the file.
+    expect(reopened(toFile(saved())).activeLocale).toBe('en');
+  });
+
+  it('shares nothing with the project it was written from', () => {
+    const project = saved();
+    const file = toFile(project);
+    file.locales[0]!.script = 'підмінено';
+    expect(project.locales[0]!.script).toBe('');
+  });
+
+  it('drops a language this build has never heard of rather than refusing the file', () => {
+    const file = toFile(saved()) as unknown as Record<string, unknown>;
+    const locales = [...(file['locales'] as unknown[]), { ...newLocale('en'), id: 'kl' }];
+    expect(reopened({ ...file, locales }).locales.map(l => l.id)).toEqual(['en', 'de']);
+  });
+
+  it('keeps one record per language', () => {
+    const file = toFile(saved()) as unknown as Record<string, unknown>;
+    const locales = file['locales'] as Locale[];
+    expect(reopened({ ...file, locales: [...locales, locales[0]] }).locales.map(l => l.id))
+      .toEqual(['en', 'de']);
+  });
+});
+
+describe('opening a project written before languages existed', () => {
+  /** A version 2 file: field edits sat on each photo's template, in the one language. */
+  const v2 = (values: Record<string, unknown>, second?: Record<string, unknown>) => ({
+    version: 2,
+    canvas: { width: 1080, height: 1920 },
+    fps: 30,
+    duration: 10,
+    photos: [
+      photoFile('a', values),
+      ...(second === undefined ? [] : [photoFile('b', second)]),
+    ],
+  });
+
+  const photoFile = (id: string, values: Record<string, unknown>) => ({
+    id, name: id + '.jpg', image: 'data:,' + id, accent: '#1fa94b', pushIn: true, glare: true,
+    buttons: [],
+    template: {
+      definitionId: 'rates',
+      values,
+      timing: { appearAt: 0, hideAt: null, enter: 'none', enterDuration: 0.6 },
+    },
+  });
+
+  const opened = (file: unknown): Project => {
+    const result = fromFile(file);
+    expect(result.ok).toBe(true);
+    return (result as { project: Project }).project;
+  };
+
+  it('gives it the one language it was written in', () => {
+    const project = opened(v2({}));
+    expect(project.locales.map(l => l.id)).toEqual(['en']);
+    expect(project.activeLocale).toBe('en');
+  });
+
+  it('carries the wording its owner typed over into that language', () => {
+    // Dropping it would mean a batch opens having quietly forgotten its offer.
+    expect(opened(v2({ ratesHead: 'Знайди свою', rates: ['200 €'] })).locales[0]!.overrides)
+      .toEqual({ ratesHead: 'Знайди свою', rates: ['200 €'] });
+  });
+
+  it('takes the first photo of the grid where two disagreed', () => {
+    const project = opened(v2({ ratesHead: 'Перше' }, { ratesHead: 'Друге' }));
+    expect(project.locales[0]!.overrides['ratesHead']).toBe('Перше');
+  });
+
+  it('leaves the template on the photo, having taken only the words off it', () => {
+    const layer = opened(v2({ ratesHead: 'x' })).photos[0]!.template!;
+    expect(layer.definitionId).toBe('rates');
+    expect('values' in layer).toBe(false);
+  });
+
+  it('defaults the sound it was written without', () => {
+    const project = opened(v2({}));
+    expect(project.voiceId).toBe('');
+    expect(project.modelId).toBe(DEFAULT_MODEL_ID);
+    expect(project.fitToVoice).toBe(true);
   });
 });

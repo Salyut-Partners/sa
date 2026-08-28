@@ -68,10 +68,13 @@ export function coalesceKey(command: Command): string | null {
       return `nudge/${command.index}/${command.by.x !== 0 ? 'x' : 'y'}`;
     case 'photo/patch':
       return `photo/${fields(command.patch)}`;
-    // Typing a headline arrives a letter at a time. Keyed by the field, so
-    // retyping the vacancy list afterwards is a step of its own.
-    case 'template/field':
-      return `template/${command.key}`;
+    // Typing a headline arrives a letter at a time. Keyed by the field and the
+    // language, so retyping the vacancy list afterwards — or the same field in
+    // German — is a step of its own.
+    case 'locale/field':
+      return `locale/${command.id}/${command.key}`;
+    case 'locale/patch':
+      return `locale/${command.id}/${fields(command.patch)}`;
     case 'template/patch':
       return `template/${fields(command.patch)}`;
     case 'project/patch':
@@ -107,6 +110,9 @@ export function isUndoable(command: Command): boolean {
     case 'photo/toggle':
     case 'selection/all':
     case 'selection/one':
+    // Which language is on screen is where the user is looking, not what they
+    // made — the same reason selection stays off the stack.
+    case 'locale/activate':
       return false;
     default:
       return true;

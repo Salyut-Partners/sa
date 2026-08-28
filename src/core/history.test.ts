@@ -132,6 +132,7 @@ describe('what is worth undoing', () => {
     expect(isUndoable({ type: 'photo/toggle', id: 'a' })).toBe(false);
     expect(isUndoable({ type: 'selection/all' })).toBe(false);
     expect(isUndoable({ type: 'selection/one' })).toBe(false);
+    expect(isUndoable({ type: 'locale/activate', id: 'de' })).toBe(false);
   });
 
   it('puts everything that changes a creative in it', () => {
@@ -143,13 +144,19 @@ describe('what is worth undoing', () => {
 
 describe('template edits on the stack', () => {
   it('folds a run of typing into one field into one step', () => {
-    expect(coalesceKey({ type: 'template/field', ids: ['a'], key: 'headline', value: 'Роб' }))
-      .toBe(coalesceKey({ type: 'template/field', ids: ['a'], key: 'headline', value: 'Робота' }));
+    expect(coalesceKey({ type: 'locale/field', id: 'en', key: 'headline', value: 'Роб' }))
+      .toBe(coalesceKey({ type: 'locale/field', id: 'en', key: 'headline', value: 'Робота' }));
   });
 
   it('holds two different fields apart', () => {
-    expect(coalesceKey({ type: 'template/field', ids: ['a'], key: 'headline', value: 'x' }))
-      .not.toBe(coalesceKey({ type: 'template/field', ids: ['a'], key: 'cta', value: 'x' }));
+    expect(coalesceKey({ type: 'locale/field', id: 'en', key: 'headline', value: 'x' }))
+      .not.toBe(coalesceKey({ type: 'locale/field', id: 'en', key: 'cta', value: 'x' }));
+  });
+
+  it('holds one field in two languages apart', () => {
+    // Undoing the German headline must not walk back the English one under it.
+    expect(coalesceKey({ type: 'locale/field', id: 'en', key: 'headline', value: 'x' }))
+      .not.toBe(coalesceKey({ type: 'locale/field', id: 'de', key: 'headline', value: 'x' }));
   });
 
   it('holds the two ends of a template window apart', () => {

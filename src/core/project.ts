@@ -1,8 +1,12 @@
 // Every change to the model goes through `apply`. One funnel means broadcast,
 // undo and persistence each need to understand one thing, not one per control.
 import { clampRect, nudgeRect } from './canvas.ts';
+import { newLocale } from './locales.ts';
 import { templateById } from './templates.ts';
-import type { ButtonLayer, FieldValue, Photo, Project, Rect, Timing } from './types.ts';
+import { DEFAULT_MODEL_ID } from './voice.ts';
+import type {
+  ButtonLayer, FieldValue, Locale, LocaleId, Photo, Project, Rect, Timing,
+} from './types.ts';
 
 export const DEFAULT_CANVAS = { width: 1080, height: 1920 } as const;
 export const DEFAULT_DURATION = 10;
@@ -35,8 +39,22 @@ export type PhotoPatch = Partial<Pick<Photo, 'name' | 'image' | 'accent' | 'push
 export type ButtonPatch =
   & Partial<Omit<ButtonLayer, 'id' | 'rect' | 'timing'>>
   & { rect?: Partial<Rect>; timing?: Partial<Timing> };
-export type ProjectPatch = Partial<Pick<Project, 'duration' | 'fps' | 'canvas'>>;
+export type ProjectPatch =
+  Partial<Pick<Project, 'duration' | 'fps' | 'canvas' | 'voiceId' | 'modelId' | 'fitToVoice'>>;
 export type TemplatePatch = { timing?: Partial<Timing> };
+export type LocalePatch = Partial<Pick<Locale, 'script' | 'voiceId' | 'include'>>;
+
+/**
+ * A language's worth of text, as a translator hands it back. One command carries
+ * every language at once so that translating a batch is one step to walk back,
+ * not one per geo.
+ */
+export interface LocaleWrite {
+  id: LocaleId;
+  script?: string;
+  /** Merged over what the locale already holds, key by key. */
+  overrides?: Readonly<Record<string, FieldValue>>;
+}
 
 /**
  * `ids` addresses a set of photos rather than one, and buttons are addressed by
@@ -59,8 +77,15 @@ export type Command =
   | { type: 'button/move'; ids: readonly string[]; from: number; to: number }
   | { type: 'button/duplicate'; ids: readonly string[]; index: number; id: string }
   | { type: 'template/set'; ids: readonly string[]; definitionId: string | null }
-  | { type: 'template/field'; ids: readonly string[]; key: string; value: FieldValue | null }
   | { type: 'template/patch'; ids: readonly string[]; patch: TemplatePatch }
+  | { type: 'locale/add'; id: LocaleId }
+  | { type: 'locale/remove'; id: LocaleId }
+  | { type: 'locale/activate'; id: LocaleId }
+  | { type: 'locale/patch'; id: LocaleId; patch: LocalePatch }
+  // A field is written on a language, not on a photo: the words are the offer,
+  // and the offer is the batch's. Null is a reset back to the dictionary.
+  | { type: 'locale/field'; id: LocaleId; key: string; value: FieldValue | null }
+  | { type: 'locale/write'; writes: readonly LocaleWrite[] }
   | { type: 'project/patch'; patch: ProjectPatch };
 
 export function createProject(): Project {
@@ -71,6 +96,16 @@ export function createProject(): Project {
     photos: [],
     selection: [],
     activeId: null,
+    // One language to start, because a project with none could not show a frame:
+    // every text on it comes out of a locale.
+    locales: [newLocale('en')],
+    activeLocale: 'en',
+    // Empty means "whichever the provider offers first" — resolved at export,
+    // where the list of voices actually is. Baking one id in here would ship a
+    // default that stops existing the day the account's plan changes.
+    voiceId: '',
+    modelId: DEFAULT_MODEL_ID,
+    fitToVoice: true,
   };
 }
 
@@ -321,33 +356,15 @@ export function apply(project: Project, command: Command): Project {
       if (info === null) return project;
       return mapPhotos(project, command.ids, p => ({
         ...p,
-        // The text and the window survive the swap. The three card versions are
-        // one offer in three layouts, and a swap that emptied the boxes would
-        // make trying the next one cost the offer.
+        // The window survives the swap, and so does the text — which is not
+        // here to survive, being the locale's. The three card versions are one
+        // offer in three layouts, and trying the next one must not cost the offer.
         template: {
           definitionId,
-          values: p.template?.values ?? {},
           timing: p.template?.timing ?? { ...info.defaultTiming },
         },
       }));
     }
-
-    case 'template/field':
-      return mapPhotos(project, command.ids, p => {
-        if (p.template === null) return p;
-        const { [command.key]: current, ...rest } = p.template.values;
-        // Null is a reset, and a reset is a forgetting: with the key gone the
-        // dictionary answers for the field again, in whatever locale is asked.
-        if (command.value === null) {
-          return current === undefined
-            ? p
-            : { ...p, template: { ...p.template, values: rest } };
-        }
-        return {
-          ...p,
-          template: { ...p.template, values: { ...p.template.values, [command.key]: command.value } },
-        };
-      });
 
     case 'template/patch':
       return mapPhotos(project, command.ids, p => {
@@ -358,10 +375,112 @@ export function apply(project: Project, command: Command): Project {
           : { ...p, template: { ...p.template, timing: { ...p.template.timing, ...timing } } };
       });
 
+    case 'locale/add': {
+      if (project.locales.some(l => l.id === command.id)) return project;
+      // Added languages open in front of the user: adding one is asking to see
+      // how the batch reads in it.
+      return {
+        ...project,
+        locales: [...project.locales, newLocale(command.id)],
+        activeLocale: command.id,
+      };
+    }
+
+    case 'locale/remove': {
+      // The last one cannot go. Every text on the frame is read out of a locale,
+      // and a project with none is a project that cannot draw itself.
+      if (project.locales.length <= 1) return project;
+      const locales = project.locales.filter(l => l.id !== command.id);
+      if (locales.length === project.locales.length) return project;
+      const activeLocale =
+        project.activeLocale === command.id ? locales[0]!.id : project.activeLocale;
+      return { ...project, locales, activeLocale };
+    }
+
+    case 'locale/activate':
+      return project.locales.some(l => l.id === command.id)
+        ? { ...project, activeLocale: command.id }
+        : project;
+
+    case 'locale/patch':
+      return mapLocales(project, [command.id], l => ({ ...l, ...command.patch }));
+
+    case 'locale/field':
+      return mapLocales(project, [command.id], l => {
+        const { [command.key]: current, ...rest } = l.overrides;
+        // Null is a reset, and a reset is a forgetting: with the key gone the
+        // dictionary answers for the field again — including when the language
+        // it answers in changes.
+        if (command.value === null) {
+          return current === undefined ? l : { ...l, overrides: rest };
+        }
+        return { ...l, overrides: { ...l.overrides, [command.key]: command.value } };
+      });
+
+    case 'locale/write': {
+      const byId = new Map(command.writes.map(w => [w.id, w]));
+      return mapLocales(project, [...byId.keys()], l => {
+        const write = byId.get(l.id)!;
+        return {
+          ...l,
+          script: write.script ?? l.script,
+          // Merged rather than replaced: a translation that came back for three
+          // of the four edited fields must not silently drop the fourth.
+          overrides: write.overrides === undefined
+            ? l.overrides
+            : { ...l.overrides, ...write.overrides },
+        };
+      });
+    }
+
     case 'project/patch':
       return { ...project, ...command.patch };
   }
 }
+
+/** `mapPhotos` for languages: same rule, same reason to keep identity on a no-op. */
+function mapLocales(
+  project: Project,
+  ids: readonly LocaleId[],
+  fn: (locale: Locale) => Locale,
+): Project {
+  const target = new Set(ids);
+  const locales = project.locales.map(l => (target.has(l.id) ? fn(l) : l));
+  return locales.every((l, i) => shallowSame(l, project.locales[i]!))
+    ? project
+    : { ...project, locales };
+}
+
+/**
+ * Whether a rewritten locale says the same thing as the one it replaced.
+ *
+ * `mapPhotos` can compare by identity because its callers return the photo
+ * unchanged when they have nothing to do. A locale is rewritten field by field —
+ * `{ ...l, ...patch }` is always a new object — so the comparison has to be over
+ * what it holds, or setting a script to the script it already had would land on
+ * the undo stack and re-serialise the batch.
+ */
+const shallowSame = (a: Locale, b: Locale): boolean =>
+  a === b || (
+    a.script === b.script && a.voiceId === b.voiceId && a.include === b.include &&
+    sameBag(a.overrides, b.overrides)
+  );
+
+const sameBag = (
+  a: Readonly<Record<string, FieldValue>>,
+  b: Readonly<Record<string, FieldValue>>,
+): boolean => {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every(k => {
+    const x = a[k];
+    const y = b[k];
+    if (Array.isArray(x) && Array.isArray(y)) {
+      return x.length === y.length && x.every((v, i) => v === y[i]);
+    }
+    return x === y;
+  });
+};
 
 export const photoById = (project: Project, id: string | null): Photo | null =>
   id === null ? null : (project.photos.find(p => p.id === id) ?? null);

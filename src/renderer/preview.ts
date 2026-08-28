@@ -2,9 +2,12 @@
 // editor: what a layer looks like — including in a catalogue — is the renderer's
 // business, and both libraries ask the same question.
 import { toPixels } from '../core/canvas.ts';
-import { DEFAULT_LOCALE } from '../core/phrasebook.ts';
+import { newLocale } from '../core/locales.ts';
 import { templateById, templateFields } from '../core/templates.ts';
-import type { Spec, Timing } from '../core/types.ts';
+import type { Locale, Spec, Timing } from '../core/types.ts';
+
+/** A chip is not a video. Nothing in it is spoken, so its sound is all empty. */
+const SILENT = { script: '', voiceId: '', modelId: '' } as const;
 
 /** Chip proportions: wide enough for a real label, short enough to sit in a card. */
 export const PREVIEW_CANVAS = { width: 560, height: 96 };
@@ -47,6 +50,8 @@ export function previewSpec(
       timing: { appearAt: 0, hideAt: null, enter: 'none', enterDuration: 0 },
     }],
     template: null,
+    locale: 'en',
+    ...SILENT,
   };
 }
 
@@ -60,8 +65,15 @@ export function previewSpec(
  */
 export function templatePreviewSpec(
   definitionId: string,
-  options: { canvas: { width: number; height: number }; image: string; color: string },
+  options: {
+    canvas: { width: number; height: number };
+    image: string;
+    color: string;
+    /** The language being worked in, so a chip reads as the frame would. */
+    locale?: Locale;
+  },
 ): Spec {
+  const locale = options.locale ?? newLocale('en');
   // A chip plays the entrance rather than sitting on the finished frame: the
   // three card versions carry the same words in three layouts, and the way each
   // one arrives is half of what tells them apart.
@@ -76,9 +88,11 @@ export function templatePreviewSpec(
     buttons: [],
     template: templateById(definitionId) === null ? null : {
       definitionId,
-      fields: templateFields({ definitionId, values: {}, timing }, DEFAULT_LOCALE),
+      fields: templateFields(definitionId, locale),
       color: options.color,
       timing,
     },
+    locale: locale.id,
+    ...SILENT,
   };
 }

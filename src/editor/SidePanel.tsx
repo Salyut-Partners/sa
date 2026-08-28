@@ -1,3 +1,5 @@
+import type { BatchPlan } from '../core/batch.ts';
+import { activeLocale, editedFieldCount, LOCALE_NAMES } from '../core/locales.ts';
 import { defaultButton, nextSlot, photoById, type ButtonPatch, type Command } from '../core/project.ts';
 import {
   buttonCount, buttonField, buttonRectField, buttonTimingField, photoField, templateChoice,
@@ -5,15 +7,20 @@ import {
 } from '../core/selection.ts';
 import type { Project } from '../core/types.ts';
 import { BUTTON_STYLES, FONTS } from '../renderer/index.ts';
+import type { ExportRun } from './export.ts';
+import { ExportPanel } from './ExportPanel.tsx';
 import { FilePicker } from './FilePicker.tsx';
 import type { ImportReport } from './import-files.ts';
 import {
-  CheckField, ColorField, NumberField, OptionalNumberField, SelectField, TextField,
+  CheckField, ColorField, NumberField, SelectField, TextField,
 } from './fields.tsx';
+import { describeTranslator, type VoiceCatalogue } from './server.ts';
 import { StyleLibrary } from './StylePreview.tsx';
 import { TemplateFields } from './TemplateFields.tsx';
 import { TemplateLibrary } from './TemplatePreview.tsx';
 import { TimingFields } from './TimingFields.tsx';
+import type { Translator } from './translate.ts';
+import { VoicePanel } from './VoicePanel.tsx';
 
 interface Props {
   project: Project;
@@ -23,9 +30,10 @@ interface Props {
   onFiles: (files: FileList | null) => void;
   onReplace: (files: FileList | null) => void;
   report: ImportReport;
-  status: string;
-  busy: boolean;
-  onExport: () => void;
+  catalogue: VoiceCatalogue | null;
+  translator: Translator;
+  run: ExportRun;
+  onExportOne: () => BatchPlan | null;
 }
 
 const FONT_OPTIONS = Object.values(FONTS).map(f => ({ id: f.id, label: f.label }));
@@ -38,6 +46,8 @@ export function SidePanel(props: Props) {
   const many = targets.length > 1;
 
   const button = photo && activeButton !== null ? photo.buttons[activeButton] ?? null : null;
+  /** Empty unless the server has told us there is no translator key at all. */
+  const noTranslator = describeTranslator(props.catalogue);
 
   const patchButton = (patch: ButtonPatch): void => {
     if (activeButton === null) return;
@@ -138,6 +148,7 @@ export function SidePanel(props: Props) {
               selectedId={templateChoice(project, targets)}
               canvas={project.canvas}
               color={photo.accent}
+              locale={activeLocale(project)}
               onPick={definitionId =>
                 dispatch({ type: 'template/set', ids: targets, definitionId })}
             />
@@ -162,9 +173,30 @@ export function SidePanel(props: Props) {
                 </div>
               </div>
 
+              <div className="group">
+                <div className="lab">
+                  Тексти
+                  <span className="val">{LOCALE_NAMES[project.activeLocale]}</span>
+                </div>
+                <div className="note">
+                  Текст належить мові, не фото: правка лягає на всю пачку в цій мові.
+                </div>
+                <button
+                  className="wide"
+                  style={{ marginTop: 8 }}
+                  disabled={
+                    props.translator.busy || project.locales.length < 2 || noTranslator !== ''
+                  }
+                  onClick={props.translator.translateFields}
+                >
+                  Перекласти правки на решту мов
+                  <span className="val"> {editedFieldCount(project)}</span>
+                </button>
+                {noTranslator === '' ? null : <div className="warn">{noTranslator}</div>}
+              </div>
+
               <TemplateFields
                 project={project}
-                targets={targets}
                 definitionId={photo.template.definitionId}
                 dispatch={dispatch}
               />
@@ -356,10 +388,21 @@ export function SidePanel(props: Props) {
 
           <hr />
 
-          <button className="primary" disabled={props.busy} onClick={props.onExport}>
-            Експортувати MP4
-          </button>
-          <div className="note">{props.status}</div>
+          <VoicePanel
+            project={project}
+            dispatch={dispatch}
+            catalogue={props.catalogue}
+            translator={props.translator}
+          />
+          {props.translator.note === '' ? null : (
+            <div className={props.translator.failed ? 'error' : 'note'}>
+              {props.translator.note}
+            </div>
+          )}
+
+          <hr />
+
+          <ExportPanel project={project} run={props.run} onExportOne={props.onExportOne} />
         </>
       ) : null}
     </aside>

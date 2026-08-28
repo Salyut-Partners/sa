@@ -1,8 +1,8 @@
 // The one place a Project turns into something renderable. The renderer never
 // sees a Project, so everything the model knows and the renderer must not care
-// about — selection, ids, percent geometry — stops here.
+// about — selection, ids, percent geometry, the dictionary — stops here.
 import { toPixels } from './canvas.ts';
-import { DEFAULT_LOCALE } from './phrasebook.ts';
+import { activeLocale, localeById, newLocale } from './locales.ts';
 import { photoById } from './project.ts';
 import { templateById, templateFields } from './templates.ts';
 import type { LocaleId, Project, ButtonSpec, Spec, TemplateSpec } from './types.ts';
@@ -10,10 +10,19 @@ import type { LocaleId, Project, ButtonSpec, Spec, TemplateSpec } from './types.
 export function buildSpec(
   project: Project,
   photoId: string,
-  locale: LocaleId = DEFAULT_LOCALE,
+  localeId?: LocaleId,
 ): Spec | null {
   const photo = photoById(project, photoId);
   if (photo === null) return null;
+
+  // A language the project does not carry still builds — as a fresh one: the
+  // dictionary alone, no edits, no script. That is what a library chip wants,
+  // and it keeps a stale id in a saved file from blanking a frame. It must not
+  // borrow from the language on screen: a Spec for Italian carrying the German
+  // script would ship a video speaking the wrong language.
+  const locale = localeId === undefined
+    ? activeLocale(project)
+    : localeById(project, localeId) ?? newLocale(localeId);
 
   const buttons: ButtonSpec[] = photo.buttons.map(b => ({
     styleId: b.styleId,
@@ -31,7 +40,7 @@ export function buildSpec(
   const template: TemplateSpec | null =
     layer === null || templateById(layer.definitionId) === null ? null : {
       definitionId: layer.definitionId,
-      fields: templateFields(layer, locale),
+      fields: templateFields(layer.definitionId, locale),
       color: photo.accent,
       timing: { ...layer.timing },
     };
@@ -45,5 +54,12 @@ export function buildSpec(
     glare: photo.glare,
     template,
     buttons,
+    locale: locale.id,
+    script: locale.script.trim(),
+    // A language that has not picked its own speaks with the project's, which
+    // may itself be empty — "whichever the provider offers first", resolved at
+    // synthesis where the list of voices is.
+    voiceId: locale.voiceId ?? project.voiceId,
+    modelId: project.modelId,
   };
 }

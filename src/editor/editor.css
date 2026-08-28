@@ -229,3 +229,49 @@ select.mixed { color: var(--warn); font-style: italic; }
 
 textarea { resize: vertical; min-height: 60px; line-height: 1.4; }
 textarea.mixed::placeholder { color: var(--warn); font-style: italic; }
+
+/* The languages strip over the grid. It sits with the transport rather than in
+   the panel because switching language redraws every cell — this is a control
+   over the batch, not over the creative the panel is editing. */
+.locale-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  width: 100%; max-width: 1100px; flex: none;
+  padding: 8px 14px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel);
+}
+.locale-bar .lab { margin-bottom: 0; flex: none; }
+.locale-bar .hint { margin-left: auto; font-size: 12px; }
+
+.locale-chip {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line); border-radius: 7px; background: #0b0b10;
+  padding: 3px 6px 3px 8px;
+}
+.locale-chip.on { border-color: var(--accent); }
+/* A language kept out of the release still edits and still previews — it just
+   is not going anywhere yet, and reads that way. */
+.locale-chip.out { opacity: .5; }
+.locale-chip .ship { display: flex; align-items: center; cursor: pointer; }
+.locale-chip .ship input { accent-color: var(--accent); }
+.locale-chip .pick {
+  border: none; background: none; padding: 3px 2px; font-size: 13px;
+  display: flex; align-items: center; gap: 5px;
+}
+.locale-chip .voiced { color: var(--accent); font-size: 11px; }
+.locale-chip .ic {
+  border: none; background: none; color: var(--muted); padding: 0 2px;
+  font-size: 13px; line-height: 1; flex: none;
+}
+.locale-chip .ic:hover:not(:disabled) { color: var(--danger); }
+.locale-chip .ic:disabled { opacity: .25; }
+.add-locale { width: auto; padding: 6px 8px; font-size: 13px; }
+
+/* Progress: the bar answers "how far", the line under it answers "on what". */
+.export-progress .bar {
+  height: 6px; border-radius: 3px; background: #0b0b10; overflow: hidden;
+  border: 1px solid var(--line);
+}
+.export-progress .bar .fill {
+  height: 100%; background: var(--accent); transition: width .25s linear;
+}
+.export-progress .note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

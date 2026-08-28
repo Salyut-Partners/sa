@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { planOne, type BatchPlan } from '../core/batch.ts';
 import {
   canRedo, canUndo, coalesceKey, historyOf, isUndoable, record, redo, undo, type History,
 } from '../core/history.ts';
+import { activeLocale } from '../core/locales.ts';
 import {
-  apply, createProject, MAX_PHOTOS, photoById, photoTimings, type Command,
+  apply, createProject, MAX_PHOTOS, photoTimings, type Command,
 } from '../core/project.ts';
 import { buildSpec } from '../core/spec.ts';
 import { posterTime } from '../core/timing.ts';
@@ -11,12 +13,16 @@ import type { Photo, Project, Spec } from '../core/types.ts';
 import { ButtonBoxes } from './ButtonBoxes.tsx';
 import { Clock } from './clock.ts';
 import { CreativeCell } from './CreativeCell.tsx';
+import { useExport } from './export.ts';
 import { FilePicker } from './FilePicker.tsx';
 import { importFiles, importReplacement, NOTHING_IMPORTED, type ImportReport } from './import-files.ts';
+import { LocaleBar } from './LocaleBar.tsx';
 import { explainRefusal, openProjectFile, saveProjectFile } from './project-file.ts';
+import { fetchVoices, type VoiceCatalogue } from './server.ts';
 import { SidePanel } from './SidePanel.tsx';
 import { autosaver, loadAutosave, type SaveState } from './store.ts';
 import { Timeline } from './Timeline.tsx';
+import { useTranslator } from './translate.ts';
 
 /** Width of one grid cell in CSS pixels — four of these fit the work area. */
 const CELL_WIDTH = 260;
@@ -41,8 +47,8 @@ export function App() {
   const [activeButton, setActiveButton] = useState<number | null>(null);
   const [report, setReport] = useState<ImportReport>(NOTHING_IMPORTED);
   const [status, setStatus] = useState('');
-  const [busy, setBusy] = useState(false);
   const [dropping, setDropping] = useState(false);
+  const [catalogue, setCatalogue] = useState<VoiceCatalogue | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
 
   const project = history.present;
@@ -52,8 +58,20 @@ export function App() {
   const latest = useRef(project);
   latest.current = project;
 
-  /** The project-wide values that reach every Spec without touching a photo. */
-  const settings = `${project.canvas.width}x${project.canvas.height}/${project.fps}/${project.duration}`;
+  /**
+   * The project-wide values that reach every Spec without touching a photo.
+   *
+   * The language and its edits are two of them, and they have to be here rather
+   * than left to `project.locales`: the cell cache below is keyed by photo
+   * identity, and retyping a headline changes no photo at all. Without the words
+   * in this key every frame would keep the text it was built with.
+   */
+  const settings =
+    `${project.canvas.width}x${project.canvas.height}/${project.fps}/${project.duration}` +
+    `/${project.activeLocale}/${JSON.stringify(activeLocale(project).overrides)}` +
+    // Not on any frame, but they are in the file — and the autosave watches this
+    // string, so leaving them out means the model and the voice never reach disk.
+    `/${project.voiceId}/${project.modelId}/${project.fitToVoice}`;
 
   const clock = useMemo(() => new Clock(project.duration), []);
   clock.duration = project.duration;
@@ -88,7 +106,14 @@ export function App() {
     void loadAutosave().then(saved => {
       if (saved !== null) setHistory(historyOf(saved));
     });
+    // Asked once. Which voices an account has does not change while the editor
+    // is open, and a failure here is not a reason to stop editing — the panel
+    // simply offers the project default and says nothing about the rest.
+    void fetchVoices().then(setCatalogue).catch(() => setCatalogue(null));
   }, []);
+
+  const run = useExport();
+  const translator = useTranslator(project, dispatch);
 
   const store = useMemo(() => autosaver(setSaveState), []);
   // Selection is not part of a saved project, so clicking through the batch must
@@ -97,7 +122,7 @@ export function App() {
     store.save(project);
     // Watched on what a saved file actually holds. Selection is not in it, so
     // clicking through a batch must not re-serialise tens of megabytes.
-  }, [project.photos, settings, store]);
+  }, [project.photos, project.locales, settings, store]);
   useEffect(() => store.stop, [store]);
 
   const scale = CELL_WIDTH / project.canvas.width;
@@ -217,46 +242,11 @@ export function App() {
     }
   };
 
-  const onExport = async (): Promise<void> => {
-    if (project.activeId === null) return;
-    const spec = buildSpec(project, project.activeId);
-    const photo = photoById(project, project.activeId);
-    if (!spec || !photo) return;
-
-    setBusy(true);
-    const startedAt = Date.now();
-    const tick = setInterval(
-      () => setStatus(`Рендер… ${((Date.now() - startedAt) / 1000).toFixed(0)} с`),
-      250,
-    );
-    try {
-      const response = await fetch('/api/render', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(spec),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({ error: response.statusText }));
-        throw new Error(body.error ?? response.statusText);
-      }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = photo.name.replace(/\.[^.]+$/, '') + '.mp4';
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      setStatus(
-        `Готово за ${((Date.now() - startedAt) / 1000).toFixed(1)} с · ` +
-        `${(blob.size / 1_048_576).toFixed(1)} МБ`,
-      );
-    } catch (e) {
-      setStatus('Помилка: ' + (e as Error).message);
-    } finally {
-      clearInterval(tick);
-      setBusy(false);
-    }
-  };
+  /** The one creative on screen, planned exactly as a release plans eighty. */
+  const onExportOne = useCallback((): BatchPlan | null => {
+    const current = latest.current;
+    return current.activeId === null ? null : planOne(current, current.activeId);
+  }, []);
 
   return (
     <div
@@ -299,6 +289,7 @@ export function App() {
           </button>
         </div>
         <div className="spacer" />
+        {status === '' ? null : <div className="hint">{status}</div>}
         <div className={'save-state ' + saveState}>
           {saveState === 'failed'
             ? 'не зберігається — збережіть у файл'
@@ -358,6 +349,7 @@ export function App() {
               ))}
             </div>
           )}
+          {cells.length > 0 ? <LocaleBar project={project} dispatch={dispatch} /> : null}
           {cells.length > 0 ? <Timeline clock={clock} duration={project.duration} /> : null}
         </section>
 
@@ -369,9 +361,10 @@ export function App() {
           onFiles={onFiles}
           onReplace={onReplace}
           report={report}
-          status={status}
-          busy={busy}
-          onExport={onExport}
+          catalogue={catalogue}
+          translator={translator}
+          run={run}
+          onExportOne={onExportOne}
         />
       </main>
     </div>

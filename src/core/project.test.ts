@@ -473,8 +473,6 @@ describe('selection', () => {
 });
 
 describe('template commands', () => {
-  const all = (p: Project): string[] => p.photos.map(x => x.id);
-
   it('starts a photo with no template — a creative may be buttons alone', () => {
     expect(withPhotos('a').photos[0]!.template).toBeNull();
   });
@@ -485,13 +483,12 @@ describe('template commands', () => {
     });
     const layer = p.photos[0]!.template!;
     expect(layer.definitionId).toBe('jobs-card-pills');
-    expect(layer.values).toEqual({});
     expect(layer.timing).toEqual(templateById('jobs-card-pills')!.defaultTiming);
   });
 
   it('puts one template on the whole selection', () => {
     const p = apply(withPhotos('a', 'b'), {
-      type: 'template/set', ids: all(withPhotos('a', 'b')), definitionId: 'rates',
+      type: 'template/set', ids: ['a', 'b'], definitionId: 'rates',
     });
     expect(p.photos.map(x => x.template?.definitionId)).toEqual(['rates', 'rates']);
   });
@@ -509,50 +506,15 @@ describe('template commands', () => {
     expect(p.photos[0]!.template).toBeNull();
   });
 
-  it('keeps the text and the timing when the layout is swapped', () => {
+  it('keeps the timing when the layout is swapped', () => {
     // The three card versions are one offer in three layouts: changing which one
-    // is on the frame is not a reason to retype the offer.
+    // is on the frame is not a reason to retype the offer or re-time the panel.
     let p = apply(withPhotos('a'), {
       type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills',
     });
-    p = apply(p, { type: 'template/field', ids: ['a'], key: 'headline', value: 'Робота в порту' });
     p = apply(p, { type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 2 } } });
     p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-sheet' });
-
-    expect(p.photos[0]!.template!.values['headline']).toBe('Робота в порту');
     expect(p.photos[0]!.template!.timing.appearAt).toBe(2);
-  });
-
-  it('writes a field on every selected photo', () => {
-    let p = apply(withPhotos('a', 'b'), { type: 'selection/all' });
-    p = apply(p, { type: 'template/set', ids: p.selection, definitionId: 'jobs-card-pills' });
-    p = apply(p, { type: 'template/field', ids: p.selection, key: 'cta', value: 'ДІЗНАТИСЬ' });
-    expect(p.photos.map(x => x.template!.values['cta'])).toEqual(['ДІЗНАТИСЬ', 'ДІЗНАТИСЬ']);
-  });
-
-  it('writes a list field as a list', () => {
-    let p = apply(withPhotos('a'), {
-      type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills',
-    });
-    p = apply(p, { type: 'template/field', ids: ['a'], key: 'jobs', value: ['Охорона', 'Прибирання'] });
-    expect(p.photos[0]!.template!.values['jobs']).toEqual(['Охорона', 'Прибирання']);
-  });
-
-  it('resets a field by forgetting it, so the dictionary answers for it again', () => {
-    let p = apply(withPhotos('a'), {
-      type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills',
-    });
-    p = apply(p, { type: 'template/field', ids: ['a'], key: 'cta', value: 'МОЄ' });
-    p = apply(p, { type: 'template/field', ids: ['a'], key: 'cta', value: null });
-    expect('cta' in p.photos[0]!.template!.values).toBe(false);
-  });
-
-  it('leaves a photo without a template alone when a field is broadcast', () => {
-    let p = apply(withPhotos('a', 'b'), { type: 'selection/all' });
-    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'rates' });
-    p = apply(p, { type: 'template/field', ids: p.selection, key: 'linkLine', value: 'тиць' });
-    expect(p.photos[0]!.template!.values['linkLine']).toBe('тиць');
-    expect(p.photos[1]!.template).toBeNull();
   });
 
   it('patches the timing of the selection, merging rather than replacing', () => {
@@ -567,9 +529,152 @@ describe('template commands', () => {
 
   it('gives the same project back when nothing was there to change', () => {
     const before = withPhotos('a');
-    expect(apply(before, { type: 'template/field', ids: ['a'], key: 'cta', value: 'x' }))
-      .toBe(before);
     expect(apply(before, { type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 1 } } }))
+      .toBe(before);
+  });
+});
+
+describe('locale commands', () => {
+  it('starts in one language, which is the one on screen', () => {
+    const p = createProject();
+    expect(p.locales.map(l => l.id)).toEqual(['en']);
+    expect(p.activeLocale).toBe('en');
+    expect(p.locales[0]).toEqual({
+      id: 'en', script: '', voiceId: null, include: true, overrides: {},
+    });
+  });
+
+  it('adds a language and shows it, because adding one is asking to see it', () => {
+    const p = apply(createProject(), { type: 'locale/add', id: 'de' });
+    expect(p.locales.map(l => l.id)).toEqual(['en', 'de']);
+    expect(p.activeLocale).toBe('de');
+  });
+
+  it('ignores a language the project already carries', () => {
+    const before = apply(createProject(), { type: 'locale/add', id: 'de' });
+    expect(apply(before, { type: 'locale/add', id: 'de' })).toBe(before);
+  });
+
+  it('removes a language', () => {
+    let p = apply(createProject(), { type: 'locale/add', id: 'de' });
+    p = apply(p, { type: 'locale/remove', id: 'de' });
+    expect(p.locales.map(l => l.id)).toEqual(['en']);
+  });
+
+  it('falls back to another language when the one on screen is removed', () => {
+    let p = apply(createProject(), { type: 'locale/add', id: 'de' });
+    expect(p.activeLocale).toBe('de');
+    p = apply(p, { type: 'locale/remove', id: 'de' });
+    expect(p.activeLocale).toBe('en');
+  });
+
+  it('will not remove the last one — every text on the frame is read out of it', () => {
+    const before = createProject();
+    expect(apply(before, { type: 'locale/remove', id: 'en' })).toBe(before);
+  });
+
+  it('activates only a language the project carries', () => {
+    const before = createProject();
+    expect(apply(before, { type: 'locale/activate', id: 'pl' })).toBe(before);
+    expect(apply(apply(before, { type: 'locale/add', id: 'pl' }), {
+      type: 'locale/activate', id: 'en',
+    }).activeLocale).toBe('en');
+  });
+
+  it('writes the script, the voice and whether it goes out', () => {
+    let p = apply(createProject(), { type: 'locale/patch', id: 'en', patch: { script: 'Привіт' } });
+    p = apply(p, { type: 'locale/patch', id: 'en', patch: { voiceId: 'lily', include: false } });
+    expect(p.locales[0]).toMatchObject({ script: 'Привіт', voiceId: 'lily', include: false });
+  });
+
+  it('gives the same project back when a patch changes nothing', () => {
+    const before = apply(createProject(), { type: 'locale/patch', id: 'en', patch: { script: 'x' } });
+    expect(apply(before, { type: 'locale/patch', id: 'en', patch: { script: 'x' } })).toBe(before);
+    expect(apply(before, { type: 'locale/patch', id: 'pl', patch: { script: 'y' } })).toBe(before);
+  });
+});
+
+describe('the words of the offer', () => {
+  const twoLanguages = (): Project => apply(createProject(), { type: 'locale/add', id: 'de' });
+
+  it('writes a field on the language it was typed in and nowhere else', () => {
+    const p = apply(twoLanguages(), { type: 'locale/field', id: 'de', key: 'cta', value: 'JETZT' });
+    expect(p.locales.map(l => l.overrides['cta'])).toEqual([undefined, 'JETZT']);
+  });
+
+  it('writes a list field as a list', () => {
+    const p = apply(createProject(), {
+      type: 'locale/field', id: 'en', key: 'jobs', value: ['Security', 'Cleaning'],
+    });
+    expect(p.locales[0]!.overrides['jobs']).toEqual(['Security', 'Cleaning']);
+  });
+
+  it('resets a field by forgetting it, so the dictionary answers for it again', () => {
+    let p = apply(createProject(), { type: 'locale/field', id: 'en', key: 'cta', value: 'МОЄ' });
+    p = apply(p, { type: 'locale/field', id: 'en', key: 'cta', value: null });
+    expect('cta' in p.locales[0]!.overrides).toBe(false);
+  });
+
+  it('is untouched by which photo or which template is on screen', () => {
+    // The offer is the batch's. Swapping a photo's layout must not lose the words.
+    let p = apply(withPhotos('a'), { type: 'locale/field', id: 'en', key: 'cta', value: 'МОЄ' });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills' });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: null });
+    expect(p.locales[0]!.overrides['cta']).toBe('МОЄ');
+  });
+
+  it('gives the same project back when a reset had nothing to forget', () => {
+    const before = createProject();
+    expect(apply(before, { type: 'locale/field', id: 'en', key: 'cta', value: null })).toBe(before);
+    expect(apply(before, { type: 'locale/field', id: 'pl', key: 'cta', value: 'x' })).toBe(before);
+  });
+});
+
+describe('a translation arriving', () => {
+  const threeLanguages = (): Project =>
+    ['de', 'pl'].reduce(
+      (p, id) => apply(p, { type: 'locale/add', id: id as 'de' }),
+      apply(createProject(), { type: 'locale/field', id: 'en', key: 'cta', value: 'LEARN MORE' }),
+    );
+
+  it('lands on every language in one step, so one undo walks it back', () => {
+    const p = apply(threeLanguages(), {
+      type: 'locale/write',
+      writes: [
+        { id: 'de', overrides: { cta: 'MEHR ERFAHREN' } },
+        { id: 'pl', overrides: { cta: 'DOWIEDZ SIĘ' } },
+      ],
+    });
+    expect(p.locales.map(l => l.overrides['cta']))
+      .toEqual(['LEARN MORE', 'MEHR ERFAHREN', 'DOWIEDZ SIĘ']);
+  });
+
+  it('merges rather than replacing, so a field it had nothing to say about survives', () => {
+    let p = apply(threeLanguages(), {
+      type: 'locale/field', id: 'de', key: 'headline', value: 'Von Hand',
+    });
+    p = apply(p, { type: 'locale/write', writes: [{ id: 'de', overrides: { cta: 'MEHR' } }] });
+    expect(p.locales[1]!.overrides).toEqual({ headline: 'Von Hand', cta: 'MEHR' });
+  });
+
+  it('carries scripts the same way', () => {
+    const p = apply(threeLanguages(), {
+      type: 'locale/write',
+      writes: [{ id: 'de', script: 'Flughafenpersonal gesucht.' }, { id: 'pl', script: 'Praca.' }],
+    });
+    expect(p.locales.map(l => l.script)).toEqual(['', 'Flughafenpersonal gesucht.', 'Praca.']);
+  });
+
+  it('leaves the overrides alone when only a script came back', () => {
+    const p = apply(threeLanguages(), {
+      type: 'locale/write', writes: [{ id: 'en', script: 'Hello.' }],
+    });
+    expect(p.locales[0]!.overrides['cta']).toBe('LEARN MORE');
+  });
+
+  it('ignores a language the project does not carry', () => {
+    const before = threeLanguages();
+    expect(apply(before, { type: 'locale/write', writes: [{ id: 'fr', script: 'Bonjour' }] }))
       .toBe(before);
   });
 });
