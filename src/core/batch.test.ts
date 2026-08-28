@@ -45,6 +45,17 @@ describe('planBatch', () => {
     expect(planBatch(noLanguage).total).toBe(0);
     expect(planBatch(noLanguage).groups).toEqual([]);
   });
+
+  it('numbers by grid position, not by position in the selection', () => {
+    // Otherwise the same creative gets a different name depending on how many
+    // photos happen to be selected, and two exports of one job disagree.
+    const project = apply(batchOf('a.jpg', 'b.jpg', 'c.jpg'), {
+      type: 'photo/activate', id: 'p2',
+    });
+    expect(planBatch(project).groups.flatMap(g => g.items).map(i => i.name))
+      .toEqual(['03-c-en.mp4']);
+    expect(planOne(project, 'p2').groups[0]!.items[0]!.name).toBe('03-c-en.mp4');
+  });
 });
 
 describe('planBatch and the shared video', () => {
@@ -70,7 +81,11 @@ describe('planBatch and the shared video', () => {
     // group takes the result — which is only sound to say because the key hashes
     // exactly what reaches the frame.
     expect(group.spec.locale).toBe('en');
-    expect(group.items.map(i => i.spec.script)).toEqual(['Hello', 'Hallo']);
+    // Each item keeps its own language's words. The group carries the picture
+    // and nothing else, so a soundtrack landing on the wrong file is the one way
+    // this grouping could go wrong quietly.
+    expect(group.items.map(i => `${i.locale}: ${i.sound.script}`))
+      .toEqual(['en: Hello', 'de: Hallo']);
   });
 
   it('splits languages whose words reach the frame', () => {
@@ -103,6 +118,20 @@ describe('planBatch and the shared video', () => {
     expect(plan.groups[0]!.items.map(i => i.name)).toEqual(['01-a-en.mp4', '02-b-en.mp4']);
   });
 
+  it('carries the photo once per group, not once per file', () => {
+    // Otherwise a batch of 12 photos in 7 languages posts 84 copies of the same
+    // pictures — tens of megabytes of request body for a dozen images.
+    const onWire = (project: Project) =>
+      JSON.stringify(planBatch(project).groups).split('data:image/jpeg;base64,').length - 1;
+    // Two languages over one picture: two files, one image on the wire.
+    expect(onWire(twoSilentLanguages())).toBe(1);
+    // And it stays one per group, not one per group plus one per file: two
+    // pictures in two languages is four files and still only two images.
+    const four = script(withLocales(batchOf('a.jpg', 'b.jpg'), 'de'), 'de', 'Hallo');
+    expect(planBatch(four).total).toBe(4);
+    expect(onWire(four)).toBe(2);
+  });
+
   it('splits a difference the user made on one photo only', () => {
     let project = batchOf('a.jpg', 'a.jpg');
     project = apply(project, {
@@ -133,9 +162,10 @@ describe('planOne', () => {
   });
 
   it('goes through the same plan a release does, so there is one render path', () => {
-    const plan = planOne(batchOf('a.jpg'), 'p0');
-    expect(plan.renders).toBe(1);
-    expect(plan.groups[0]!.spec).toBe(plan.groups[0]!.items[0]!.spec);
+    // One photo in one language is a release of one, and this says so exactly:
+    // the same groups, the same names, the same sound reaching the same queue.
+    const project = batchOf('a.jpg');
+    expect(planOne(project, 'p0')).toEqual(planBatch(project));
   });
 
   it('ignores a language taken off the release — this is not the release', () => {

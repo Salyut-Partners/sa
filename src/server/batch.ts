@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { groupDuration, type BatchGroup, type BatchItem } from '../core/batch.ts';
+import { groupDuration, type BatchGroup, type BatchItem, type Sound } from '../core/batch.ts';
 import { clamp } from '../core/canvas.ts';
 import { mux, probeDuration } from './ffmpeg.ts';
 import { CancelledError, renderSpecToFile } from './render.ts';
@@ -131,6 +131,21 @@ function validate(request: unknown): BatchRequest {
   for (const group of groups) {
     if (!group?.spec || !Array.isArray(group.items) || group.items.length === 0) {
       throw new BadRequestError('пошкоджений план експорту');
+    }
+    // Every item is a file name and three fields of speech. Checked to the
+    // field rather than for presence: a half-built sound gets no further than
+    // the first `script.trim()`, which happens after the group has rendered and
+    // files are already on disk.
+    for (const item of group.items) {
+      const sound = item?.sound as Partial<Sound> | undefined;
+      if (
+        typeof item?.name !== 'string' || item.name === ''
+        || typeof sound?.script !== 'string'
+        || typeof sound.voiceId !== 'string'
+        || typeof sound.modelId !== 'string'
+      ) {
+        throw new BadRequestError('пошкоджений план експорту');
+      }
     }
   }
   const duration = Number(body?.duration);
@@ -319,7 +334,7 @@ async function renderGroup(job: Job, group: BatchGroup, ctx: GroupContext): Prom
 
 /** The speech for one item, or null when it has nothing to say. */
 async function voiceFor(job: Job, item: BatchItem, ctx: GroupContext): Promise<Clip | null> {
-  const { script, voiceId, modelId } = item.spec;
+  const { script, voiceId, modelId } = item.sound;
   // An empty script is a silent video, not a missing one — no key needed, no
   // charge, no separate mode.
   if (script.trim() === '') return null;

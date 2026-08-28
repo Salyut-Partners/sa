@@ -103,6 +103,12 @@ that reaches the frame, and `planBatch` groups by it, so two files that share a
 key share a video. Adding a visual field to `Spec` means adding it to
 `visualParts` — otherwise a real difference silently ships the same video twice.
 
+That grouping is also what keeps the export request small: the `Spec` — and so
+the photo, as a data URL — is written once per group, and each `BatchItem` in it
+carries only the sound that separates it from its neighbours. Which is the same
+obligation read from the other end: adding a *sound* field to `Spec` means adding
+it to `Sound` in `core/batch.ts`, or it never reaches the server at all.
+
 ## Checks
 
 ```sh

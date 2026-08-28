@@ -10,21 +10,35 @@ import { buildSpec } from './spec.ts';
 import type { LocaleId, Project, Spec } from './types.ts';
 import { visualKey } from './visual-key.ts';
 
+/**
+ * All that separates one file in a group from the one beside it: its sound.
+ *
+ * The three fields the server needs to synthesize speech, and no more. The
+ * picture lives on the group, once, because that is what a group is.
+ */
+export interface Sound {
+  script: string;
+  voiceId: string;
+  modelId: string;
+}
+
 /** One file that will come out of the export. */
 export interface BatchItem {
   photoId: string;
   locale: LocaleId;
   /** What it is called inside the archive. */
   name: string;
-  spec: Spec;
+  sound: Sound;
 }
 
 /**
  * A set of files that share one video.
  *
- * `spec` is walked frame by frame, once. Every item then takes that video and
- * has its own soundtrack laid over it — which is only sound because the key is a
- * hash of exactly what reaches the frame.
+ * `spec` is walked frame by frame, once, and it is the only place the photo is
+ * written down — a batch of twelve photos in seven languages posts a dozen
+ * images, not eighty-four. Every item then takes that video and has its own
+ * soundtrack laid over it, which is only sound to say because the key is a hash
+ * of exactly what reaches the frame.
  */
 export interface BatchGroup {
   key: string;
@@ -57,12 +71,13 @@ export const VOICE_TAIL = 0.6;
 export function planBatch(project: Project): BatchPlan {
   const locales = releaseLocales(project).map(l => l.id);
   const chosen = new Set(project.selection);
-  // Grid order, not click order: the archive is numbered by where a photo sits
-  // in the batch, and that has to be stable across two exports of the same work.
-  const selected = project.photos.filter(p => chosen.has(p.id));
-  return group(selected.flatMap(
-    (photo, index) => locales.map(locale => itemFor(project, photo.id, photo.name, index, locale)),
-  ));
+  // Numbered by where a photo sits in the whole batch, not by where it sits in
+  // the selection. Selecting one photo of four must not renumber it 01, or the
+  // same creative comes out under two names from the two export buttons.
+  return group(project.photos.flatMap((photo, index) =>
+    chosen.has(photo.id)
+      ? locales.map(locale => itemFor(project, photo.id, photo.name, index, locale))
+      : []));
 }
 
 /**
@@ -80,28 +95,51 @@ export function planOne(project: Project, photoId: string): BatchPlan {
   return group([itemFor(project, photo.id, photo.name, index, project.activeLocale)]);
 }
 
+/**
+ * A file and the video it was built from, before grouping throws the duplicate
+ * videos away. Only `group` ever sees the second half.
+ */
+interface Planned {
+  item: BatchItem;
+  spec: Spec;
+}
+
 const itemFor = (
   project: Project,
   photoId: string,
   photoName: string,
   index: number,
   locale: LocaleId,
-): BatchItem | null => {
+): Planned | null => {
   const spec = buildSpec(project, photoId, locale);
-  return spec === null
-    ? null
-    : { photoId, locale, name: archiveName(index, photoName, locale), spec };
+  if (spec === null) return null;
+  const { script, voiceId, modelId } = spec;
+  return {
+    item: {
+      photoId,
+      locale,
+      name: archiveName(index, photoName, locale),
+      sound: { script, voiceId, modelId },
+    },
+    spec,
+  };
 };
 
-/** Fold items into groups by what they look like. */
-function group(items: readonly (BatchItem | null)[]): BatchPlan {
+/**
+ * Fold items into groups by what they look like.
+ *
+ * The first Spec of a key is the one kept and rendered; the rest differ from it
+ * only in sound, by definition of the key, and are dropped here rather than
+ * carried to the server.
+ */
+function group(planned: readonly (Planned | null)[]): BatchPlan {
   const groups = new Map<string, BatchGroup>();
-  for (const item of items) {
-    if (item === null) continue;
-    const key = visualKey(item.spec);
+  for (const entry of planned) {
+    if (entry === null) continue;
+    const key = visualKey(entry.spec);
     const found = groups.get(key);
-    if (found === undefined) groups.set(key, { key, spec: item.spec, items: [item] });
-    else found.items.push(item);
+    if (found === undefined) groups.set(key, { key, spec: entry.spec, items: [entry.item] });
+    else found.items.push(entry.item);
   }
   const list = [...groups.values()];
   return {
