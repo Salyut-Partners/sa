@@ -1,4 +1,35 @@
+/* Two palettes, one set of names. `data-theme` is written on <html> — by the
+   inline script in index.html before first paint, and by the editor after — so
+   it is always resolved to a real theme here, never left as "system".
+
+   What deliberately does *not* live here: anything drawn over a creative. The
+   caption gradient, the drag box and its handles keep their own colours further
+   down, because the creative underneath is artwork on its way to an mp4 and does
+   not know what theme the editor is wearing. A preview that changed with the
+   chrome would be lying about the export. */
+/* Three depths, and light keeps the same order dark does: the workspace sits
+   at the back, the panel is raised off it, and a well is sunk into the panel.
+   Inverting that (white workspace, grey panel) flattens the editor — the panel
+   stops reading as a surface laid over the grid. */
 :root {
+  --bg: #f2f2f5;
+  --panel: #ffffff;
+  --line: #e2e2e9;
+  --ink: #1f1f23;
+  --muted: #6e6e80;
+  --accent: #6c5cff;
+  --danger: #d93636;
+  --warn: #a86400;
+  /* Sunken things: inputs, cards, tracks. */
+  --well: #f6f6f9;
+  --btn: #ffffff;
+  --btn-line-hover: #c2c2ce;
+  /* Selected but not active — the accent stepped back, so the active cell still
+     reads as the one the panel writes its single values to. */
+  --sel: #a79dff;
+}
+
+:root[data-theme='dark'] {
   --bg: #0d0d12;
   --panel: #14141b;
   --line: #24242f;
@@ -7,6 +38,10 @@
   --accent: #6c5cff;
   --danger: #ff6b6b;
   --warn: #ffb020;
+  --well: #0b0b10;
+  --btn: #1b1b24;
+  --btn-line-hover: #3a3a4a;
+  --sel: #4b3fd6;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -29,6 +64,10 @@ header {
   border-bottom: 1px solid var(--line);
   flex: none;
 }
+/* One glyph, square, so the row does not reflow as the label behind it changes
+   from sun to moon to half-moon. */
+.tools .theme { width: 34px; padding: 8px 0; text-align: center; font-size: 15px; line-height: 1; }
+
 .brand { font-weight: 700; letter-spacing: .2px; display: flex; align-items: center; gap: 9px; }
 .mark { width: 14px; height: 14px; border-radius: 4px; background: var(--accent); }
 .spacer { flex: 1; }
@@ -53,7 +92,7 @@ main { flex: 1; display: flex; min-height: 0; }
 }
 /* Two states, not one: everything in the selection takes the change, but the
    panel's single-value controls and the drag box belong to the active cell. */
-.cell.selected { border-color: #4b3fd6; }
+.cell.selected { border-color: var(--sel); }
 .cell.active {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
@@ -118,7 +157,7 @@ main { flex: 1; display: flex; min-height: 0; }
 hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 
 input[type=text], select, textarea {
-  width: 100%; background: #0b0b10; color: var(--ink);
+  width: 100%; background: var(--well); color: var(--ink);
   border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font: inherit;
 }
 input[type=range] { width: 100%; accent-color: var(--accent); }
@@ -131,9 +170,9 @@ input[type=color] { width: 46px; height: 34px; background: none; border: 1px sol
 
 button {
   font: inherit; border-radius: 7px; cursor: pointer;
-  border: 1px solid var(--line); background: #1b1b24; color: var(--ink); padding: 8px 12px;
+  border: 1px solid var(--line); background: var(--btn); color: var(--ink); padding: 8px 12px;
 }
-button:hover:not(:disabled) { border-color: #3a3a4a; }
+button:hover:not(:disabled) { border-color: var(--btn-line-hover); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button.primary { width: 100%; background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: 11px; }
 button.wide { width: 100%; }
@@ -163,7 +202,7 @@ input[type=text].mixed::placeholder { color: var(--warn); font-style: italic; }
   max-height: 330px; overflow-y: auto; padding-right: 4px;
 }
 .style-card {
-  border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: #0b0b10;
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: var(--well);
   display: flex; flex-direction: column; gap: 6px; align-items: stretch;
   /* The stage inside is 560 layout pixels however far it is scaled down, and a
      grid or flex item sized to its content would drag the panel out with it. */
@@ -178,7 +217,7 @@ input[type=text].mixed::placeholder { color: var(--warn); font-style: italic; }
 .button-row {
   display: flex; align-items: center; gap: 8px;
   border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; cursor: pointer;
-  background: #0b0b10;
+  background: var(--well);
 }
 .button-row.on { border-color: var(--accent); }
 .button-row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -192,7 +231,7 @@ input[type=text].mixed::placeholder { color: var(--warn); font-style: italic; }
 
 .num { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .num input[type=number] {
-  width: 100%; min-width: 0; background: #0b0b10; color: var(--ink);
+  width: 100%; min-width: 0; background: var(--well); color: var(--ink);
   border: 1px solid var(--line); border-radius: 7px; padding: 8px 9px; font: inherit;
   font-variant-numeric: tabular-nums;
 }
@@ -207,7 +246,7 @@ select.mixed { color: var(--warn); font-style: italic; }
   max-height: 420px; overflow-y: auto; padding-right: 4px;
 }
 .template-card {
-  border: 1px solid var(--line); border-radius: 8px; padding: 6px; background: #0b0b10;
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px; background: var(--well);
   display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 0;
 }
 .template-card.on { border-color: var(--accent); }
@@ -244,7 +283,7 @@ textarea.mixed::placeholder { color: var(--warn); font-style: italic; }
 
 .locale-chip {
   display: flex; align-items: center; gap: 6px;
-  border: 1px solid var(--line); border-radius: 7px; background: #0b0b10;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--well);
   padding: 3px 6px 3px 8px;
 }
 .locale-chip.on { border-color: var(--accent); }
@@ -268,7 +307,7 @@ textarea.mixed::placeholder { color: var(--warn); font-style: italic; }
 
 /* Progress: the bar answers "how far", the line under it answers "on what". */
 .export-progress .bar {
-  height: 6px; border-radius: 3px; background: #0b0b10; overflow: hidden;
+  height: 6px; border-radius: 3px; background: var(--well); overflow: hidden;
   border: 1px solid var(--line);
 }
 .export-progress .bar .fill {

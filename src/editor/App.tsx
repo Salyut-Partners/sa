@@ -13,6 +13,7 @@ import type { Photo, Project, Spec } from '../core/types.ts';
 import { ButtonBoxes } from './ButtonBoxes.tsx';
 import { Clock } from './clock.ts';
 import { CreativeCell } from './CreativeCell.tsx';
+import { themeIcon, themeLabel, useTheme } from './theme.ts';
 import { useExport } from './export.ts';
 import { FilePicker } from './FilePicker.tsx';
 import { importFiles, importReplacement, NOTHING_IMPORTED, type ImportReport } from './import-files.ts';
@@ -74,6 +75,7 @@ export function App() {
     `/${project.voiceId}/${project.modelId}/${project.fitToVoice}`;
 
   const clock = useMemo(() => new Clock(project.duration), []);
+  const theme = useTheme();
   clock.duration = project.duration;
 
   const dispatch = useCallback((command: Command) => {
@@ -260,6 +262,14 @@ export function App() {
       <header>
         <div className="brand"><span className="mark" /> Creative Factory Search</div>
         <div className="tools">
+          <button
+            className="theme"
+            title={`${themeLabel[theme.choice]} — натисніть, щоб змінити`}
+            aria-label={themeLabel[theme.choice]}
+            onClick={theme.cycle}
+          >
+            {themeIcon[theme.choice]}
+          </button>
           <button
             disabled={!canUndo(history)}
             title="Скасувати (⌘Z)"

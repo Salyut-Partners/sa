@@ -87,6 +87,11 @@ Three build units and one rule.
   animation in `renderer/templates/`. Adding one is a record in each and nothing
   in the editor.
 - **`src/editor`** — React. Owns interaction and nothing about how a creative looks.
+  That line is what makes the light/dark theme safe: it repaints the chrome from
+  the tokens at the top of `editor.css` and never touches a creative, so a
+  preview looks the same in either theme and still matches the mp4. The choice
+  cycles system → light → dark in the header, lives in `localStorage`, and is
+  never written into a project file.
 - **`src/server`** — Express, Puppeteer, ffmpeg. Bundles the render target from
   source at startup, so the headless page can never drift from the editor. An
   export is a job in memory: the editor posts a plan, gets an id, and watches it.
