@@ -1,6 +1,8 @@
 // The renderer ships its own stylesheet and injects it on first use. That is
 // what lets a single import be enough in the editor, in a library thumbnail and
 // in the headless render target — there is no CSS file for a consumer to forget.
+import { TEMPLATE_CSS } from './template-css.ts';
+
 export const RENDERER_STYLE_ID = 'cf-renderer-style';
 
 export const RENDERER_CSS = `
@@ -26,7 +28,7 @@ export const RENDERER_CSS = `
 .cf-flash{opacity:0}
 .cf-sheen{position:absolute;top:-25%;height:150%;left:0;pointer-events:none;
   background:linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.55) 50%,rgba(255,255,255,0) 100%)}
-`;
+` + TEMPLATE_CSS;
 
 /** Idempotent: many stages on one page share one stylesheet. */
 export function ensureRendererStyle(doc: Document): void {

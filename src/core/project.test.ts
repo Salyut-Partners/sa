@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { apply, createProject, defaultButton, MAX_PHOTOS, nextSlot } from './project.ts';
+import { templateById } from './templates.ts';
 import type { Project } from './types.ts';
 
 const photo = (id: string) => ({ id, name: id + '.jpg', image: 'data:image/jpeg;base64,' + id });
@@ -468,5 +469,107 @@ describe('selection', () => {
       type: 'photo/remove', id: 'a',
     });
     expect(p.selection).toEqual(['b']);
+  });
+});
+
+describe('template commands', () => {
+  const all = (p: Project): string[] => p.photos.map(x => x.id);
+
+  it('starts a photo with no template — a creative may be buttons alone', () => {
+    expect(withPhotos('a').photos[0]!.template).toBeNull();
+  });
+
+  it('puts a template on the photo with the library default timing', () => {
+    const p = apply(withPhotos('a'), {
+      type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills',
+    });
+    const layer = p.photos[0]!.template!;
+    expect(layer.definitionId).toBe('jobs-card-pills');
+    expect(layer.values).toEqual({});
+    expect(layer.timing).toEqual(templateById('jobs-card-pills')!.defaultTiming);
+  });
+
+  it('puts one template on the whole selection', () => {
+    const p = apply(withPhotos('a', 'b'), {
+      type: 'template/set', ids: all(withPhotos('a', 'b')), definitionId: 'rates',
+    });
+    expect(p.photos.map(x => x.template?.definitionId)).toEqual(['rates', 'rates']);
+  });
+
+  it('refuses a template the library does not carry', () => {
+    const before = withPhotos('a');
+    expect(apply(before, { type: 'template/set', ids: ['a'], definitionId: 'nope' })).toBe(before);
+  });
+
+  it('takes the template off again', () => {
+    let p = apply(withPhotos('a'), {
+      type: 'template/set', ids: ['a'], definitionId: 'rates',
+    });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: null });
+    expect(p.photos[0]!.template).toBeNull();
+  });
+
+  it('keeps the text and the timing when the layout is swapped', () => {
+    // The three card versions are one offer in three layouts: changing which one
+    // is on the frame is not a reason to retype the offer.
+    let p = apply(withPhotos('a'), {
+      type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills',
+    });
+    p = apply(p, { type: 'template/field', ids: ['a'], key: 'headline', value: 'Робота в порту' });
+    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 2 } } });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-sheet' });
+
+    expect(p.photos[0]!.template!.values['headline']).toBe('Робота в порту');
+    expect(p.photos[0]!.template!.timing.appearAt).toBe(2);
+  });
+
+  it('writes a field on every selected photo', () => {
+    let p = apply(withPhotos('a', 'b'), { type: 'selection/all' });
+    p = apply(p, { type: 'template/set', ids: p.selection, definitionId: 'jobs-card-pills' });
+    p = apply(p, { type: 'template/field', ids: p.selection, key: 'cta', value: 'ДІЗНАТИСЬ' });
+    expect(p.photos.map(x => x.template!.values['cta'])).toEqual(['ДІЗНАТИСЬ', 'ДІЗНАТИСЬ']);
+  });
+
+  it('writes a list field as a list', () => {
+    let p = apply(withPhotos('a'), {
+      type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills',
+    });
+    p = apply(p, { type: 'template/field', ids: ['a'], key: 'jobs', value: ['Охорона', 'Прибирання'] });
+    expect(p.photos[0]!.template!.values['jobs']).toEqual(['Охорона', 'Прибирання']);
+  });
+
+  it('resets a field by forgetting it, so the dictionary answers for it again', () => {
+    let p = apply(withPhotos('a'), {
+      type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills',
+    });
+    p = apply(p, { type: 'template/field', ids: ['a'], key: 'cta', value: 'МОЄ' });
+    p = apply(p, { type: 'template/field', ids: ['a'], key: 'cta', value: null });
+    expect('cta' in p.photos[0]!.template!.values).toBe(false);
+  });
+
+  it('leaves a photo without a template alone when a field is broadcast', () => {
+    let p = apply(withPhotos('a', 'b'), { type: 'selection/all' });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'rates' });
+    p = apply(p, { type: 'template/field', ids: p.selection, key: 'linkLine', value: 'тиць' });
+    expect(p.photos[0]!.template!.values['linkLine']).toBe('тиць');
+    expect(p.photos[1]!.template).toBeNull();
+  });
+
+  it('patches the timing of the selection, merging rather than replacing', () => {
+    let p = apply(withPhotos('a'), {
+      type: 'template/set', ids: ['a'], definitionId: 'rates',
+    });
+    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { timing: { hideAt: 6 } } });
+    const timing = p.photos[0]!.template!.timing;
+    expect(timing.hideAt).toBe(6);
+    expect(timing.appearAt).toBe(templateById('rates')!.defaultTiming.appearAt);
+  });
+
+  it('gives the same project back when nothing was there to change', () => {
+    const before = withPhotos('a');
+    expect(apply(before, { type: 'template/field', ids: ['a'], key: 'cta', value: 'x' }))
+      .toBe(before);
+    expect(apply(before, { type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 1 } } }))
+      .toBe(before);
   });
 });

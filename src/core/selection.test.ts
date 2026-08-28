@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { apply, createProject, defaultButton } from './project.ts';
 import {
-  buttonCount, buttonField, buttonRectField, buttonTimingField, photoField, shared,
+  buttonCount, buttonField, buttonRectField, buttonTimingField, NO_TEMPLATE, photoField,
+  shared, templateChoice, templateEdited, templateText, templateTimingField,
 } from './selection.ts';
 import type { Project } from './types.ts';
 
@@ -135,5 +136,84 @@ describe('buttonTimingField', () => {
 
   it('reads a slot nobody has as mixed rather than inventing a window', () => {
     expect(buttonTimingField(withPhotos('a'), ['a'], 0, 'appearAt')).toEqual({ mixed: true });
+  });
+});
+
+describe('reading a template across the selection', () => {
+  const batch = (): Project => {
+    let p = ['a', 'b'].reduce(
+      (acc, id) => apply(acc, {
+        type: 'photo/add', photos: [{ id, name: id, image: 'data:,' + id }],
+      }),
+      createProject(),
+    );
+    return apply(p, { type: 'selection/all' });
+  };
+
+  const withTemplate = (id: string): Project => {
+    const p = batch();
+    return apply(p, { type: 'template/set', ids: p.selection, definitionId: id });
+  };
+
+  it('reports the template the whole selection wears', () => {
+    expect(templateChoice(withTemplate('rates'), ['a', 'b']))
+      .toEqual({ mixed: false, value: 'rates' });
+  });
+
+  it('reports no template as a value, not as an absence', () => {
+    expect(templateChoice(batch(), ['a', 'b'])).toEqual({ mixed: false, value: NO_TEMPLATE });
+  });
+
+  it('reports mixed when the selection wears different templates', () => {
+    const p = apply(withTemplate('rates'), {
+      type: 'template/set', ids: ['b'], definitionId: 'jobs-banner',
+    });
+    expect(templateChoice(p, ['a', 'b']).mixed).toBe(true);
+  });
+
+  it('reads a field as the text a box shows, dictionary value included', () => {
+    const p = withTemplate('jobs-card-pills');
+    expect(templateText(p, ['a', 'b'], 'cta')).toEqual({ mixed: false, value: 'LEARN MORE' });
+  });
+
+  it('reads a list field a line to an item', () => {
+    const p = withTemplate('rates');
+    expect(templateText(p, ['a', 'b'], 'rates'))
+      .toEqual({ mixed: false, value: '200 – 300 €\n500 – 800 €\n900 – 1200 €' });
+  });
+
+  it('reports mixed when one photo of the selection has been edited and another has not', () => {
+    const p = apply(withTemplate('rates'), {
+      type: 'template/field', ids: ['a'], key: 'linkLine', value: 'тиць',
+    });
+    expect(templateText(p, ['a', 'b'], 'linkLine').mixed).toBe(true);
+  });
+
+  it('reports mixed for a field of a selection where one photo wears no template', () => {
+    const p = apply(withTemplate('rates'), { type: 'template/set', ids: ['b'], definitionId: null });
+    expect(templateText(p, ['a', 'b'], 'linkLine').mixed).toBe(true);
+  });
+
+  it('says which fields were written by hand, so the dictionary ones can be told apart', () => {
+    const p = apply(withTemplate('rates'), {
+      type: 'template/field', ids: ['a', 'b'], key: 'linkLine', value: 'тиць',
+    });
+    expect(templateEdited(p, ['a', 'b'], 'linkLine')).toBe(true);
+    expect(templateEdited(p, ['a', 'b'], 'ratesHead')).toBe(false);
+  });
+
+  it('counts a field edited when any photo of the selection has edited it', () => {
+    const p = apply(withTemplate('rates'), {
+      type: 'template/field', ids: ['a'], key: 'linkLine', value: 'тиць',
+    });
+    expect(templateEdited(p, ['a', 'b'], 'linkLine')).toBe(true);
+  });
+
+  it('reads the template window like any other layer field', () => {
+    const p = apply(withTemplate('rates'), {
+      type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 3 } },
+    });
+    expect(templateTimingField(p, ['a', 'b'], 'appearAt').mixed).toBe(true);
+    expect(templateTimingField(p, ['a'], 'appearAt')).toEqual({ mixed: false, value: 3 });
   });
 });

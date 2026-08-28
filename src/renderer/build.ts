@@ -5,12 +5,14 @@
 // The frame walk sets a time and screenshots; anything time-dependent that is
 // not derived from `t` would desync the export from what was on screen.
 import { layerStateAt } from '../core/timing.ts';
-import type { ButtonSpec, Spec } from '../core/types.ts';
+import type { ButtonSpec, EnterAnimation, Spec, TemplateSpec } from '../core/types.ts';
 import { styleById, type ButtonStyle } from './button-styles.ts';
 import { accent, type Accent } from './color.ts';
 import { ensureRendererStyle } from './css.ts';
 import { clamp01, easeInOutCubic, easeOutBack, easeOutCubic } from './easing.ts';
 import { fontById } from './fonts.ts';
+import { definitionById, type TemplateParts } from './templates/index.ts';
+import { DESIGN } from './templates/kit.ts';
 
 export interface CreativeHandle {
   /** Draw the frame at `t` seconds. */
@@ -23,6 +25,13 @@ export interface CreativeHandle {
 const ARROW_SVG =
   '<svg class="cf-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" ' +
   'stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>';
+
+/** The template layer, if the photo wears one. */
+interface TemplatePlace {
+  spec: TemplateSpec;
+  layer: HTMLElement;
+  parts: TemplateParts;
+}
 
 /** One button's DOM, plus everything about it that does not change per frame. */
 interface ButtonParts {
@@ -45,9 +54,13 @@ export function build(root: HTMLElement, spec: Spec): CreativeHandle {
   root.style.width = spec.canvas.width + 'px';
   root.style.height = spec.canvas.height + 'px';
 
+  // The order of the frame: photo, then at most one template, then the buttons
+  // in the order of their list. A button is meant to be laid over a template,
+  // never under one.
   root.innerHTML =
     '<div class="cf-wrap">' +
     '<img class="cf-base" alt="">' +
+    (spec.template === null ? '' : '<div class="cf-layer cf-tpl"><div class="cf-tpl-frame"></div></div>') +
     spec.buttons.map(buttonHtml).join('') +
     '</div>';
 
@@ -55,17 +68,23 @@ export function build(root: HTMLElement, spec: Spec): CreativeHandle {
   const base = root.querySelector<HTMLImageElement>('.cf-base')!;
   if (spec.image) base.src = spec.image;
 
-  const layers = [...root.querySelectorAll<HTMLElement>('.cf-layer')];
+  const template = dressTemplate(spec, root);
+  const layers = [...root.querySelectorAll<HTMLElement>('.cf-btn-layer')];
   const parts: ButtonParts[] = spec.buttons.map((b, i) => dressButton(b, layers[i]!));
 
-  const fitAll = (): void => parts.forEach(fitText);
+  const fitAll = (): void => {
+    parts.forEach(fitText);
+    template?.parts.fit();
+  };
   fitAll();
   // Text measured before the webfont lands is measured against a fallback face,
-  // so a label can end up a size too large. Re-fit once the real font is in.
+  // so a label can end up a size too large and a panel a line too tall. Re-fit
+  // once the real fonts are in.
   root.ownerDocument.fonts?.ready.then(fitAll).catch(() => {});
 
   function render(t: number): void {
     wrap.style.transform = 'scale(' + (spec.pushIn ? 1 + 0.022 * (t / spec.duration) : 1) + ')';
+    if (template) renderTemplate(template, t, spec);
     for (const p of parts) renderButton(p, t, spec);
   }
 
@@ -73,10 +92,48 @@ export function build(root: HTMLElement, spec: Spec): CreativeHandle {
   return { render, spec };
 }
 
+/**
+ * Put the template on the frame, or answer nothing when the photo wears none —
+ * or names one this build does not carry, which a project saved against an older
+ * library can. A creative short a panel beats one that refuses to build.
+ */
+function dressTemplate(spec: Spec, root: HTMLElement): TemplatePlace | null {
+  const layer = root.querySelector<HTMLElement>('.cf-tpl');
+  const definition = spec.template === null ? null : definitionById(spec.template.definitionId);
+  if (layer === null || spec.template === null || definition === null) {
+    layer?.remove();
+    return null;
+  }
+
+  const frame = layer.querySelector<HTMLElement>('.cf-tpl-frame')!;
+  // Every template is written against one frame size and scaled to the canvas,
+  // so a second output size is this line rather than four re-measured layouts.
+  frame.style.transform = 'scale(' + spec.canvas.width / DESIGN.width + ')';
+
+  return { spec: spec.template, layer, parts: definition.build({ spec: spec.template, frame }) };
+}
+
+function renderTemplate(place: TemplatePlace, t: number, spec: Spec): void {
+  const state = layerStateAt(place.spec.timing, t, spec.duration);
+  if (!state.visible) {
+    place.layer.style.display = 'none';
+    return;
+  }
+  place.layer.style.display = '';
+  // The layer is the whole frame, so a rise is a short slide of everything on it
+  // rather than a panel travelling its own height. Small on purpose: the
+  // template spends the same entrance on the motion that is its own, and two
+  // full-length arrivals stacked on each other read as a stutter.
+  applyEntrance(place.layer, place.spec.timing.enter, state.enter, spec.canvas.height * 0.05);
+  // Time since it arrived, not since the video started: a panel set to land on
+  // the third second lives the life it would have lived landing on the first.
+  place.parts.render(t - place.spec.timing.appearAt, state.enter);
+}
+
 function buttonHtml(b: ButtonSpec): string {
   const style = styleById(b.styleId);
   return (
-    `<div class="cf-layer" style="left:${b.rect.x}px;top:${b.rect.y}px;` +
+    `<div class="cf-layer cf-btn-layer" style="left:${b.rect.x}px;top:${b.rect.y}px;` +
     `width:${b.rect.w}px;height:${b.rect.h}px">` +
     '<div class="cf-btn"><div class="cf-fill">' +
     '<span class="cf-txt"></span>' +
@@ -187,7 +244,7 @@ function renderButton(p: ButtonParts, t: number, spec: Spec): void {
     return;
   }
   p.layer.style.display = '';
-  applyEntrance(p, state.enter);
+  applyEntrance(p.layer, p.spec.timing.enter, state.enter, p.riseBy);
 
   const style = p.style;
   const beat = (Math.sin(t * 5.2) + 1) / 2;
@@ -215,27 +272,37 @@ function haloShadow(strength: number, a: Accent, beat: number): string {
   );
 }
 
-function applyEntrance(p: ButtonParts, enter: number): void {
-  switch (p.spec.timing.enter) {
+/**
+ * The entrance the layer itself performs, over whatever the thing inside it does.
+ * `riseBy` is in canvas pixels and belongs to the layer: a button rises by a
+ * fraction of its own height, and a full-canvas layer has no height to rise by.
+ */
+function applyEntrance(
+  el: HTMLElement,
+  kind: EnterAnimation,
+  enter: number,
+  riseBy: number,
+): void {
+  switch (kind) {
     case 'fade':
-      p.layer.style.opacity = String(enter);
-      p.layer.style.transform = '';
+      el.style.opacity = String(enter);
+      el.style.transform = '';
       return;
     case 'pop': {
       const k = easeOutBack(clamp01(enter));
-      p.layer.style.opacity = String(clamp01(enter * 1.6));
-      p.layer.style.transform = 'scale(' + (0.86 + 0.14 * k) + ')';
+      el.style.opacity = String(clamp01(enter * 1.6));
+      el.style.transform = 'scale(' + (0.86 + 0.14 * k) + ')';
       return;
     }
     case 'rise': {
       const k = easeOutCubic(clamp01(enter));
-      p.layer.style.opacity = String(clamp01(enter * 1.6));
-      p.layer.style.transform = 'translateY(' + p.riseBy * (1 - k) + 'px)';
+      el.style.opacity = String(clamp01(enter * 1.6));
+      el.style.transform = 'translateY(' + riseBy * (1 - k) + 'px)';
       return;
     }
     case 'none':
-      p.layer.style.opacity = '1';
-      p.layer.style.transform = '';
+      el.style.opacity = '1';
+      el.style.transform = '';
   }
 }
 

@@ -38,6 +38,16 @@ export interface PixelRect {
 export type EnterAnimation = 'none' | 'fade' | 'pop' | 'rise';
 
 /**
+ * The languages a project can be released in. A closed set: the phrase book
+ * ships translated for exactly these, and a locale nobody wrote the dictionary
+ * for would render as a frame full of blanks.
+ */
+export type LocaleId = 'en' | 'de' | 'it' | 'es' | 'fr' | 'nl' | 'pl';
+
+/** What one template field holds. A list is a list all the way down — see FieldKind. */
+export type FieldValue = string | readonly string[];
+
+/**
  * When a layer is on screen. `hideAt: null` means "until the end" and is
  * resolved against the *current* duration, so stretching the video to fit a
  * voice-over keeps open-ended layers to the new end.
@@ -60,6 +70,22 @@ export interface ButtonLayer {
   timing: Timing;
 }
 
+/**
+ * The template chosen on one photo: which one, what the user typed into it, and
+ * when it is on screen.
+ *
+ * `values` holds only the fields edited by hand. Everything else comes from the
+ * phrase book at build time, so a field nobody touched follows the dictionary
+ * when the locale changes instead of freezing at whatever it said when the
+ * template was picked — and "reset this field" is deleting a key, not guessing
+ * what it used to say.
+ */
+export interface TemplateLayer {
+  definitionId: string;
+  values: Readonly<Record<string, FieldValue>>;
+  timing: Timing;
+}
+
 /** One creative in the batch. Not the image file — the creative built on it. */
 export interface Photo {
   id: string;
@@ -69,6 +95,8 @@ export interface Photo {
   accent: string;
   pushIn: boolean;
   glare: boolean;
+  /** At most one. A photo either wears a template or it does not. */
+  template: TemplateLayer | null;
   buttons: ButtonLayer[];
 }
 
@@ -97,6 +125,18 @@ export interface ButtonSpec {
 }
 
 /**
+ * A template as the renderer wants it: every field in its schema resolved to a
+ * value, with nothing left to look up. The renderer holds no dictionary.
+ */
+export interface TemplateSpec {
+  definitionId: string;
+  fields: Readonly<Record<string, FieldValue>>;
+  /** The photo's accent, which the template paints itself in. */
+  color: string;
+  timing: Timing;
+}
+
+/**
  * A flat, immutable description of exactly one video. The only input the
  * renderer accepts — it never sees a Project.
  */
@@ -107,5 +147,6 @@ export interface Spec {
   image: string;
   pushIn: boolean;
   glare: boolean;
+  template: TemplateSpec | null;
   buttons: ButtonSpec[];
 }

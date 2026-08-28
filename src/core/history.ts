@@ -68,6 +68,12 @@ export function coalesceKey(command: Command): string | null {
       return `nudge/${command.index}/${command.by.x !== 0 ? 'x' : 'y'}`;
     case 'photo/patch':
       return `photo/${fields(command.patch)}`;
+    // Typing a headline arrives a letter at a time. Keyed by the field, so
+    // retyping the vacancy list afterwards is a step of its own.
+    case 'template/field':
+      return `template/${command.key}`;
+    case 'template/patch':
+      return `template/${fields(command.patch)}`;
     case 'project/patch':
       return `project/${fields(command.patch)}`;
     default:

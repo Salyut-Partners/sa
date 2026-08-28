@@ -1,8 +1,10 @@
 // How a library entry is shown. This lives with the renderer rather than in the
-// editor: what a button looks like — including in a catalogue — is the
-// renderer's business, and E3's template library will ask the same question.
+// editor: what a layer looks like — including in a catalogue — is the renderer's
+// business, and both libraries ask the same question.
 import { toPixels } from '../core/canvas.ts';
-import type { Spec } from '../core/types.ts';
+import { DEFAULT_LOCALE } from '../core/phrasebook.ts';
+import { templateById, templateFields } from '../core/templates.ts';
+import type { Spec, Timing } from '../core/types.ts';
 
 /** Chip proportions: wide enough for a real label, short enough to sit in a card. */
 export const PREVIEW_CANVAS = { width: 560, height: 96 };
@@ -44,5 +46,39 @@ export function previewSpec(
       // A catalogue entry is always fully arrived — it is not part of a video.
       timing: { appearAt: 0, hideAt: null, enter: 'none', enterDuration: 0 },
     }],
+    template: null,
+  };
+}
+
+/**
+ * A whole frame wearing one template, for the template library.
+ *
+ * Nothing is typed into it: the chip shows what the template says out of the
+ * dictionary, which is what picking it would actually put on the photo. It is
+ * built at full canvas size and scaled down by the caller — the same renderer as
+ * the video, so the catalogue cannot drift from the result.
+ */
+export function templatePreviewSpec(
+  definitionId: string,
+  options: { canvas: { width: number; height: number }; image: string; color: string },
+): Spec {
+  // A chip plays the entrance rather than sitting on the finished frame: the
+  // three card versions carry the same words in three layouts, and the way each
+  // one arrives is half of what tells them apart.
+  const timing: Timing = { appearAt: 0, hideAt: null, enter: 'none', enterDuration: 0.9 };
+  return {
+    canvas: { ...options.canvas },
+    duration: 6,
+    fps: 30,
+    image: options.image,
+    pushIn: false,
+    glare: true,
+    buttons: [],
+    template: templateById(definitionId) === null ? null : {
+      definitionId,
+      fields: templateFields({ definitionId, values: {}, timing }, DEFAULT_LOCALE),
+      color: options.color,
+      timing,
+    },
   };
 }

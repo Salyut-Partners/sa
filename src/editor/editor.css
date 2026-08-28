@@ -199,3 +199,33 @@ input[type=text].mixed::placeholder { color: var(--warn); font-style: italic; }
 .num .suffix { color: var(--muted); font-size: 11px; flex: none; }
 .num.mixed input::placeholder { color: var(--warn); font-style: italic; }
 select.mixed { color: var(--warn); font-style: italic; }
+
+/* Two to a row: a template is a whole 9:16 frame, and a chip wide enough to
+   tell the three cards apart is too wide for three across the panel. */
+.templates {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  max-height: 420px; overflow-y: auto; padding-right: 4px;
+}
+.template-card {
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px; background: #0b0b10;
+  display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 0;
+}
+.template-card.on { border-color: var(--accent); }
+.template-card .name {
+  font-size: 11px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.template-preview { overflow: hidden; border-radius: 5px; }
+.template-preview .scaler { transform-origin: 0 0; }
+.template-preview.empty {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); border: 1px dashed var(--line); font-size: 20px;
+}
+
+/* The field no longer follows the dictionary. Worth a mark, not a warning: it
+   is usually deliberate, and only matters when the batch goes out in seven
+   languages and this one field does not follow along. */
+.lab .edited { color: var(--warn); font-size: 8px; line-height: 1; }
+
+textarea { resize: vertical; min-height: 60px; line-height: 1.4; }
+textarea.mixed::placeholder { color: var(--warn); font-style: italic; }

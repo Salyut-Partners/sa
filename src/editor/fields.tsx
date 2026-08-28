@@ -25,6 +25,44 @@ export function TextField({ value, onChange }: TextProps) {
   );
 }
 
+interface TextAreaProps {
+  value: Shared<string>;
+  onChange: (value: string) => void;
+  rows?: number;
+  /**
+   * Hold what was typed until the box is left, instead of writing it through.
+   *
+   * For a list, and only for a list. A list is parsed from its lines, so writing
+   * as they are typed would delete the empty line the user has just made to type
+   * the next item into. A paragraph survives being written through, and pays the
+   * price of not: the preview is meant to follow every edit as it is made.
+   */
+  holdUntilBlur?: boolean;
+}
+
+/** The box for everything longer than a line — a paragraph, and a list. */
+export function TextAreaField({ value, onChange, rows, holdUntilBlur }: TextAreaProps) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  return (
+    <textarea
+      spellCheck={false}
+      rows={rows ?? 3}
+      className={value.mixed ? 'mixed' : ''}
+      value={draft ?? (value.mixed ? '' : value.value)}
+      placeholder={value.mixed ? MIXED_LABEL : ''}
+      onChange={e => {
+        if (holdUntilBlur) setDraft(e.target.value);
+        else onChange(e.target.value);
+      }}
+      onBlur={() => {
+        if (draft !== null) onChange(draft);
+        setDraft(null);
+      }}
+    />
+  );
+}
+
 interface ColorProps {
   value: Shared<string>;
   onChange: (value: string) => void;

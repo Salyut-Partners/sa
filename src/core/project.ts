@@ -1,7 +1,8 @@
 // Every change to the model goes through `apply`. One funnel means broadcast,
 // undo and persistence each need to understand one thing, not one per control.
 import { clampRect, nudgeRect } from './canvas.ts';
-import type { ButtonLayer, Photo, Project, Rect, Timing } from './types.ts';
+import { templateById } from './templates.ts';
+import type { ButtonLayer, FieldValue, Photo, Project, Rect, Timing } from './types.ts';
 
 export const DEFAULT_CANVAS = { width: 1080, height: 1920 } as const;
 export const DEFAULT_DURATION = 10;
@@ -35,6 +36,7 @@ export type ButtonPatch =
   & Partial<Omit<ButtonLayer, 'id' | 'rect' | 'timing'>>
   & { rect?: Partial<Rect>; timing?: Partial<Timing> };
 export type ProjectPatch = Partial<Pick<Project, 'duration' | 'fps' | 'canvas'>>;
+export type TemplatePatch = { timing?: Partial<Timing> };
 
 /**
  * `ids` addresses a set of photos rather than one, and buttons are addressed by
@@ -56,6 +58,9 @@ export type Command =
   | { type: 'button/nudge'; ids: readonly string[]; index: number; by: { x: number; y: number } }
   | { type: 'button/move'; ids: readonly string[]; from: number; to: number }
   | { type: 'button/duplicate'; ids: readonly string[]; index: number; id: string }
+  | { type: 'template/set'; ids: readonly string[]; definitionId: string | null }
+  | { type: 'template/field'; ids: readonly string[]; key: string; value: FieldValue | null }
+  | { type: 'template/patch'; ids: readonly string[]; patch: TemplatePatch }
   | { type: 'project/patch'; patch: ProjectPatch };
 
 export function createProject(): Project {
@@ -99,6 +104,7 @@ function newPhoto(input: NewPhoto): Photo {
     accent: DEFAULT_ACCENT,
     pushIn: true,
     glare: true,
+    template: null,
     buttons: [],
   };
 }
@@ -302,6 +308,56 @@ export function apply(project: Project, command: Command): Project {
         return { ...p, buttons };
       });
 
+    case 'template/set': {
+      const { definitionId } = command;
+      if (definitionId === null) {
+        return mapPhotos(project, command.ids, p =>
+          p.template === null ? p : { ...p, template: null });
+      }
+      const info = templateById(definitionId);
+      // A layout nobody carries is refused rather than stored: unlike a button
+      // style, there is no sane fallback — a template is its own layout, and
+      // silently drawing a different one would be a creative the user never made.
+      if (info === null) return project;
+      return mapPhotos(project, command.ids, p => ({
+        ...p,
+        // The text and the window survive the swap. The three card versions are
+        // one offer in three layouts, and a swap that emptied the boxes would
+        // make trying the next one cost the offer.
+        template: {
+          definitionId,
+          values: p.template?.values ?? {},
+          timing: p.template?.timing ?? { ...info.defaultTiming },
+        },
+      }));
+    }
+
+    case 'template/field':
+      return mapPhotos(project, command.ids, p => {
+        if (p.template === null) return p;
+        const { [command.key]: current, ...rest } = p.template.values;
+        // Null is a reset, and a reset is a forgetting: with the key gone the
+        // dictionary answers for the field again, in whatever locale is asked.
+        if (command.value === null) {
+          return current === undefined
+            ? p
+            : { ...p, template: { ...p.template, values: rest } };
+        }
+        return {
+          ...p,
+          template: { ...p.template, values: { ...p.template.values, [command.key]: command.value } },
+        };
+      });
+
+    case 'template/patch':
+      return mapPhotos(project, command.ids, p => {
+        if (p.template === null) return p;
+        const { timing } = command.patch;
+        return timing === undefined
+          ? p
+          : { ...p, template: { ...p.template, timing: { ...p.template.timing, ...timing } } };
+      });
+
     case 'project/patch':
       return { ...project, ...command.patch };
   }
@@ -309,3 +365,13 @@ export function apply(project: Project, command: Command): Project {
 
 export const photoById = (project: Project, id: string | null): Photo | null =>
   id === null ? null : (project.photos.find(p => p.id === id) ?? null);
+
+/**
+ * Every layer on a photo, as timings. The poster frame and the warnings about a
+ * window falling off the end of the video both want all of them, and a template
+ * is a layer like any other — that is the whole point of the word.
+ */
+export const photoTimings = (photo: Photo): Timing[] => [
+  ...(photo.template === null ? [] : [photo.template.timing]),
+  ...photo.buttons.map(b => b.timing),
+];

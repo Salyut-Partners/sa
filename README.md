@@ -5,7 +5,7 @@ layers over them, generate a voice-over, export mp4 per photo and per locale.
 
 The spec lives in [`.scratch/prd-creative-factory-search.md`](.scratch/prd-creative-factory-search.md).
 
-## What works today (stage E3)
+## What works today (stage E4)
 
 Import a batch of 9:16 photos at once — the ones that do not fit are listed with
 a reason rather than failing the import. The batch lays out four to a row; a
@@ -27,8 +27,18 @@ under the grid stops the selected cells on a second, so you can check what is on
 screen at it without waiting for a render — ⌘A first, to hold the whole batch to
 the same clock.
 
-Then: mp4 export of the active creative. Templates, locales and the voice-over
-land in E4–E5.
+A photo also wears at most one template, chosen from a library of five whose
+chips are whole frames drawn by the same renderer: a banner listing the
+vacancies, three versions of the offer card — pills, panel, and a sheet that
+unrolls from the top — and the rate list. The form under the library is built
+from the template's own schema rather than laid out by hand, so every field it
+carries is editable, lists a line to an item. Fields nobody touches follow the
+phrase book, which ships all seven locales; a field written over says so and
+resets back with one click. The template has the same window as a button —
+appears at, hides at, entrance — and lands over the same warnings.
+
+Then: mp4 export of the active creative, template and buttons on the one frame.
+Locales and the voice-over land in E5.
 
 ## Running it
 
@@ -53,6 +63,10 @@ Three build units and one rule.
   No DOM, no React, no network. This is the one tested seam.
 - **`src/renderer`** — plain DOM, no React. Builds a creative from a `Spec` and
   exposes `render(t)`. Ships its own CSS so a single import is enough anywhere.
+  A template is a record in two halves: its fields and label in `core/templates.ts`,
+  because the model has to merge them with the dictionary, and its layout and
+  animation in `renderer/templates/`. Adding one is a record in each and nothing
+  in the editor.
 - **`src/editor`** — React. Owns interaction and nothing about how a creative looks.
 - **`src/server`** — Express, Puppeteer, ffmpeg. Bundles the render target from
   source at startup, so the headless page can never drift from the editor.

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   canRedo, canUndo, coalesceKey, historyOf, isUndoable, record, redo, undo, type History,
 } from '../core/history.ts';
-import { apply, createProject, MAX_PHOTOS, photoById, type Command } from '../core/project.ts';
+import {
+  apply, createProject, MAX_PHOTOS, photoById, photoTimings, type Command,
+} from '../core/project.ts';
 import { buildSpec } from '../core/spec.ts';
 import { posterTime } from '../core/timing.ts';
 import type { Photo, Project, Spec } from '../core/types.ts';
@@ -121,7 +123,7 @@ export function App() {
       const entry = reusable.get(photo) ?? {
         photo,
         spec: buildSpec(project, photo.id)!,
-        poster: posterTime(photo.buttons.map(b => b.timing), project.duration),
+        poster: posterTime(photoTimings(photo), project.duration),
       };
       fresh.set(photo, entry);
       return entry;

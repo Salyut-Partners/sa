@@ -73,3 +73,72 @@ describe('buildSpec', () => {
     expect(project.photos[0]!.buttons[0]!.rect.x).toBe(10);
   });
 });
+
+describe('buildSpec and the template', () => {
+  const withTemplate = (id: string): Project =>
+    apply(projectWithButton(), { type: 'template/set', ids: ['a'], definitionId: id });
+
+  it('carries no template for a photo that wears none', () => {
+    expect(buildSpec(projectWithButton(), 'a')!.template).toBeNull();
+  });
+
+  it('carries the chosen template, its window and the photo accent', () => {
+    const template = buildSpec(withTemplate('rates'), 'a')!.template!;
+    expect(template.definitionId).toBe('rates');
+    expect(template.color).toBe('#123456');
+    expect(template.timing.appearAt).toBe(0);
+  });
+
+  it('fills every field of the schema from the dictionary', () => {
+    const { fields } = buildSpec(withTemplate('rates'), 'a')!.template!;
+    expect(fields['ratesHead']).toBe('Find this');
+    expect(fields['rates']).toEqual(['200 – 300 €', '500 – 800 €', '900 – 1200 €']);
+  });
+
+  it('puts what the user typed over what the dictionary says', () => {
+    const p = apply(withTemplate('rates'), {
+      type: 'template/field', ids: ['a'], key: 'ratesHead', value: 'Знайди свою',
+    });
+    expect(buildSpec(p, 'a')!.template!.fields['ratesHead']).toBe('Знайди свою');
+  });
+
+  it('builds in the locale it is asked for', () => {
+    const spec = buildSpec(withTemplate('rates'), 'a', 'de')!;
+    expect(spec.template!.fields['ratesHead']).toBe('Finde diesen');
+  });
+
+  it('carries only the fields of the template on the photo now', () => {
+    // A value left behind by the template the photo used to wear is kept, so
+    // swapping back restores it — but it is not this template's field and the
+    // renderer must never see it.
+    let p = apply(withTemplate('jobs-card-pills'), {
+      type: 'template/field', ids: ['a'], key: 'disclaimer', value: 'дрібний шрифт',
+    });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'rates' });
+
+    const { fields } = buildSpec(p, 'a')!.template!;
+    expect(Object.keys(fields).sort()).toEqual(['linkLine', 'rates', 'ratesAccent', 'ratesHead']);
+    expect(buildSpec(apply(p, {
+      type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills',
+    }), 'a')!.template!.fields['disclaimer']).toBe('дрібний шрифт');
+  });
+
+  it('drops a template this build no longer carries rather than failing to build', () => {
+    const p = withTemplate('rates');
+    const broken: Project = {
+      ...p,
+      photos: p.photos.map(photo => ({
+        ...photo,
+        template: { ...photo.template!, definitionId: 'retired-template' },
+      })),
+    };
+    expect(buildSpec(broken, 'a')!.template).toBeNull();
+  });
+
+  it('shares no state with the project it was built from', () => {
+    const project = withTemplate('rates');
+    const spec = buildSpec(project, 'a')!;
+    spec.template!.timing.appearAt = 99;
+    expect(project.photos[0]!.template!.timing.appearAt).toBe(0);
+  });
+});

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { photoTimings } from './project.ts';
 import { layerStateAt, posterTime, timingIssues } from './timing.ts';
-import type { Timing } from './types.ts';
+import type { Photo, Timing } from './types.ts';
 
 const timing = (over: Partial<Timing> = {}): Timing => ({
   appearAt: 0,
@@ -151,5 +152,35 @@ describe('timingIssues', () => {
     const t = timing({ appearAt: 12 });
     expect(timingIssues(t, 10)).toEqual(['appears-after-end']);
     expect(timingIssues(t, 18)).toEqual([]);
+  });
+});
+
+describe('photoTimings', () => {
+  const base = (over: Partial<Photo> = {}): Photo => ({
+    id: 'a', name: 'a.jpg', image: 'data:,a', accent: '#1fa94b',
+    pushIn: true, glare: true, template: null, buttons: [], ...over,
+  });
+
+  it('lists no timings for a bare photo, which is what a poster falls back on', () => {
+    expect(photoTimings(base())).toEqual([]);
+  });
+
+  it('counts the template among the layers, so the poster waits for the panel', () => {
+    const panel = timing({ appearAt: 1.2, enterDuration: 0.9 });
+    const timings = photoTimings(base({ template: { definitionId: 'rates', values: {}, timing: panel } }));
+    expect(posterTime(timings, 10)).toBeCloseTo(2.1, 10);
+  });
+
+  it('takes the last layer to settle, whichever kind it is', () => {
+    const panel = timing({ appearAt: 0.3, enterDuration: 0.9 });
+    const late = timing({ appearAt: 4, enterDuration: 0.4 });
+    const timings = photoTimings(base({
+      template: { definitionId: 'rates', values: {}, timing: panel },
+      buttons: [{
+        id: 'b', styleId: 'glow', fontId: 'anton', text: 'x', color: '#fff',
+        rect: { x: 0, y: 0, w: 10, h: 10 }, timing: late,
+      }],
+    }));
+    expect(posterTime(timings, 10)).toBeCloseTo(4.4, 10);
   });
 });

@@ -140,3 +140,25 @@ describe('what is worth undoing', () => {
     expect(isUndoable({ type: 'button/remove', ids: ['a'], index: 0 })).toBe(true);
   });
 });
+
+describe('template edits on the stack', () => {
+  it('folds a run of typing into one field into one step', () => {
+    expect(coalesceKey({ type: 'template/field', ids: ['a'], key: 'headline', value: 'Роб' }))
+      .toBe(coalesceKey({ type: 'template/field', ids: ['a'], key: 'headline', value: 'Робота' }));
+  });
+
+  it('holds two different fields apart', () => {
+    expect(coalesceKey({ type: 'template/field', ids: ['a'], key: 'headline', value: 'x' }))
+      .not.toBe(coalesceKey({ type: 'template/field', ids: ['a'], key: 'cta', value: 'x' }));
+  });
+
+  it('holds the two ends of a template window apart', () => {
+    expect(coalesceKey({ type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 1 } } }))
+      .not.toBe(coalesceKey({ type: 'template/patch', ids: ['a'], patch: { timing: { hideAt: 9 } } }));
+  });
+
+  it('gives choosing a template a step of its own', () => {
+    expect(coalesceKey({ type: 'template/set', ids: ['a'], definitionId: 'rates' })).toBeNull();
+    expect(isUndoable({ type: 'template/set', ids: ['a'], definitionId: null })).toBe(true);
+  });
+});

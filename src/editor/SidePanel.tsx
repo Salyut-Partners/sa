@@ -1,9 +1,9 @@
 import { defaultButton, nextSlot, photoById, type ButtonPatch, type Command } from '../core/project.ts';
 import {
-  buttonCount, buttonField, buttonRectField, buttonTimingField, photoField,
+  buttonCount, buttonField, buttonRectField, buttonTimingField, photoField, templateChoice,
+  templateTimingField,
 } from '../core/selection.ts';
-import { timingIssues } from '../core/timing.ts';
-import type { EnterAnimation, Project } from '../core/types.ts';
+import type { Project } from '../core/types.ts';
 import { BUTTON_STYLES, FONTS } from '../renderer/index.ts';
 import { FilePicker } from './FilePicker.tsx';
 import type { ImportReport } from './import-files.ts';
@@ -11,6 +11,9 @@ import {
   CheckField, ColorField, NumberField, OptionalNumberField, SelectField, TextField,
 } from './fields.tsx';
 import { StyleLibrary } from './StylePreview.tsx';
+import { TemplateFields } from './TemplateFields.tsx';
+import { TemplateLibrary } from './TemplatePreview.tsx';
+import { TimingFields } from './TimingFields.tsx';
 
 interface Props {
   project: Project;
@@ -25,22 +28,7 @@ interface Props {
   onExport: () => void;
 }
 
-const ENTER_ANIMATIONS: readonly { id: EnterAnimation; label: string }[] = [
-  { id: 'none', label: 'Без анімації' },
-  { id: 'fade', label: 'Проявлення' },
-  { id: 'pop', label: 'Вискок' },
-  { id: 'rise', label: 'Знизу вгору' },
-];
-
 const FONT_OPTIONS = Object.values(FONTS).map(f => ({ id: f.id, label: f.label }));
-
-/** What a broken window means, in the words the user would use for it. */
-const TIMING_COMPLAINTS = {
-  'appears-after-end': 'З’являється після кінця ролика — у відео її не буде.',
-  'never-visible': 'Зникає раніше, ніж з’являється — у відео її не буде.',
-  'hides-after-end': 'Зникає вже після кінця ролика — висітиме до кінця.',
-  'entrance-cut-off': 'Не встигає доанімуватись до зникнення.',
-} as const;
 
 export function SidePanel(props: Props) {
   const { project, dispatch, activeButton, setActiveButton } = props;
@@ -141,6 +129,47 @@ export function SidePanel(props: Props) {
               </button>
             </div>
           </div>
+
+          <hr />
+
+          <div className="group">
+            <div className="lab">Шаблон</div>
+            <TemplateLibrary
+              selectedId={templateChoice(project, targets)}
+              canvas={project.canvas}
+              color={photo.accent}
+              onPick={definitionId =>
+                dispatch({ type: 'template/set', ids: targets, definitionId })}
+            />
+          </div>
+
+          {photo.template ? (
+            // Keyed by which template is being edited, so swapping layout builds
+            // the boxes afresh rather than leaving a half-typed draft sitting in
+            // a box that now belongs to a different field.
+            <div key={`${project.activeId}:${photo.template.definitionId}`}>
+              <div className="group">
+                <div className="lab">Час на екрані шаблону</div>
+                <TimingFields
+                  read={key => templateTimingField(project, targets, key)}
+                  onChange={timing =>
+                    dispatch({ type: 'template/patch', ids: targets, patch: { timing } })}
+                  timing={photo.template.timing}
+                  duration={project.duration}
+                />
+                <div className="note">
+                  Шаблон приходить своєю анімацією; ця — понад неї.
+                </div>
+              </div>
+
+              <TemplateFields
+                project={project}
+                targets={targets}
+                definitionId={photo.template.definitionId}
+                dispatch={dispatch}
+              />
+            </div>
+          ) : null}
 
           <hr />
 
@@ -284,37 +313,12 @@ export function SidePanel(props: Props) {
 
               <div className="group">
                 <div className="lab">Час на екрані</div>
-                <div className="row">
-                  <NumberField
-                    value={buttonTimingField(project, targets, activeButton, 'appearAt')}
-                    onChange={appearAt => patchButton({ timing: { appearAt } })}
-                    min={0} step={0.1} suffix="з"
-                  />
-                  <OptionalNumberField
-                    value={buttonTimingField(project, targets, activeButton, 'hideAt')}
-                    onChange={hideAt => patchButton({ timing: { hideAt } })}
-                    min={0} step={0.1}
-                    emptyLabel="до кінця"
-                  />
-                </div>
-                <div className="row" style={{ marginTop: 8 }}>
-                  <SelectField
-                    value={buttonTimingField(project, targets, activeButton, 'enter')}
-                    options={ENTER_ANIMATIONS}
-                    onChange={enter => patchButton({ timing: { enter } })}
-                  />
-                  <NumberField
-                    value={buttonTimingField(project, targets, activeButton, 'enterDuration')}
-                    onChange={enterDuration => patchButton({ timing: { enterDuration } })}
-                    min={0} max={10} step={0.1} suffix="с"
-                  />
-                </div>
-                {/* Read off the active photo: the panel says whose values it is
-                    showing, and a warning about a window nobody can see would be
-                    worse than one about the window on screen. */}
-                {timingIssues(button.timing, project.duration).map(issue => (
-                  <div className="warn" key={issue}>{TIMING_COMPLAINTS[issue]}</div>
-                ))}
+                <TimingFields
+                  read={key => buttonTimingField(project, targets, activeButton, key)}
+                  onChange={timing => patchButton({ timing })}
+                  timing={button.timing}
+                  duration={project.duration}
+                />
               </div>
             </div>
           ) : null}

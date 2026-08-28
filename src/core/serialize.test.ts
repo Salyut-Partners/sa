@@ -88,3 +88,49 @@ describe('opening something else', () => {
     expect(fromFile(broken)).toEqual({ ok: false, reason: 'not-a-project' });
   });
 });
+
+describe('a project file carrying templates', () => {
+  const saved = (): Project => {
+    let p = apply(createProject(), {
+      type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:,a' }],
+    });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-panel' });
+    p = apply(p, { type: 'template/field', ids: ['a'], key: 'headline', value: 'Робота' });
+    p = apply(p, { type: 'template/field', ids: ['a'], key: 'jobs', value: ['Охорона', 'Кухня'] });
+    return apply(p, { type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 1.5 } } });
+  };
+
+  it('comes back with the template, the edits and the window intact', () => {
+    const result = fromFile(JSON.parse(JSON.stringify(toFile(saved()))));
+    expect(result.ok).toBe(true);
+    const layer = (result as { project: Project }).project.photos[0]!.template!;
+    expect(layer.definitionId).toBe('jobs-card-panel');
+    expect(layer.values).toEqual({ headline: 'Робота', jobs: ['Охорона', 'Кухня'] });
+    expect(layer.timing.appearAt).toBe(1.5);
+  });
+
+  it('opens a file written before templates existed, with none on the photos', () => {
+    // Refusing it would mean a project made yesterday cannot be opened today,
+    // and the missing half is a template nobody had chosen anyway.
+    const file = toFile(saved()) as unknown as Record<string, unknown>;
+    const older = {
+      ...file,
+      version: 1,
+      photos: (file['photos'] as Record<string, unknown>[]).map(({ template, ...rest }) => rest),
+    };
+    const result = fromFile(older);
+    expect(result.ok).toBe(true);
+    expect((result as { project: Project }).project.photos[0]!.template).toBeNull();
+  });
+
+  it('refuses a file whose template is not one', () => {
+    const file = toFile(saved()) as unknown as Record<string, unknown>;
+    const photos = (file['photos'] as Record<string, unknown>[])
+      .map(p => ({ ...p, template: { definitionId: 7 } }));
+    expect(fromFile({ ...file, photos })).toEqual({ ok: false, reason: 'not-a-project' });
+  });
+
+  it('refuses a file from a schema this build has never seen', () => {
+    expect(fromFile({ ...toFile(saved()), version: 99 })).toEqual({ ok: false, reason: 'version' });
+  });
+});

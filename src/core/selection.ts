@@ -2,8 +2,11 @@
 // branch inside every control: the panel asks for a field over the selection and
 // gets back either a value it can show or `mixed`, and it writes through the same
 // commands whichever it got.
+import { toText } from './fields.ts';
+import { DEFAULT_LOCALE } from './phrasebook.ts';
 import { photoById } from './project.ts';
-import type { ButtonLayer, Photo, Project, Rect, Timing } from './types.ts';
+import { fieldValue } from './templates.ts';
+import type { ButtonLayer, Photo, Project, Rect, TemplateLayer, Timing } from './types.ts';
 
 /**
  * What the selection agrees on. `mixed` is a first-class answer, not a null:
@@ -102,4 +105,70 @@ export function buttonCount(project: Project, ids: readonly string[]): Shared<nu
   const photos = ids.map(id => photoById(project, id));
   if (photos.some(p => p === null)) return MIXED;
   return shared(photos.map(p => p!.buttons.length));
+}
+
+
+// ---------------------------------------------------------------- template --
+
+/**
+ * What "no template" is called in the library and in a shared value. A sentinel
+ * rather than null so the choice reads as one list of options — the absence of
+ * a template is a thing the user picks, not a thing that failed to be picked.
+ */
+export const NO_TEMPLATE = '';
+
+export function templateChoice(project: Project, ids: readonly string[]): Shared<string> {
+  const photos = ids.map(id => photoById(project, id));
+  if (photos.some(p => p === null)) return MIXED;
+  return shared(photos.map(p => p!.template?.definitionId ?? NO_TEMPLATE));
+}
+
+const templatesOf = (
+  project: Project,
+  ids: readonly string[],
+): readonly TemplateLayer[] | null => {
+  const layers = ids.map(id => photoById(project, id)?.template);
+  return layers.every((l): l is TemplateLayer => l != null) ? layers : null;
+};
+
+/**
+ * The text a box shows for one field: what was typed, or what the dictionary
+ * says when nothing was — the same merge the frame is built through, so the box
+ * and the video never disagree about what the creative says. Always text, lists
+ * included: the panel edits a list a line at a time, and one control that reads
+ * every kind is why mixed only had to be solved once.
+ */
+export function templateText(
+  project: Project,
+  ids: readonly string[],
+  key: string,
+): Shared<string> {
+  const layers = templatesOf(project, ids);
+  if (layers === null) return MIXED;
+  return shared(layers.map(layer => toText(fieldValue(layer, key, DEFAULT_LOCALE))));
+}
+
+/**
+ * Whether the field was written by hand rather than left to the dictionary.
+ *
+ * One edited photo makes the whole selection edited: the mark exists to warn
+ * that the batch has drifted from the phrase book, and a drift in one of four
+ * photos is exactly the case worth marking.
+ */
+export function templateEdited(
+  project: Project,
+  ids: readonly string[],
+  key: string,
+): boolean {
+  const layers = templatesOf(project, ids);
+  return layers !== null && layers.some(layer => key in layer.values);
+}
+
+export function templateTimingField<K extends FlatKeys<Timing>>(
+  project: Project,
+  ids: readonly string[],
+  key: K,
+): Shared<Timing[K]> {
+  const layers = templatesOf(project, ids);
+  return layers === null ? MIXED : shared(layers.map(l => l.timing[key]));
 }
