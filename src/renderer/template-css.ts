@@ -157,4 +157,40 @@ export const TEMPLATE_CSS = `
 .cf-sheet-card .cf-cta{margin-top:28px;border-radius:20px;padding:28px 0;
   font-weight:800;font-size:44px;letter-spacing:2.8px}
 .cf-sheet-card .cf-disc{margin-top:20px;font-size:17px;line-height:1.35}
+
+/* ------------------------------------------------- donor: age bands ------ */
+.cf-dn-head{position:absolute;top:104px;left:64px;width:952px;display:flex;flex-direction:column;
+  font-family:'Anton','Avenir Next Condensed',sans-serif;font-size:158px;line-height:.9;
+  letter-spacing:-1px;text-transform:uppercase}
+.cf-dn-head .bot{color:#fff;text-shadow:0 8px 34px rgba(0,0,0,.5)}
+.cf-dn-mid{position:absolute;left:64px;width:952px;transform-origin:0 0}
+.cf-dn-badges{display:flex;flex-direction:column;gap:22px;align-items:flex-start}
+.cf-dn-badge{display:flex;align-items:center;gap:24px;background:#fff;border-radius:999px;
+  padding:16px 42px 16px 16px;box-shadow:0 14px 34px rgba(0,0,0,.28);will-change:transform,opacity}
+.cf-dn-badge .ic{width:78px;height:78px;border-radius:50%;flex:none;
+  display:flex;align-items:center;justify-content:center}
+.cf-dn-badge .tx{font-family:'Inter',sans-serif;font-weight:700;font-size:40px;line-height:1.15;
+  color:#0F1B2A;max-width:660px}
+.cf-dn-pledge{margin-top:40px;display:flex;align-items:center;gap:26px;
+  background:rgba(8,16,28,.82);border:4px solid;border-radius:26px;padding:22px 34px 22px 22px;
+  will-change:transform,opacity}
+.cf-dn-pledge .ic{width:88px;height:88px;border-radius:22px;flex:none;
+  display:flex;align-items:center;justify-content:center}
+.cf-dn-pledge .tx{display:flex;flex-direction:column;font-family:'Inter',sans-serif;
+  font-style:italic;font-weight:700;font-size:46px;line-height:1.12}
+.cf-dn-pledge .tx .a{color:#fff}
+.cf-dn-tiers{position:absolute;left:64px;bottom:118px;width:952px;
+  display:flex;flex-direction:column;gap:26px}
+.cf-dn-tier{display:flex;align-items:center;background:#fff;border-radius:22px;
+  padding:12px 14px 12px 0;box-shadow:0 16px 38px rgba(0,0,0,.3);overflow:hidden;
+  will-change:transform,opacity}
+/* The band is cut to a point on its right: the row reads left to right, towards
+   the button, the way the eye is meant to travel it. */
+.cf-dn-tier .band{flex:1;min-width:0;display:flex;align-items:center;padding:22px 64px 22px 40px;
+  margin:-12px 0;clip-path:polygon(0 0,calc(100% - 46px) 0,100% 50%,calc(100% - 46px) 100%,0 100%)}
+.cf-dn-tier .band .v{font-family:'Inter',sans-serif;font-weight:800;font-size:52px;
+  line-height:1;color:#0F1B2A;white-space:nowrap}
+.cf-dn-tier .go{flex:none;margin-left:20px;border-radius:16px;padding:22px 40px;color:#fff;
+  font-family:'Inter',sans-serif;font-weight:800;font-size:36px;letter-spacing:1.6px;
+  white-space:nowrap}
 `;

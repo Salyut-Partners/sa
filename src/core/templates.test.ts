@@ -7,8 +7,14 @@ import type { Locale, LocaleId } from './types.ts';
 const ALL_LOCALES: LocaleId[] = ['en', 'de', 'it', 'es', 'fr', 'nl', 'pl'];
 
 describe('the template library', () => {
-  it('carries the five records the contract asks for', () => {
-    expect(TEMPLATES).toHaveLength(5);
+  it('carries every record the library is meant to offer', () => {
+    // Named rather than counted: an id is what the model, the renderer and a
+    // saved project all agree on, so a rename has to be a decision here and not
+    // a number that still adds up.
+    expect(TEMPLATES.map(t => t.id)).toEqual([
+      'jobs-banner', 'jobs-card-pills', 'jobs-card-panel', 'jobs-card-sheet',
+      'rates', 'donor-tiers',
+    ]);
   });
 
   it('gives every template an id of its own', () => {

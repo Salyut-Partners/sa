@@ -10,6 +10,7 @@ import type { TemplateSpec } from '../../core/types.ts';
 import { cardPanel } from './card-panel.ts';
 import { cardPills } from './card-pills.ts';
 import { cardSheet } from './card-sheet.ts';
+import { donorTiers } from './donor-tiers.ts';
 import { rowsBanner } from './rows-banner.ts';
 
 export interface BuildContext {
@@ -51,6 +52,7 @@ const BUILDERS: Record<string, (context: BuildContext) => TemplateParts> = {
   'jobs-card-pills': cardPills,
   'jobs-card-panel': cardPanel,
   'jobs-card-sheet': cardSheet,
+  'donor-tiers': donorTiers,
   rates: rowsBanner({
     headKey: 'ratesHead',
     accentKey: 'ratesAccent',

@@ -27,6 +27,9 @@ const SHARED: Phrases = {
   // The rates banner is a column of figures; only the words around it translate.
   // In the currency the rest of the book quotes: the geos are the same seven.
   rates: ['200 – 300 €', '500 – 800 €', '900 – 1200 €'],
+  // Age bands are figures too: only the word after them changes language, and
+  // that word is part of the band in every locale that needs one.
+  donorTiers: ['18–25', '26–35', '36–45'],
 };
 
 const BY_LOCALE: Record<LocaleId, Phrases> = {
@@ -49,6 +52,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     linkLine: 'Link in the description',
     ratesHead: 'Find this',
     ratesAccent: 'job',
+    donorTop: 'SPERM',
+    donorBottom: 'DONATION',
+    donorBadges: ['Clinics are looking for donors', '100% confidential'],
+    donorPledge: 'Help a family and',
+    donorPledgeAccent: 'be compensated.',
+    donorCta: 'READ MORE',
   },
   de: {
     eyebrow: 'TEILZEIT',
@@ -66,6 +75,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     disclaimer: 'Dieser Inhalt dient ausschließlich zu Informationszwecken und garantiert nicht die Verfügbarkeit dieses konkreten Angebots.',
     ratesHead: 'Finde diesen',
     ratesAccent: 'Job',
+    donorTop: 'SAMEN',
+    donorBottom: 'SPENDE',
+    donorBadges: ['Kliniken suchen Spender', '100 % vertraulich'],
+    donorPledge: 'Hilf einer Familie und',
+    donorPledgeAccent: 'werde entschädigt.',
+    donorCta: 'MEHR ERFAHREN',
     linkLine: 'Link in der Beschreibung',
   },
   it: {
@@ -84,6 +99,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     disclaimer: 'Questo contenuto ha finalità puramente informative e non garantisce la disponibilità di questa specifica offerta.',
     ratesHead: 'Trova questo',
     ratesAccent: 'lavoro',
+    donorTop: 'DONAZIONE',
+    donorBottom: 'DI SPERMA',
+    donorBadges: ['Le cliniche cercano donatori', '100% riservato'],
+    donorPledge: 'Aiuta una famiglia e',
+    donorPledgeAccent: 'ricevi un compenso.',
+    donorCta: 'SCOPRI DI PIÙ',
     linkLine: 'Link nella descrizione',
   },
   es: {
@@ -102,6 +123,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     disclaimer: 'Este contenido tiene únicamente fines informativos y no garantiza la disponibilidad de esta oferta concreta.',
     ratesHead: 'Encuentra este',
     ratesAccent: 'trabajo',
+    donorTop: 'DONACIÓN',
+    donorBottom: 'DE ESPERMA',
+    donorBadges: ['Las clínicas buscan donantes', '100% confidencial'],
+    donorPledge: 'Ayuda a una familia y',
+    donorPledgeAccent: 'recibe una compensación.',
+    donorCta: 'SABER MÁS',
     linkLine: 'Enlace en la descripción',
   },
   fr: {
@@ -120,6 +147,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     disclaimer: "Ce contenu est fourni à titre informatif uniquement et ne garantit pas la disponibilité de cette offre précise.",
     ratesHead: 'Trouve ce',
     ratesAccent: 'job',
+    donorTop: 'DON DE',
+    donorBottom: 'SPERME',
+    donorBadges: ['Les cliniques cherchent des donneurs', '100% confidentiel'],
+    donorPledge: 'Aidez une famille et',
+    donorPledgeAccent: 'soyez indemnisé.',
+    donorCta: 'EN SAVOIR PLUS',
     linkLine: 'Lien dans la description',
   },
   nl: {
@@ -138,6 +171,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     disclaimer: 'Deze inhoud is uitsluitend ter informatie en garandeert niet de beschikbaarheid van dit specifieke aanbod.',
     ratesHead: 'Vind deze',
     ratesAccent: 'baan',
+    donorTop: 'SPERMA',
+    donorBottom: 'DONATIE',
+    donorBadges: ['Klinieken zoeken donoren', '100% vertrouwelijk'],
+    donorPledge: 'Help een gezin en',
+    donorPledgeAccent: 'word vergoed.',
+    donorCta: 'MEER WETEN',
     linkLine: 'Link in de beschrijving',
   },
   pl: {
@@ -156,6 +195,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     disclaimer: 'Treść ma charakter wyłącznie informacyjny i nie gwarantuje dostępności tej konkretnej oferty.',
     ratesHead: 'Znajdź tę',
     ratesAccent: 'pracę',
+    donorTop: 'DAWSTWO',
+    donorBottom: 'NASIENIA',
+    donorBadges: ['Kliniki szukają dawców', '100% poufnie'],
+    donorPledge: 'Pomóż rodzinie i',
+    donorPledgeAccent: 'otrzymaj rekompensatę.',
+    donorCta: 'DOWIEDZ SIĘ WIĘCEJ',
     linkLine: 'Link w opisie',
   },
 };

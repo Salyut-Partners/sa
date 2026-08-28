@@ -60,6 +60,25 @@ const RATES_FIELDS: FieldSchema = [
   { key: 'linkLine', label: 'Нижній рядок', kind: 'line' },
 ];
 
+/**
+ * The donor call: a two-line title, the claims that answer "is this real", one
+ * pledge, and the age bands the offer is split into.
+ *
+ * Its own schema rather than a share of JOB_FIELDS: this is a different offer,
+ * not a fourth layout of the same one. A donor creative has no rate, no shifts
+ * and no vacancy list, and folding it into the job schema would put nine dead
+ * fields in the panel for every one it uses.
+ */
+const DONOR_FIELDS: FieldSchema = [
+  { key: 'donorTop', label: 'Заголовок, верхній рядок', kind: 'line' },
+  { key: 'donorBottom', label: 'Заголовок, нижній рядок', kind: 'line' },
+  { key: 'donorBadges', label: 'Переваги', kind: 'list' },
+  { key: 'donorPledge', label: 'Обіцянка', kind: 'line' },
+  { key: 'donorPledgeAccent', label: 'Обіцянка, акцент', kind: 'line' },
+  { key: 'donorTiers', label: 'Вікові групи', kind: 'list' },
+  { key: 'donorCta', label: 'Напис на кнопці', kind: 'line' },
+];
+
 const LANDS: Timing = { appearAt: 0.3, hideAt: null, enter: 'none', enterDuration: 0.9 };
 /** The row banners build themselves a row at a time, so they open on the frame. */
 const OPENS: Timing = { appearAt: 0, hideAt: null, enter: 'none', enterDuration: 0.6 };
@@ -94,6 +113,13 @@ export const TEMPLATES: readonly TemplateInfo[] = [
     id: 'rates',
     label: 'Список ставок',
     schema: RATES_FIELDS,
+    defaultTiming: { ...OPENS },
+  },
+  {
+    id: 'donor-tiers',
+    label: 'Донорство · вікові групи',
+    schema: DONOR_FIELDS,
+    // Built a row at a time from the top, like the other row stacks.
     defaultTiming: { ...OPENS },
   },
 ];

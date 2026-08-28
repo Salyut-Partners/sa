@@ -43,7 +43,17 @@ const ICONS: Record<string, string> = {
   speech: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   arrow: '<path d="M5 12h13M13 6l6 6-6 6"/>',
+  shield: '<path d="M12 2.7 4.7 5.8v5.5c0 4.6 3.1 8.8 7.3 10 4.2-1.2 7.3-5.4 7.3-10V5.8Z"/><path d="m8.8 11.9 2.3 2.3 4.2-4.6"/>',
+  lock: '<rect x="4.6" y="10.4" width="14.8" height="10.2" rx="2.6"/><path d="M8.3 10.4V7.7a3.7 3.7 0 0 1 7.4 0v2.7"/>',
+  heart: '<path d="M12 20.8 4.8 13.9a4.5 4.5 0 0 1 6.4-6.3l.8.8.8-.8a4.5 4.5 0 0 1 6.4 6.3Z"/>',
 };
+
+/**
+ * The badge icons, in the order the claims are made: who is asking, then what
+ * they promise. Positional like the shift icons — a list the user lengthens
+ * cycles back to the start rather than running out of pictures.
+ */
+export const BADGE_ICONS = ['shield', 'lock', 'check'] as const;
 
 /** Line art in the accent, at whatever size the layout asks for. */
 export const icon = (name: keyof typeof ICONS | string, size: number, color: string): string =>
