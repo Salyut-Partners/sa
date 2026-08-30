@@ -12,6 +12,7 @@ import { cardPills } from './card-pills.ts';
 import { cardSheet } from './card-sheet.ts';
 import { donorTiers } from './donor-tiers.ts';
 import { rowsBanner } from './rows-banner.ts';
+import { scrimColumn } from './scrim-column.ts';
 
 export interface BuildContext {
   spec: TemplateSpec;
@@ -52,6 +53,7 @@ const BUILDERS: Record<string, (context: BuildContext) => TemplateParts> = {
   'jobs-card-pills': cardPills,
   'jobs-card-panel': cardPanel,
   'jobs-card-sheet': cardSheet,
+  'jobs-scrim': scrimColumn,
   'donor-tiers': donorTiers,
   rates: rowsBanner({
     headKey: 'ratesHead',

@@ -158,6 +158,37 @@ export const TEMPLATE_CSS = `
   font-weight:800;font-size:44px;letter-spacing:2.8px}
 .cf-sheet-card .cf-disc{margin-top:20px;font-size:17px;line-height:1.35}
 
+/* --------------------------------------------- jobs: scrim, no card ------ */
+.cf-sc-flag{position:absolute;top:58px;right:64px;font-size:56px;line-height:1}
+.cf-sc-col{position:absolute;top:132px;left:64px;width:600px;transform-origin:0 0;
+  display:flex;flex-direction:column;align-items:flex-start;
+  font-family:'Inter',-apple-system,sans-serif;color:#fff}
+.cf-sc-col .eyebrow{font-weight:800;font-size:30px;letter-spacing:3.2px;color:#fff;
+  padding:15px 28px;border-radius:14px;white-space:nowrap;will-change:transform,opacity}
+/* No font-size: the title is the one size the layout sets, because a locale whose
+   longest word will not fit the column gets a smaller one. See HEAD_SIZE. */
+.cf-sc-col .h1{margin-top:26px;font-weight:800;line-height:.98;
+  letter-spacing:-2.4px;text-shadow:0 10px 40px rgba(0,0,0,.55);will-change:transform,opacity}
+.cf-sc-col .aud{margin-top:22px;font-weight:700;font-size:36px;line-height:1.24;
+  color:#C3CCD8;will-change:transform,opacity}
+.cf-sc-rate{margin-top:34px;display:flex;flex-direction:column;background:#fff;
+  border-radius:30px;padding:26px 40px;color:#16202F;transform-origin:0 50%;
+  will-change:transform,box-shadow,opacity}
+.cf-sc-rate .top{display:flex;align-items:baseline;gap:14px}
+.cf-sc-rate .big{font-weight:800;font-size:86px;line-height:1;letter-spacing:-2.6px;
+  white-space:nowrap}
+.cf-sc-rate .u{font-weight:700;font-size:34px;color:#6B7784;white-space:nowrap}
+.cf-sc-rate .bot{margin-top:8px;font-weight:700;font-size:34px;color:#2A3542}
+.cf-sc-col .perks{margin-top:38px;display:flex;flex-direction:column;gap:22px}
+.cf-sc-col .perk{display:flex;align-items:center;gap:20px;font-weight:700;font-size:40px;
+  line-height:1.18;text-shadow:0 6px 24px rgba(0,0,0,.5);will-change:transform,opacity}
+.cf-sc-cta{position:relative;margin-top:44px;width:600px;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;gap:22px;
+  border-radius:24px;padding:34px 0;color:#fff;font-weight:800;font-size:48px;
+  letter-spacing:.4px;will-change:transform,box-shadow,opacity}
+.cf-sc-sheen{position:absolute;top:-25%;left:0;height:150%;pointer-events:none;
+  background:linear-gradient(100deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.45) 50%,rgba(255,255,255,0) 100%)}
+
 /* ------------------------------------------------- donor: age bands ------ */
 .cf-dn-head{position:absolute;top:104px;left:64px;width:952px;display:flex;flex-direction:column;
   font-family:'Anton','Avenir Next Condensed',sans-serif;font-size:158px;line-height:.9;

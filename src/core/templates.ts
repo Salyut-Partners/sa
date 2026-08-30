@@ -46,6 +46,22 @@ const JOB_FIELDS: FieldSchema = [
   { key: 'disclaimer', label: 'Дисклеймер', kind: 'text' },
 ];
 
+/**
+ * The same offer stated straight onto the photo, so it asks for the half of the
+ * card that fits beside a picture: no vacancy list, no shifts, no disclaimer.
+ *
+ * Narrowed from the card schema rather than written out, because these are the
+ * cards' own keys and not lookalikes of them. A schema decides which fields the
+ * panel offers and which reach the frame — never where a value is kept — so a
+ * headline typed on a card is the same `headline` here, and switching a photo
+ * between the two layouts asks the user to retype nothing.
+ */
+const SCRIM_KEEPS: ReadonlySet<string> = new Set([
+  'eyebrow', 'headline', 'flag', 'age', 'audience',
+  'rate', 'cur', 'unitTop', 'unitBot', 'perks', 'cta',
+]);
+const SCRIM_FIELDS: FieldSchema = JOB_FIELDS.filter(f => SCRIM_KEEPS.has(f.key));
+
 /** The banner states the offer in three lines, so it asks for three fields. */
 const BANNER_FIELDS: FieldSchema = [
   { key: 'headline', label: 'Заголовок', kind: 'line' },
@@ -108,6 +124,14 @@ export const TEMPLATES: readonly TemplateInfo[] = [
     schema: JOB_FIELDS,
     // The sheet unrolls from the top, and an unroll takes longer to read than a rise.
     defaultTiming: { ...LANDS, appearAt: 0.5, enterDuration: 1.1 },
+  },
+  {
+    id: 'jobs-scrim',
+    label: 'Вакансія · затемнення',
+    schema: SCRIM_FIELDS,
+    // The copy is the frame here rather than a panel laid over it, so it builds
+    // itself from the first beat like the row stacks do, not after a pause.
+    defaultTiming: { ...OPENS },
   },
   {
     id: 'rates',

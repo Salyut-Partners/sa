@@ -13,7 +13,7 @@ describe('the template library', () => {
     // a number that still adds up.
     expect(TEMPLATES.map(t => t.id)).toEqual([
       'jobs-banner', 'jobs-card-pills', 'jobs-card-panel', 'jobs-card-sheet',
-      'rates', 'donor-tiers',
+      'jobs-scrim', 'rates', 'donor-tiers',
     ]);
   });
 
@@ -44,6 +44,19 @@ describe('the template library', () => {
         }
       }
     }
+  });
+
+  it('states the scrim offer in the card keys, so nothing is retyped to switch', () => {
+    // Built by narrowing the card schema, which a typo would silently shorten
+    // rather than break. Pinned to the keys the layout actually draws.
+    const scrim = templateById('jobs-scrim')!;
+    expect(scrim.schema.map(f => f.key)).toEqual([
+      'eyebrow', 'headline', 'flag', 'age', 'audience',
+      'rate', 'cur', 'unitTop', 'unitBot', 'perks', 'cta',
+    ]);
+    const card = templateById('jobs-card-panel')!;
+    const labels = new Map(card.schema.map(f => [f.key, f.label]));
+    for (const field of scrim.schema) expect(labels.get(field.key), field.key).toBe(field.label);
   });
 
   it('holds the three card versions to one schema, as they are one offer in three layouts', () => {
