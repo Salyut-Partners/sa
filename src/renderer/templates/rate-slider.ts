@@ -9,6 +9,7 @@
 // It also runs to that position rather than starting there. A slider already at
 // rest is a picture of a control; a slider travelling to its answer is the offer
 // being made, which is the whole reason this creative wears one.
+import { amountOf, counterFor } from '../../core/money.ts';
 import { accent } from '../color.ts';
 import { clamp01, easeInOutCubic, easeOutBack, easeOutCubic } from '../easing.ts';
 import type { BuildContext, TemplateParts } from './index.ts';
@@ -94,6 +95,11 @@ export function rateSlider({ spec, frame }: BuildContext): TemplateParts {
   cta.style.background = `linear-gradient(180deg,${a.lift(0.12)} 0%,${a.dark(0.28)} 100%)`;
 
   const rest = restingAt(line(spec, 'payMin'), line(spec, 'payRate'), line(spec, 'payMax'));
+  // The figure counts up under the knob, in the spelling the field was written
+  // in. A field that is not a plain figure holds still and the knob travels
+  // alone — see `counterFor`.
+  const counter = counterFor(line(spec, 'payRate'));
+  const target = counter.value ?? 0;
 
   const sheenWidth = Math.round(CTA_WIDTH * 0.7);
   sheen.style.width = sheenWidth + 'px';
@@ -128,11 +134,13 @@ export function rateSlider({ spec, frame }: BuildContext): TemplateParts {
     card.style.opacity = String(easeOutCubic(seg(t, CARD_AT, 0.4)));
     card.style.transform = `translateY(${46 * (1 - c)}px) scale(${0.94 + 0.06 * c})`;
 
-    // The knob runs out to the payment, and the figure lands as it arrives.
+    // The knob runs out to the payment and the figure counts up with it, off the
+    // one `travel`, so the two cannot come to rest saying different things.
     const travel = easeOutCubic(seg(t, SLIDE_AT, SLIDE_SPAN));
     const at = (rest * travel * 100).toFixed(2) + '%';
     fill.style.width = at;
     knob.style.left = at;
+    amount.textContent = counter.say(target * travel);
     const settle = t > SLIDE_AT + SLIDE_SPAN
       ? Math.max(0, 1 - (t - SLIDE_AT - SLIDE_SPAN) * 3) : 0;
     amount.style.transform = `scale(${1 + 0.05 * settle})`;
@@ -161,22 +169,15 @@ export function rateSlider({ spec, frame }: BuildContext): TemplateParts {
 /**
  * Where the knob rests, as a fraction of the scale.
  *
- * The three fields are money, written the way the geo writes it — "10.000 €" is
- * ten thousand and not ten. Every digit is kept and everything else dropped,
- * which reads thousands separators of either kind correctly and is the whole
- * reason the figures live in the shared half of the phrase book: one spelling,
- * one number. A payment written with decimals would read high and pin the knob
- * to the end of the scale, which is wrong but still on the card.
+ * Read blunt rather than strict: "10.000 €" is ten thousand, and a scale whose
+ * ends are written with a stray word in them should still put the knob roughly
+ * right. The figure that has to be spelled back out at every frame is parsed
+ * strictly instead, by `counterFor`.
  */
 function restingAt(min: string, value: string, max: string): number {
-  const lo = digits(min);
-  const hi = digits(max);
-  const at = digits(value);
+  const lo = amountOf(min);
+  const hi = amountOf(max);
+  const at = amountOf(value);
   if (lo === null || hi === null || at === null || hi <= lo) return FALLBACK_AT;
   return clamp01((at - lo) / (hi - lo));
-}
-
-function digits(text: string): number | null {
-  const only = text.replace(/\D+/g, '');
-  return only === '' ? null : Number(only);
 }

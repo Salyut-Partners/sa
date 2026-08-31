@@ -204,8 +204,11 @@ export const TEMPLATE_CSS = `
   padding:92px 56px 80px;box-shadow:0 34px 80px rgba(10,20,35,.34);
   will-change:transform,opacity}
 .cf-pay-card .lbl{font-weight:600;font-size:50px;color:#4A5666}
+/* Tabular figures: the amount counts up, and proportional digits would make it
+   twitch sideways on every tick. */
 .cf-pay-card .amt{margin-top:22px;font-weight:800;font-size:190px;line-height:1.04;
-  letter-spacing:-5px;white-space:nowrap;will-change:transform}
+  letter-spacing:-5px;white-space:nowrap;font-variant-numeric:tabular-nums;
+  will-change:transform}
 .cf-pay-card .rule{margin:54px 0 46px;height:2px;background:#E4E8EF;border-radius:2px}
 .cf-pay-card .slbl{font-weight:600;font-size:40px;color:#8A94A2}
 /* The knob is centred on the fill's end by half its own width, so the track can
