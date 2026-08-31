@@ -189,6 +189,45 @@ export const TEMPLATE_CSS = `
 .cf-sc-sheen{position:absolute;top:-25%;left:0;height:150%;pointer-events:none;
   background:linear-gradient(100deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.45) 50%,rgba(255,255,255,0) 100%)}
 
+/* -------------------------------------------- payment: rate slider ------- */
+.cf-pay-top{position:absolute;top:56px;left:60px;width:960px;transform-origin:50% 0;
+  display:flex;flex-direction:column;align-items:center;text-align:center;
+  font-family:'Inter',-apple-system,sans-serif;color:#16233A}
+/* No font-size: the headline is the one size the layout sets, because a locale
+   whose longest word will not fit the block gets a smaller one. See HEAD_SIZE. */
+.cf-pay-top .head{font-weight:800;line-height:1.02;letter-spacing:-2.6px;
+  text-shadow:0 6px 26px rgba(255,255,255,.6);will-change:transform,opacity}
+.cf-pay-top .sub{margin-top:34px;padding:0 60px;font-weight:700;font-size:50px;
+  line-height:1.28;color:#2A3542;text-shadow:0 4px 18px rgba(255,255,255,.6);
+  will-change:transform,opacity}
+.cf-pay-card{margin-top:280px;width:816px;background:#fff;border-radius:60px;
+  padding:92px 56px 80px;box-shadow:0 34px 80px rgba(10,20,35,.34);
+  will-change:transform,opacity}
+.cf-pay-card .lbl{font-weight:600;font-size:50px;color:#4A5666}
+.cf-pay-card .amt{margin-top:22px;font-weight:800;font-size:190px;line-height:1.04;
+  letter-spacing:-5px;white-space:nowrap;will-change:transform}
+.cf-pay-card .rule{margin:54px 0 46px;height:2px;background:#E4E8EF;border-radius:2px}
+.cf-pay-card .slbl{font-weight:600;font-size:40px;color:#8A94A2}
+/* The knob is centred on the fill's end by half its own width, so the track can
+   be laid out in percent and still have the two agree at either extreme. */
+.cf-pay-card .track{position:relative;margin-top:42px;height:28px;border-radius:999px;
+  background:#E4E8EF}
+.cf-pay-card .fill{position:absolute;left:0;top:0;height:100%;border-radius:999px}
+.cf-pay-card .knob{position:absolute;top:50%;width:74px;height:74px;margin:-37px 0 0 -37px;
+  border-radius:50%;border:7px solid #fff}
+.cf-pay-card .ends{margin-top:46px;display:flex;justify-content:space-between;
+  font-weight:600;font-size:42px;color:#3A4554}
+.cf-pay-foot{position:absolute;left:0;bottom:56px;width:100%;display:flex;
+  flex-direction:column;align-items:center;font-family:'Inter',-apple-system,sans-serif}
+.cf-pay-cta{position:relative;width:790px;overflow:hidden;display:flex;align-items:center;
+  justify-content:center;border-radius:26px;padding:34px 0;color:#fff;font-weight:800;
+  font-size:50px;letter-spacing:.4px;will-change:transform,box-shadow,opacity}
+.cf-pay-sheen{position:absolute;top:-25%;left:0;height:150%;pointer-events:none;
+  background:linear-gradient(100deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.45) 50%,rgba(255,255,255,0) 100%)}
+.cf-pay-foot .hint{margin-top:36px;display:flex;align-items:center;gap:18px;
+  font-weight:600;font-size:38px;color:#fff;text-shadow:0 4px 18px rgba(0,0,0,.6);
+  will-change:opacity}
+
 /* ------------------------------------------------- donor: age bands ------ */
 .cf-dn-head{position:absolute;top:104px;left:64px;width:952px;display:flex;flex-direction:column;
   font-family:'Anton','Avenir Next Condensed',sans-serif;font-size:158px;line-height:.9;

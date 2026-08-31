@@ -81,6 +81,48 @@ export const panelInk = (a: Accent): PanelInk => ({
 });
 
 /**
+ * Set a title's size, shrinking it until its longest line fits `room` across.
+ *
+ * Only titles need this, and only on the layouts with no card under them. A card
+ * wraps its title inside a white sheet, so a word too long for the column simply
+ * takes more of the sheet; a title on the bare photo has nothing past its edge,
+ * so the word runs out into the picture and stops being readable. German and
+ * Dutch compounds do this routinely — "Flughafenpersonal" is one unbreakable
+ * word a third wider than a 600px column.
+ *
+ * One pass is exact: a word's width is linear in its font size.
+ */
+export function fitAcross(el: HTMLElement, room: number, size: number): void {
+  el.style.fontSize = size + 'px';
+  const over = overrun(el, room);
+  if (over > 1) el.style.fontSize = Math.floor(size / over) + 'px';
+}
+
+/**
+ * How far the longest line an element painted runs past `room`, as a ratio — 1
+ * or less when it fits.
+ *
+ * The element's own width is no use as the yardstick: a word too long to break
+ * widens the block it is in rather than spilling out of it, so the box and the
+ * ink agree with each other and both are wrong. `room` has to come from the
+ * column instead.
+ *
+ * And the lines are measured rather than the block, because which of those two
+ * an overlong word widens is up to the engine. A range over the contents asks
+ * for what was actually painted, which every engine answers the same way. Both
+ * figures are read as rendered rects, so the ratio survives the frame being
+ * scaled down to a grid cell or a library thumbnail.
+ */
+function overrun(el: HTMLElement, room: number): number {
+  if (room <= 0) return 1;
+  const range = el.ownerDocument.createRange();
+  range.selectNodeContents(el);
+  let widest = 0;
+  for (const rect of range.getClientRects()) widest = Math.max(widest, rect.width);
+  return widest > 0 ? widest / room : 1;
+}
+
+/**
  * Scale a panel down until it fits the frame, keeping `previous` when there is
  * nothing to measure against — a detached stage, or a panel inside a hidden box.
  * Answering 1 there would throw away a fit an earlier pass got right.

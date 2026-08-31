@@ -13,7 +13,7 @@ describe('the template library', () => {
     // a number that still adds up.
     expect(TEMPLATES.map(t => t.id)).toEqual([
       'jobs-banner', 'jobs-card-pills', 'jobs-card-panel', 'jobs-card-sheet',
-      'jobs-scrim', 'rates', 'donor-tiers',
+      'jobs-scrim', 'rates', 'donor-tiers', 'rate-slider',
     ]);
   });
 
@@ -57,6 +57,18 @@ describe('the template library', () => {
     const card = templateById('jobs-card-panel')!;
     const labels = new Map(card.schema.map(f => [f.key, f.label]));
     for (const field of scrim.schema) expect(labels.get(field.key), field.key).toBe(field.label);
+  });
+
+  it('quotes the slider figures identically in every locale, as figures do not translate', () => {
+    // The payment, and the two ends of the slider, are numbers in one currency.
+    // They sit in the shared half of the phrase book on purpose: a locale that
+    // carried its own copy is a locale where the knob comes to rest somewhere
+    // else, because the position is read back out of these three.
+    for (const key of ['payRate', 'payMin', 'payMax']) {
+      const said = ALL_LOCALES.map(id => phrase(id, key));
+      expect(new Set(said).size, key).toBe(1);
+      expect(said[0], key).not.toBeUndefined();
+    }
   });
 
   it('holds the three card versions to one schema, as they are one offer in three layouts', () => {

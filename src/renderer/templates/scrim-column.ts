@@ -14,7 +14,7 @@
 import { accent } from '../color.ts';
 import { easeInOutCubic, easeOutBack, easeOutCubic } from '../easing.ts';
 import type { BuildContext, TemplateParts } from './index.ts';
-import { DESIGN, esc, fitScale, icon, items, line, seg, sheenAt } from './kit.ts';
+import { DESIGN, esc, fitAcross, fitScale, icon, items, line, seg, sheenAt } from './kit.ts';
 
 /**
  * The copy column, as the stylesheet places it: 132px down, 600 wide. Repeated
@@ -102,14 +102,9 @@ export function scrimColumn({ spec, frame }: BuildContext): TemplateParts {
   /**
    * Shrink the copy until it clears the frame — across first, then down.
    *
-   * Across matters here in a way it does not on a card. A card wraps its title
-   * inside a white sheet, so a word too long for the column overflows onto more
-   * white; this title has a scrim under it and nothing beyond the edge of it, so
-   * a word that runs past the column runs out into the bright half of the photo
-   * and stops being readable. German compounds do exactly that:
-   * "Flughafenpersonal" is one unbreakable word a third wider than the column.
-   * It is scaled by how far it overruns, which is exact in one pass because a
-   * word's width is linear in its font size.
+   * Across matters here in a way it does not on a card: the title has a scrim
+   * under it and nothing past the edge of it, so a word wider than the column
+   * runs out into the bright half of the photo. See `fitAcross`.
    *
    * Down is the ordinary reason every panel in this library measures itself:
    * "Znajomość języka niewymagana" is half again the length of "No language
@@ -118,9 +113,7 @@ export function scrimColumn({ spec, frame }: BuildContext): TemplateParts {
    */
   function fit(): void {
     col.style.transform = 'none';
-    head.style.fontSize = HEAD_SIZE + 'px';
-    const over = overrun(head, col.getBoundingClientRect().width);
-    if (over > 1) head.style.fontSize = Math.floor(HEAD_SIZE / over) + 'px';
+    fitAcross(head, col.getBoundingClientRect().width, HEAD_SIZE);
     scale = fitScale(col, ROOM, scale);
     col.style.transform = `scale(${scale})`;
   }
@@ -164,28 +157,4 @@ export function scrimColumn({ spec, frame }: BuildContext): TemplateParts {
   }
 
   return { fit, render };
-}
-
-/**
- * How far the longest line an element painted runs past `room`, as a ratio — 1
- * or less when it fits.
- *
- * The element's own width is no use as the yardstick: a word too long to break
- * widens the block it is in rather than spilling out of it, so the box and the
- * ink agree with each other and both are wrong. `room` has to come from the
- * column instead.
- *
- * And the lines are measured rather than the block, because which of those two
- * an overlong word widens is up to the engine. A range over the contents asks
- * for what was actually painted, which every engine answers the same way. Both
- * figures are read as rendered rects, so the ratio survives the frame being
- * scaled down to a grid cell or a library thumbnail.
- */
-function overrun(el: HTMLElement, room: number): number {
-  if (room <= 0) return 1;
-  const range = el.ownerDocument.createRange();
-  range.selectNodeContents(el);
-  let widest = 0;
-  for (const rect of range.getClientRects()) widest = Math.max(widest, rect.width);
-  return widest > 0 ? widest / room : 1;
 }

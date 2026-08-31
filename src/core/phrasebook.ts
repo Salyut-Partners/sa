@@ -30,6 +30,13 @@ const SHARED: Phrases = {
   // Age bands are figures too: only the word after them changes language, and
   // that word is part of the band in every locale that needs one.
   donorTiers: ['18–25', '26–35', '36–45'],
+  // The payment and the two ends of its slider. Shared for the same reason the
+  // rate list is, and for one more: the layout reads these three back as numbers
+  // to work out where the knob rests, so a locale holding its own copy would be
+  // a locale where the slider quietly points somewhere else.
+  payRate: '3.532 €',
+  payMin: '890 €',
+  payMax: '10.000 €',
 };
 
 const BY_LOCALE: Record<LocaleId, Phrases> = {
@@ -58,6 +65,13 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     donorPledge: 'Help a family and',
     donorPledgeAccent: 'be compensated.',
     donorCta: 'READ MORE',
+    payHead: 'Buy a home without a',
+    payHeadAccent: 'bank?',
+    paySub: 'It is possible thanks to the option-purchase programme.',
+    payRateLabel: 'Your monthly payment:',
+    paySliderLabel: 'Choose the payment you want',
+    payCta: 'Discover now',
+    paySwipe: 'Swipe left',
   },
   de: {
     eyebrow: 'TEILZEIT',
@@ -82,6 +96,13 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     donorPledgeAccent: 'werde entschädigt.',
     donorCta: 'MEHR ERFAHREN',
     linkLine: 'Link in der Beschreibung',
+    payHead: 'Haus kaufen ohne',
+    payHeadAccent: 'Bank?',
+    paySub: 'Das ist möglich dank des Optionskauf-Programms.',
+    payRateLabel: 'Ihre monatliche Rate:',
+    paySliderLabel: 'Wählen Sie Ihre Wunschrate',
+    payCta: 'Jetzt entdecken',
+    paySwipe: 'Nach links wischen',
   },
   it: {
     eyebrow: 'PART-TIME',
@@ -106,6 +127,13 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     donorPledgeAccent: 'ricevi un compenso.',
     donorCta: 'SCOPRI DI PIÙ',
     linkLine: 'Link nella descrizione',
+    payHead: 'Comprare casa senza',
+    payHeadAccent: 'banca?',
+    paySub: 'È possibile grazie al programma di acquisto con opzione.',
+    payRateLabel: 'La tua rata mensile:',
+    paySliderLabel: 'Scegli la rata che preferisci',
+    payCta: 'Scopri ora',
+    paySwipe: 'Scorri a sinistra',
   },
   es: {
     eyebrow: 'MEDIA JORNADA',
@@ -130,6 +158,13 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     donorPledgeAccent: 'recibe una compensación.',
     donorCta: 'SABER MÁS',
     linkLine: 'Enlace en la descripción',
+    payHead: '¿Comprar casa sin',
+    payHeadAccent: 'banco?',
+    paySub: 'Es posible gracias al programa de compra con opción.',
+    payRateLabel: 'Tu cuota mensual:',
+    paySliderLabel: 'Elige la cuota que prefieras',
+    payCta: 'Descúbrelo ya',
+    paySwipe: 'Desliza a la izquierda',
   },
   fr: {
     eyebrow: 'TEMPS PARTIEL',
@@ -154,6 +189,13 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     donorPledgeAccent: 'soyez indemnisé.',
     donorCta: 'EN SAVOIR PLUS',
     linkLine: 'Lien dans la description',
+    payHead: 'Acheter une maison sans',
+    payHeadAccent: 'banque ?',
+    paySub: 'C\'est possible grâce au programme d\'achat avec option.',
+    payRateLabel: 'Votre mensualité :',
+    paySliderLabel: 'Choisissez votre mensualité',
+    payCta: 'Découvrir',
+    paySwipe: 'Balayez vers la gauche',
   },
   nl: {
     eyebrow: 'PARTTIME',
@@ -178,6 +220,13 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     donorPledgeAccent: 'word vergoed.',
     donorCta: 'MEER WETEN',
     linkLine: 'Link in de beschrijving',
+    payHead: 'Een huis kopen zonder',
+    payHeadAccent: 'bank?',
+    paySub: 'Dat kan dankzij het optiekoopprogramma.',
+    payRateLabel: 'Uw maandbedrag:',
+    paySliderLabel: 'Kies het maandbedrag dat u wilt',
+    payCta: 'Ontdek het nu',
+    paySwipe: 'Veeg naar links',
   },
   pl: {
     eyebrow: 'NIEPEŁNY ETAT',
@@ -202,6 +251,13 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     donorPledgeAccent: 'otrzymaj rekompensatę.',
     donorCta: 'DOWIEDZ SIĘ WIĘCEJ',
     linkLine: 'Link w opisie',
+    payHead: 'Kupno domu bez',
+    payHeadAccent: 'banku?',
+    paySub: 'To możliwe dzięki programowi zakupu z opcją.',
+    payRateLabel: 'Twoja miesięczna rata:',
+    paySliderLabel: 'Wybierz wysokość raty',
+    payCta: 'Sprawdź teraz',
+    paySwipe: 'Przesuń w lewo',
   },
 };
 

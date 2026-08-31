@@ -95,6 +95,29 @@ const DONOR_FIELDS: FieldSchema = [
   { key: 'donorCta', label: 'Напис на кнопці', kind: 'line' },
 ];
 
+/**
+ * The payment offer: a question for a headline, one figure, and the slider that
+ * picks it. Its own schema — it shares no field with the job or donor calls,
+ * because it is asking about a purchase rather than about work.
+ *
+ * `payMin` and `payMax` are the two ends of the slider and `payRate` is where it
+ * sits, so the three are read as numbers by the layout and not only printed. A
+ * user who raises the payment past the top of the scale gets the knob pinned to
+ * the end rather than a slider pointing off the card.
+ */
+const PAYMENT_FIELDS: FieldSchema = [
+  { key: 'payHead', label: 'Заголовок', kind: 'line' },
+  { key: 'payHeadAccent', label: 'Заголовок, акцент', kind: 'line' },
+  { key: 'paySub', label: 'Підзаголовок', kind: 'text' },
+  { key: 'payRateLabel', label: 'Підпис платежу', kind: 'line' },
+  { key: 'payRate', label: 'Платіж', kind: 'line' },
+  { key: 'paySliderLabel', label: 'Підпис повзунка', kind: 'line' },
+  { key: 'payMin', label: 'Мінімум шкали', kind: 'line' },
+  { key: 'payMax', label: 'Максимум шкали', kind: 'line' },
+  { key: 'payCta', label: 'Напис на кнопці', kind: 'line' },
+  { key: 'paySwipe', label: 'Підказка внизу', kind: 'line' },
+];
+
 const LANDS: Timing = { appearAt: 0.3, hideAt: null, enter: 'none', enterDuration: 0.9 };
 /** The row banners build themselves a row at a time, so they open on the frame. */
 const OPENS: Timing = { appearAt: 0, hideAt: null, enter: 'none', enterDuration: 0.6 };
@@ -144,6 +167,14 @@ export const TEMPLATES: readonly TemplateInfo[] = [
     label: 'Донорство · вікові групи',
     schema: DONOR_FIELDS,
     // Built a row at a time from the top, like the other row stacks.
+    defaultTiming: { ...OPENS },
+  },
+  {
+    id: 'rate-slider',
+    label: 'Платіж · повзунок',
+    schema: PAYMENT_FIELDS,
+    // The headline is the frame's first word, and the slider needs room to run
+    // before the video is over, so it opens rather than lands.
     defaultTiming: { ...OPENS },
   },
 ];
