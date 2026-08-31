@@ -158,7 +158,7 @@ describe('timingIssues', () => {
 describe('photoTimings', () => {
   const base = (over: Partial<Photo> = {}): Photo => ({
     id: 'a', name: 'a.jpg', image: 'data:,a', accent: '#1fa94b',
-    pushIn: true, glare: true, template: null, buttons: [], ...over,
+    pushIn: true, glare: true, template: null, buttons: [], props: [], ...over,
   });
 
   it('lists no timings for a bare photo, which is what a poster falls back on', () => {

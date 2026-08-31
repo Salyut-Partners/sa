@@ -25,6 +25,18 @@ export function hexToRgb(hex: string): [number, number, number] {
 export const rgbToHex = (c: readonly number[]): string =>
   '#' + c.map(v => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join('');
 
+/**
+ * The hue of a colour, in degrees. Grey answers 0 — it has no hue, and a caller
+ * turning a grey prop by any angle gets the same grey either way.
+ */
+export function hueOf(hex: string): number {
+  const [r, g, b] = hexToRgb(hex);
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), c = mx - mn;
+  if (c === 0) return 0;
+  const h = mx === r ? ((g - b) / c) % 6 : mx === g ? (b - r) / c + 2 : (r - g) / c + 4;
+  return (h * 60 + 360) % 360;
+}
+
 export function accent(hex: string): Accent {
   const base = hexToRgb(hex);
   return {

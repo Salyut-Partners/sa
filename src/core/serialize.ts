@@ -4,18 +4,18 @@ import { isLocaleId, newLocale } from './locales.ts';
 import { DEFAULT_CANVAS, DEFAULT_DURATION, DEFAULT_FPS, MAX_PHOTOS } from './project.ts';
 import { DEFAULT_MODEL_ID } from './voice.ts';
 import type {
-  ButtonLayer, CanvasSize, FieldValue, Locale, LocaleId, Photo, Project, Rect, TemplateLayer,
-  Timing,
+  ButtonLayer, CanvasSize, FieldValue, Locale, LocaleId, Photo, Project, PropLayer, Rect,
+  TemplateLayer, Timing,
 } from './types.ts';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /**
  * Schemas this build can still read. A file from before templates existed is
  * opened rather than refused: the half it is missing is a template nobody had
  * chosen, and refusing it would mean yesterday's batch cannot be opened today.
  */
-const READABLE_VERSIONS = new Set([1, 2, SCHEMA_VERSION]);
+const READABLE_VERSIONS = new Set([1, 2, 3, SCHEMA_VERSION]);
 
 /**
  * What lands on disk. Selection and the active photo are deliberately absent:
@@ -84,12 +84,18 @@ const isButton = (v: unknown): v is ButtonLayer =>
   isBag(v) && isText(v['id']) && isText(v['styleId']) && isText(v['fontId']) &&
   isText(v['text']) && isText(v['color']) && isRect(v['rect']) && isTiming(v['timing']);
 
+const isProp = (v: unknown): v is PropLayer =>
+  isBag(v) && isText(v['id']) && isText(v['propId']) && isRect(v['rect']) &&
+  isTiming(v['timing']) && Array.isArray(v['colors']) && v['colors'].every(isText);
+
 const isPhoto = (v: unknown): v is Photo =>
   isBag(v) && isText(v['id']) && isText(v['name']) && isText(v['image']) &&
   isText(v['accent']) && typeof v['pushIn'] === 'boolean' && typeof v['glare'] === 'boolean' &&
   // Absent is a valid answer, and the one a version 1 file gives.
   (v['template'] == null || isTemplate(v['template'])) &&
-  Array.isArray(v['buttons']) && v['buttons'].every(isButton);
+  Array.isArray(v['buttons']) && v['buttons'].every(isButton) &&
+  // Absent is what every file written before props existed says.
+  (v['props'] === undefined || (Array.isArray(v['props']) && v['props'].every(isProp)));
 
 const isCanvas = (v: unknown): v is CanvasSize => isBag(v) && isNum(v['width']) && isNum(v['height']);
 
@@ -116,6 +122,7 @@ export function fromFile(data: unknown): LoadResult {
   // rest of the app may assume a photo has the field, whatever the file said.
   const photos = stored.map(p => ({
     ...p,
+    props: p.props ?? [],
     template: p.template == null
       ? null
       : { definitionId: p.template.definitionId, timing: p.template.timing },

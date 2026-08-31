@@ -5,7 +5,7 @@ import { newLocale } from './locales.ts';
 import { templateById } from './templates.ts';
 import { DEFAULT_MODEL_ID } from './voice.ts';
 import type {
-  ButtonLayer, FieldValue, Locale, LocaleId, Photo, Project, Rect, Timing,
+  ButtonLayer, FieldValue, Locale, LocaleId, Photo, Project, PropLayer, Rect, Timing,
 } from './types.ts';
 
 export const DEFAULT_CANVAS = { width: 1080, height: 1920 } as const;
@@ -15,6 +15,14 @@ export const DEFAULT_ACCENT = '#1fa94b';
 
 /** Smallest a button may be dragged to, in percent of the canvas. */
 export const MIN_BUTTON_SIZE = { w: 12, h: 3 };
+
+/**
+ * Smallest a prop may be dragged to. Squarer than a button's floor because a
+ * prop is a picture rather than a line of text: the artwork sits inside the box
+ * keeping its own proportions, so a box squashed flat wastes the height instead
+ * of cropping anything, and a prop nobody can see is a prop nobody can grab.
+ */
+export const MIN_PROP_SIZE = { w: 8, h: 6 };
 
 /**
  * How many photos one project holds. Images live inside the project as data
@@ -38,6 +46,9 @@ export type PhotoPatch = Partial<Pick<Photo, 'name' | 'image' | 'accent' | 'push
  */
 export type ButtonPatch =
   & Partial<Omit<ButtonLayer, 'id' | 'rect' | 'timing'>>
+  & { rect?: Partial<Rect>; timing?: Partial<Timing> };
+export type PropPatch =
+  & { propId?: string; colors?: string[] }
   & { rect?: Partial<Rect>; timing?: Partial<Timing> };
 export type ProjectPatch =
   Partial<Pick<Project, 'duration' | 'fps' | 'canvas' | 'voiceId' | 'modelId' | 'fitToVoice'>>;
@@ -76,6 +87,10 @@ export type Command =
   | { type: 'button/nudge'; ids: readonly string[]; index: number; by: { x: number; y: number } }
   | { type: 'button/move'; ids: readonly string[]; from: number; to: number }
   | { type: 'button/duplicate'; ids: readonly string[]; index: number; id: string }
+  | { type: 'prop/add'; ids: readonly string[]; index: number; prop: PropLayer }
+  | { type: 'prop/patch'; ids: readonly string[]; index: number; patch: PropPatch }
+  | { type: 'prop/remove'; ids: readonly string[]; index: number }
+  | { type: 'prop/nudge'; ids: readonly string[]; index: number; by: { x: number; y: number } }
   | { type: 'template/set'; ids: readonly string[]; definitionId: string | null }
   | { type: 'template/patch'; ids: readonly string[]; patch: TemplatePatch }
   | { type: 'locale/add'; id: LocaleId }
@@ -131,6 +146,38 @@ export function defaultButton(
   };
 }
 
+/**
+ * A prop in a sensible spot: right of centre, where a portrait creative usually
+ * has room beside its subject, and stepped down so a second one does not land on
+ * the first.
+ *
+ * It arrives wearing the photo's accent rather than the colour it was drawn in,
+ * so that a prop dropped on a creative already belongs to it. A second colour is
+ * what starts it cycling.
+ */
+export function defaultProp(
+  id: string,
+  propId: string,
+  index: number,
+  accent: string,
+): PropLayer {
+  const rect: Rect = clampRect(
+    // Taller than it is wide: most of the catalogue is a standing object, and a
+    // wide box wastes its room on either side of one.
+    { x: 55, y: 26 + (index % 4) * 8, w: 36, h: 34 },
+    MIN_PROP_SIZE,
+  );
+  return {
+    id,
+    propId,
+    rect,
+    colors: [accent],
+    // Props land rather than open: the photo reads first, and the object arrives
+    // onto it. Long enough to be an arrival, short enough not to be a wait.
+    timing: { appearAt: 0.35, hideAt: null, enter: 'pop', enterDuration: 0.5 },
+  };
+}
+
 function newPhoto(input: NewPhoto): Photo {
   return {
     id: input.id,
@@ -141,6 +188,7 @@ function newPhoto(input: NewPhoto): Photo {
     glare: true,
     template: null,
     buttons: [],
+    props: [],
   };
 }
 
@@ -157,10 +205,23 @@ const clampIndex = (index: number, length: number): number =>
  * does. The panel needs the same number to know which button to open for editing.
  */
 export function nextSlot(project: Project, ids: readonly string[]): number {
+  return shortest(project, ids, p => p.buttons);
+}
+
+/** The same, for props: they are their own list and their own slots. */
+export function nextPropSlot(project: Project, ids: readonly string[]): number {
+  return shortest(project, ids, p => p.props);
+}
+
+function shortest(
+  project: Project,
+  ids: readonly string[],
+  of: (photo: Photo) => readonly unknown[],
+): number {
   const lengths = ids
     .map(id => photoById(project, id))
     .filter((p): p is Photo => p !== null)
-    .map(p => p.buttons.length);
+    .map(p => of(p).length);
   return lengths.length === 0 ? 0 : Math.min(...lengths);
 }
 
@@ -198,6 +259,14 @@ const patched = (button: ButtonLayer, patch: ButtonPatch): ButtonLayer => ({
   // Spreading the patch put the partials in place; these put the wholes back.
   rect: patch.rect === undefined ? button.rect : { ...button.rect, ...patch.rect },
   timing: patch.timing === undefined ? button.timing : { ...button.timing, ...patch.timing },
+});
+
+const patchedProp = (prop: PropLayer, patch: PropPatch): PropLayer => ({
+  ...prop,
+  ...patch,
+  rect: patch.rect === undefined ? prop.rect : { ...prop.rect, ...patch.rect },
+  timing: patch.timing === undefined ? prop.timing : { ...prop.timing, ...patch.timing },
+  colors: patch.colors === undefined ? prop.colors : [...patch.colors],
 });
 
 export function apply(project: Project, command: Command): Project {
@@ -310,6 +379,45 @@ export function apply(project: Project, command: Command): Project {
         return {
           ...p,
           buttons: p.buttons.map((b, i) => (i === command.index ? { ...b, rect } : b)),
+        };
+      });
+
+    case 'prop/add': {
+      // At a slot rather than at each photo's end, for the reason buttons are:
+      // photos already holding different numbers of props would otherwise put
+      // the new one at a different depth in each, and every later broadcast
+      // would edit a different prop per photo.
+      const at = clampIndex(command.index, Number.MAX_SAFE_INTEGER);
+      return mapPhotos(project, command.ids, p => {
+        const props = [...p.props];
+        props.splice(Math.min(at, props.length), 0, structuredClone(command.prop));
+        return { ...p, props };
+      });
+    }
+
+    case 'prop/patch':
+      return mapPhotos(project, command.ids, p => {
+        if (!inRange(command.index, p.props)) return p;
+        return {
+          ...p,
+          props: p.props.map((x, i) => (i === command.index ? patchedProp(x, command.patch) : x)),
+        };
+      });
+
+    case 'prop/remove':
+      return mapPhotos(project, command.ids, p =>
+        inRange(command.index, p.props)
+          ? { ...p, props: p.props.filter((_, i) => i !== command.index) }
+          : p);
+
+    case 'prop/nudge':
+      return mapPhotos(project, command.ids, p => {
+        const prop = p.props[command.index];
+        if (prop === undefined) return p;
+        const rect = nudgeRect(prop.rect, command.by, project.canvas, MIN_PROP_SIZE);
+        return {
+          ...p,
+          props: p.props.map((x, i) => (i === command.index ? { ...x, rect } : x)),
         };
       });
 

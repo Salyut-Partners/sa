@@ -10,7 +10,7 @@ import {
 import { buildSpec } from '../core/spec.ts';
 import { posterTime } from '../core/timing.ts';
 import type { Photo, Project, Spec } from '../core/types.ts';
-import { ButtonBoxes } from './ButtonBoxes.tsx';
+import { LayerBoxes } from './LayerBoxes.tsx';
 import { Clock } from './clock.ts';
 import { CreativeCell } from './CreativeCell.tsx';
 import { themeIcon, themeLabel, useTheme } from './theme.ts';
@@ -46,6 +46,9 @@ interface Cell {
 export function App() {
   const [history, setHistory] = useState<History<Project>>(() => historyOf(createProject()));
   const [activeButton, setActiveButton] = useState<number | null>(null);
+  // One layer is being edited at a time, whichever kind it is: two sets of
+  // handles on one frame would leave the arrow keys with nothing to aim at.
+  const [activeProp, setActiveProp] = useState<number | null>(null);
   const [report, setReport] = useState<ImportReport>(NOTHING_IMPORTED);
   const [status, setStatus] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -179,9 +182,14 @@ export function App() {
     if (result.ok) dispatch({ type: 'photo/replace', id, name: result.name, image: result.image });
   }, [dispatch]);
 
-  /** The button being edited, as the keyboard needs it: outside React's render. */
-  const editing = useRef(activeButton);
-  editing.current = activeButton;
+  /**
+   * The layer being edited, as the keyboard needs it: outside React's render.
+   * One of the two at a time, so the arrows always have a single target.
+   */
+  const editing = useRef<{ kind: 'button' | 'prop'; index: number } | null>(null);
+  editing.current = activeButton !== null
+    ? { kind: 'button', index: activeButton }
+    : activeProp !== null ? { kind: 'prop', index: activeProp } : null;
 
   // ------------------------------------------------------------ keyboard --
   useEffect(() => {
@@ -213,17 +221,18 @@ export function App() {
       }
 
       const nudge = NUDGES[e.key];
-      // A slider's own arrows move the playhead; a button's move the button.
+      // A slider's own arrows move the playhead; a layer's move the layer.
       const onSlider = target instanceof HTMLElement && target.matches('input[type=range]');
-      if (!nudge || onSlider || editing.current === null || meta) return;
+      const layer = editing.current;
+      if (!nudge || onSlider || layer === null || meta) return;
       e.preventDefault();
       // A step is one canvas pixel, which is what "по пікселю" has to mean when
       // the geometry is in percent and the cell on screen is a quarter size.
       const by = e.shiftKey ? 10 : 1;
       dispatch({
-        type: 'button/nudge',
+        type: layer.kind === 'button' ? 'button/nudge' : 'prop/nudge',
         ids: latest.current.selection,
-        index: editing.current,
+        index: layer.index,
         by: { x: nudge.x * by, y: nudge.y * by },
       });
     };
@@ -336,23 +345,40 @@ export function App() {
                       ? { type: 'photo/toggle', id: photo.id }
                       : { type: 'photo/activate', id: photo.id });
                     setActiveButton(null);
+                    setActiveProp(null);
                   }}
                   overlay={
-                    photo.id === project.activeId && photo.buttons.length > 0 ? (
-                      <ButtonBoxes
-                        buttons={photo.buttons}
-                        activeIndex={activeButton}
-                        cellWidth={CELL_WIDTH}
-                        cellHeight={project.canvas.height * scale}
-                        onSelect={setActiveButton}
-                        onChange={rect =>
-                          dispatch({
-                            type: 'button/patch',
-                            ids: project.selection,
-                            index: activeButton!,
-                            patch: { rect },
-                          })}
-                      />
+                    photo.id === project.activeId ? (
+                      <>
+                        <LayerBoxes
+                          layers={photo.props}
+                          activeIndex={activeProp}
+                          cellWidth={CELL_WIDTH}
+                          cellHeight={project.canvas.height * scale}
+                          onSelect={index => { setActiveButton(null); setActiveProp(index); }}
+                          onChange={rect =>
+                            dispatch({
+                              type: 'prop/patch',
+                              ids: project.selection,
+                              index: activeProp!,
+                              patch: { rect },
+                            })}
+                        />
+                        <LayerBoxes
+                          layers={photo.buttons}
+                          activeIndex={activeButton}
+                          cellWidth={CELL_WIDTH}
+                          cellHeight={project.canvas.height * scale}
+                          onSelect={index => { setActiveProp(null); setActiveButton(index); }}
+                          onChange={rect =>
+                            dispatch({
+                              type: 'button/patch',
+                              ids: project.selection,
+                              index: activeButton!,
+                              patch: { rect },
+                            })}
+                        />
+                      </>
                     ) : null
                   }
                 />
@@ -368,6 +394,8 @@ export function App() {
           dispatch={dispatch}
           activeButton={activeButton}
           setActiveButton={setActiveButton}
+          activeProp={activeProp}
+          setActiveProp={setActiveProp}
           onFiles={onFiles}
           onReplace={onReplace}
           report={report}

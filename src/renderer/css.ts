@@ -16,6 +16,9 @@ export const RENDERER_CSS = `
 .cf-base{position:absolute;left:0;top:0;width:100%;height:100%;display:block;object-fit:cover}
 
 .cf-layer{position:absolute;will-change:transform,opacity}
+/* The artwork keeps its own proportions inside whatever box it was dragged to:
+   a prop is a picture of a real object, and a stretched one stops being one. */
+.cf-prop{width:100%;height:100%;display:block;object-fit:contain;will-change:filter}
 .cf-btn{position:absolute;inset:0;display:block;will-change:transform,box-shadow}
 .cf-fill{position:relative;width:100%;height:100%;display:flex;align-items:center;
   justify-content:center;overflow:hidden}

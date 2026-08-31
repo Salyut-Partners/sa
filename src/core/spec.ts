@@ -4,8 +4,9 @@
 import { toPixels } from './canvas.ts';
 import { activeLocale, localeById, newLocale } from './locales.ts';
 import { photoById } from './project.ts';
+import { propById, propImage } from './props.ts';
 import { templateById, templateFields } from './templates.ts';
-import type { LocaleId, Project, ButtonSpec, Spec, TemplateSpec } from './types.ts';
+import type { LocaleId, Project, ButtonSpec, PropSpec, Spec, TemplateSpec } from './types.ts';
 
 export function buildSpec(
   project: Project,
@@ -33,6 +34,20 @@ export function buildSpec(
     timing: { ...b.timing },
   }));
 
+  // A prop the catalogue no longer carries drops off the frame, the way a
+  // template does: the artwork is the library's, and a creative short an object
+  // beats one that will not build.
+  const props: PropSpec[] = photo.props.flatMap(x => {
+    const info = propById(x.propId);
+    return info === null ? [] : [{
+      src: propImage(info.id),
+      hue: info.hue,
+      colors: [...x.colors],
+      rect: toPixels(x.rect, project.canvas),
+      timing: { ...x.timing },
+    }];
+  });
+
   const layer = photo.template;
   // A template the library no longer carries drops off the frame. Unlike a
   // button style, there is nothing sane to fall back to — a template is its own
@@ -54,6 +69,7 @@ export function buildSpec(
     glare: photo.glare,
     template,
     buttons,
+    props,
     locale: locale.id,
     script: locale.script.trim(),
     // A language that has not picked its own speaks with the project's, which

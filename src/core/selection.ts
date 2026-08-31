@@ -3,7 +3,9 @@
 // gets back either a value it can show or `mixed`, and it writes through the same
 // commands whichever it got.
 import { photoById } from './project.ts';
-import type { ButtonLayer, Photo, Project, Rect, TemplateLayer, Timing } from './types.ts';
+import type {
+  ButtonLayer, Photo, Project, PropLayer, Rect, TemplateLayer, Timing,
+} from './types.ts';
 
 /**
  * What the selection agrees on. `mixed` is a first-class answer, not a null:
@@ -114,6 +116,73 @@ export function buttonCount(project: Project, ids: readonly string[]): Shared<nu
   return shared(photos.map(p => p!.buttons.length));
 }
 
+
+// -------------------------------------------------------------------- prop --
+
+const propsAt = (
+  project: Project,
+  ids: readonly string[],
+  index: number,
+): PropLayer[] | null => {
+  const found = ids
+    .map(id => photoById(project, id))
+    .map(photo => photo?.props[index]);
+  return found.some(p => p === undefined) ? null : (found as PropLayer[]);
+};
+
+export function propRectField<K extends FlatKeys<Rect>>(
+  project: Project,
+  ids: readonly string[],
+  index: number,
+  key: K,
+): Shared<Rect[K]> {
+  const props = propsAt(project, ids, index);
+  return props === null ? MIXED : shared(props.map(p => p.rect[key]));
+}
+
+export function propTimingField<K extends FlatKeys<Timing>>(
+  project: Project,
+  ids: readonly string[],
+  index: number,
+  key: K,
+): Shared<Timing[K]> {
+  const props = propsAt(project, ids, index);
+  return props === null ? MIXED : shared(props.map(p => p.timing[key]));
+}
+
+/** Which object sits in this slot across the selection. */
+export function propChoice(
+  project: Project,
+  ids: readonly string[],
+  index: number,
+): Shared<string> {
+  const props = propsAt(project, ids, index);
+  return props === null ? MIXED : shared(props.map(p => p.propId));
+}
+
+/**
+ * The colours this slot runs through, as one string.
+ *
+ * Joined rather than compared as lists, because `shared` compares by identity
+ * and two equal arrays are two objects — asking for the list itself would answer
+ * `mixed` on a selection that agrees perfectly. The order is the animation, so
+ * the join keeps it.
+ */
+export function propColors(
+  project: Project,
+  ids: readonly string[],
+  index: number,
+): Shared<string> {
+  const props = propsAt(project, ids, index);
+  return props === null ? MIXED : shared(props.map(p => p.colors.join(' ')));
+}
+
+/** How many props the selection has, or `mixed`. Slots line up, as buttons do. */
+export function propCount(project: Project, ids: readonly string[]): Shared<number> {
+  const photos = ids.map(id => photoById(project, id));
+  if (photos.some(p => p === null)) return MIXED;
+  return shared(photos.map(p => p!.props.length));
+}
 
 // ---------------------------------------------------------------- template --
 

@@ -35,6 +35,14 @@ function visualParts(spec: Spec): unknown[] {
       b.rect.x, b.rect.y, b.rect.w, b.rect.h,
       timingParts(b.timing),
     ]),
+    spec.props.map(x => [
+      x.src, x.hue,
+      // In order: a prop that runs red then blue is not the one that runs blue
+      // then red, and the two are different videos.
+      x.colors.join(' '),
+      x.rect.x, x.rect.y, x.rect.w, x.rect.h,
+      timingParts(x.timing),
+    ]),
   ];
 }
 

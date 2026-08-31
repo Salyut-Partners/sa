@@ -5,9 +5,9 @@
 // The frame walk sets a time and screenshots; anything time-dependent that is
 // not derived from `t` would desync the export from what was on screen.
 import { layerStateAt } from '../core/timing.ts';
-import type { ButtonSpec, EnterAnimation, Spec, TemplateSpec } from '../core/types.ts';
+import type { ButtonSpec, EnterAnimation, PropSpec, Spec, TemplateSpec } from '../core/types.ts';
 import { styleById, type ButtonStyle } from './button-styles.ts';
-import { accent, type Accent } from './color.ts';
+import { accent, hueOf, type Accent } from './color.ts';
 import { ensureRendererStyle } from './css.ts';
 import { clamp01, easeInOutCubic, easeOutBack, easeOutCubic } from './easing.ts';
 import { fontById } from './fonts.ts';
@@ -31,6 +31,20 @@ interface TemplatePlace {
   spec: TemplateSpec;
   layer: HTMLElement;
   parts: TemplateParts;
+}
+
+/** One prop's DOM, plus the turns its colours work out to. */
+interface PropParts {
+  spec: PropSpec;
+  layer: HTMLElement;
+  img: HTMLElement;
+  /**
+   * How far to turn the hue for each colour it was given, in order. Empty means
+   * it wears the colours it was drawn in — either nobody chose any, or the prop
+   * is grey and has no hue to turn.
+   */
+  turns: number[];
+  riseBy: number;
 }
 
 /** One button's DOM, plus everything about it that does not change per frame. */
@@ -60,6 +74,10 @@ export function build(root: HTMLElement, spec: Spec): CreativeHandle {
   root.innerHTML =
     '<div class="cf-wrap">' +
     '<img class="cf-base" alt="">' +
+    // Under the copy and over the photo. A prop is a thing in the picture; the
+    // panel and the buttons are what the creative says, and an object drifting
+    // over the offer would be the one layer nobody chose to put there.
+    spec.props.map(propHtml).join('') +
     (spec.template === null ? '' : '<div class="cf-layer cf-tpl"><div class="cf-tpl-frame"></div></div>') +
     spec.buttons.map(buttonHtml).join('') +
     '</div>';
@@ -71,6 +89,8 @@ export function build(root: HTMLElement, spec: Spec): CreativeHandle {
   const template = dressTemplate(spec, root);
   const layers = [...root.querySelectorAll<HTMLElement>('.cf-btn-layer')];
   const parts: ButtonParts[] = spec.buttons.map((b, i) => dressButton(b, layers[i]!));
+  const propLayers = [...root.querySelectorAll<HTMLElement>('.cf-prop-layer')];
+  const propParts: PropParts[] = spec.props.map((x, i) => dressProp(x, propLayers[i]!));
 
   const fitAll = (): void => {
     parts.forEach(fitText);
@@ -85,6 +105,7 @@ export function build(root: HTMLElement, spec: Spec): CreativeHandle {
   function render(t: number): void {
     wrap.style.transform = 'scale(' + (spec.pushIn ? 1 + 0.022 * (t / spec.duration) : 1) + ')';
     if (template) renderTemplate(template, t, spec);
+    for (const x of propParts) renderProp(x, t, spec);
     for (const p of parts) renderButton(p, t, spec);
   }
 
@@ -129,6 +150,73 @@ function renderTemplate(place: TemplatePlace, t: number, spec: Spec): void {
   // the third second lives the life it would have lived landing on the first.
   place.parts.render(t - place.spec.timing.appearAt, state.enter);
 }
+
+function propHtml(p: PropSpec): string {
+  // The source is set on the element rather than written into this string: it
+  // comes off a Spec, and a Spec can arrive over the wire.
+  return (
+    `<div class="cf-layer cf-prop-layer" style="left:${p.rect.x}px;top:${p.rect.y}px;` +
+    `width:${p.rect.w}px;height:${p.rect.h}px">` +
+    '<img class="cf-prop" alt="">' +
+    '</div>'
+  );
+}
+
+/** How long a prop wears one colour, and how long it takes to become the next. */
+const PROP_HOLD = 1.5;
+const PROP_SWEEP = 0.45;
+
+function dressProp(spec: PropSpec, layer: HTMLElement): PropParts {
+  const img = layer.querySelector<HTMLImageElement>('.cf-prop')!;
+  img.src = spec.src;
+
+  // Recolouring is a hue rotation over the artwork, which is why the catalogue
+  // records the hue each prop was drawn in: the turn is the distance from there
+  // to the colour asked for. It is also why the chrome, the black plastic and
+  // the white stay as they are — they have no hue for a rotation to move, so a
+  // recoloured prop still reads as the same object in another finish.
+  const base = spec.hue;
+  const turns = base === null ? [] : spec.colors.map(c => shortWay(hueOf(c) - base));
+  return { spec, layer, img, turns, riseBy: spec.rect.h * 0.4 };
+}
+
+function renderProp(p: PropParts, t: number, spec: Spec): void {
+  const state = layerStateAt(p.spec.timing, t, spec.duration);
+  if (!state.visible) {
+    p.layer.style.display = 'none';
+    return;
+  }
+  p.layer.style.display = '';
+  applyEntrance(p.layer, p.spec.timing.enter, state.enter, p.riseBy);
+  // Time since it arrived, so a prop set to land late runs its colours from the
+  // first of them rather than joining a cycle already in progress.
+  p.img.style.filter = `hue-rotate(${turnAt(p.turns, t - p.spec.timing.appearAt).toFixed(2)}deg)`;
+}
+
+/**
+ * Where a prop's hue has got to: each colour held for a beat, then swept into
+ * the next, round and round.
+ *
+ * Swept rather than cut, because the point of putting several colours on one
+ * object is to say it comes in all of them — a cut reads as two shots spliced
+ * together, a sweep reads as the one object it is.
+ */
+function turnAt(turns: readonly number[], t: number): number {
+  const first = turns[0];
+  if (first === undefined) return 0;
+  if (turns.length === 1) return first;
+  const step = PROP_HOLD + PROP_SWEEP;
+  const at = Math.max(0, t) / step;
+  const i = Math.floor(at);
+  const into = (at - i) * step;
+  const from = turns[i % turns.length]!;
+  if (into < PROP_HOLD) return from;
+  const to = turns[(i + 1) % turns.length]!;
+  return from + shortWay(to - from) * easeInOutCubic((into - PROP_HOLD) / PROP_SWEEP);
+}
+
+/** An angle as the shorter way round, so a sweep never takes the long road. */
+const shortWay = (deg: number): number => ((((deg + 180) % 360) + 360) % 360) - 180;
 
 function buttonHtml(b: ButtonSpec): string {
   const style = styleById(b.styleId);

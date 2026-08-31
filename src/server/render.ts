@@ -92,11 +92,14 @@ export async function renderSpecToFile(
     // The page is built at the length it will be walked at, so a layer with an
     // open end reaches the new end rather than the one the user authored at.
     await page.evaluate(s => window.__init(s), { ...spec, duration });
-    // A half-decoded background would be captured as a blank frame.
-    await page.evaluate(() => {
-      const img = document.querySelector<HTMLImageElement>('.cf-base');
-      return img && !img.complete ? img.decode().catch(() => undefined) : undefined;
-    });
+    // A half-decoded image would be captured as a blank frame. Every image on
+    // the page rather than the photo alone: a prop is fetched from the catalogue
+    // over the network, so it lands later than a photo that came in the spec.
+    await page.evaluate(() => Promise.all(
+      [...document.images]
+        .filter(img => !img.complete)
+        .map(img => img.decode().catch(() => undefined)),
+    ).then(() => undefined));
     await page.evaluate(() => document.fonts.ready);
 
     encoder = spawnEncoder(spec.fps, outFile);

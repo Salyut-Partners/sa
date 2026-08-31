@@ -21,6 +21,7 @@ const spec = (over: Partial<Spec> = {}): Spec => ({
     rect: toPixels({ x: 10, y: 60, w: 70, h: 7 }, CANVAS),
     timing: { appearAt: 0, hideAt: null, enter: 'fade', enterDuration: 0.4 },
   }],
+  props: [],
   locale: 'en',
   script: 'Airport staff wanted.',
   voiceId: 'george',
@@ -40,7 +41,7 @@ describe('visualKey', () => {
     // split a group the moment a spec arrived over the wire.
     const b: Spec = {
       modelId: a.modelId, voiceId: a.voiceId, script: a.script, locale: a.locale,
-      buttons: a.buttons, template: a.template, glare: a.glare, pushIn: a.pushIn,
+      props: a.props, buttons: a.buttons, template: a.template, glare: a.glare, pushIn: a.pushIn,
       image: a.image, fps: a.fps, duration: a.duration, canvas: a.canvas,
     };
     expect(visualKey(b)).toBe(visualKey(a));

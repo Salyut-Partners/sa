@@ -71,6 +71,26 @@ export interface ButtonLayer {
 }
 
 /**
+ * One catalogue object placed on one photo.
+ *
+ * `colors` is a list rather than one colour because the reason to put a product
+ * on a creative is usually to say it comes in several: the prop runs through
+ * them in order, holding each for a beat. One colour is a prop that simply wears
+ * it, and an empty list is the artwork as it was drawn.
+ *
+ * Which object it is stays an id. The artwork is the library's and the same
+ * bytes for every user, so it is fetched by URL rather than carried in the
+ * document the way a photo is.
+ */
+export interface PropLayer {
+  id: string;
+  propId: string;
+  rect: Rect;
+  colors: string[];
+  timing: Timing;
+}
+
+/**
  * The template chosen on one photo: which one, and when it is on screen.
  *
  * What it *says* is not here. A field's text is the phrase book under the
@@ -95,6 +115,7 @@ export interface Photo {
   /** At most one. A photo either wears a template or it does not. */
   template: TemplateLayer | null;
   buttons: ButtonLayer[];
+  props: PropLayer[];
 }
 
 /**
@@ -153,6 +174,24 @@ export interface ButtonSpec {
 }
 
 /**
+ * A prop as the renderer wants it: the artwork located, the geometry in pixels
+ * and the catalogue left behind. The renderer holds no catalogue, the same way
+ * it holds no dictionary.
+ */
+export interface PropSpec {
+  src: string;
+  /**
+   * The hue the artwork was drawn in, or null when it has none worth turning.
+   * Recolouring is a rotation from here, so without it a colour would land
+   * somewhere different on every prop.
+   */
+  hue: number | null;
+  colors: string[];
+  rect: PixelRect;
+  timing: Timing;
+}
+
+/**
  * A template as the renderer wants it: every field in its schema resolved to a
  * value, with nothing left to look up. The renderer holds no dictionary.
  */
@@ -181,6 +220,7 @@ export interface Spec {
   glare: boolean;
   template: TemplateSpec | null;
   buttons: ButtonSpec[];
+  props: PropSpec[];
   /** Which language this one is. Not visual: the words are already resolved. */
   locale: LocaleId;
   /** What the voice says. Empty means no audio track at all. */

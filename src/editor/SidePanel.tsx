@@ -1,9 +1,13 @@
 import type { BatchPlan } from '../core/batch.ts';
 import { activeLocale, editedFieldCount, LOCALE_NAMES } from '../core/locales.ts';
-import { defaultButton, nextSlot, photoById, type ButtonPatch, type Command } from '../core/project.ts';
 import {
-  buttonCount, buttonField, buttonRectField, buttonTimingField, photoField, templateChoice,
-  templateTimingField,
+  defaultButton, defaultProp, nextPropSlot, nextSlot, photoById,
+  type ButtonPatch, type Command, type PropPatch,
+} from '../core/project.ts';
+import { propById, PROPS } from '../core/props.ts';
+import {
+  buttonCount, buttonField, buttonRectField, buttonTimingField, photoField, propChoice,
+  propColors, propCount, propRectField, propTimingField, templateChoice, templateTimingField,
 } from '../core/selection.ts';
 import type { Project } from '../core/types.ts';
 import { BUTTON_STYLES, FONTS } from '../renderer/index.ts';
@@ -15,6 +19,7 @@ import {
   CheckField, ColorField, NumberField, SelectField, TextField,
 } from './fields.tsx';
 import { describeTranslator, type VoiceCatalogue } from './server.ts';
+import { PropLibrary } from './PropLibrary.tsx';
 import { StyleLibrary } from './StylePreview.tsx';
 import { TemplateFields } from './TemplateFields.tsx';
 import { TemplateLibrary } from './TemplatePreview.tsx';
@@ -27,6 +32,8 @@ interface Props {
   dispatch: (command: Command) => void;
   activeButton: number | null;
   setActiveButton: (index: number | null) => void;
+  activeProp: number | null;
+  setActiveProp: (index: number | null) => void;
   onFiles: (files: FileList | null) => void;
   onReplace: (files: FileList | null) => void;
   report: ImportReport;
@@ -39,13 +46,14 @@ interface Props {
 const FONT_OPTIONS = Object.values(FONTS).map(f => ({ id: f.id, label: f.label }));
 
 export function SidePanel(props: Props) {
-  const { project, dispatch, activeButton, setActiveButton } = props;
+  const { project, dispatch, activeButton, setActiveButton, activeProp, setActiveProp } = props;
   const photo = photoById(project, project.activeId);
   /** Every write in this panel goes to the whole selection, one photo included. */
   const targets = project.selection;
   const many = targets.length > 1;
 
   const button = photo && activeButton !== null ? photo.buttons[activeButton] ?? null : null;
+  const prop = photo && activeProp !== null ? photo.props[activeProp] ?? null : null;
   /** Empty unless the server has told us there is no translator key at all. */
   const noTranslator = describeTranslator(props.catalogue);
 
@@ -79,6 +87,32 @@ export function SidePanel(props: Props) {
     // the thing they just moved.
     if (activeButton === from) setActiveButton(to);
   };
+
+  const patchProp = (patch: PropPatch): void => {
+    if (activeProp === null) return;
+    dispatch({ type: 'prop/patch', ids: targets, index: activeProp, patch });
+  };
+
+  const addProp = (propId: string): void => {
+    if (!photo) return;
+    const index = nextPropSlot(project, targets);
+    dispatch({
+      type: 'prop/add',
+      ids: targets,
+      index,
+      // Staggered by what is on the photo in front of the user rather than by
+      // the slot, for the reason a button is: on an uneven batch the slot can be
+      // 0 while this photo already carries three, and the new one would land
+      // underneath them.
+      prop: defaultProp(crypto.randomUUID(), propId, photo.props.length, photo.accent),
+    });
+    setActiveButton(null);
+    setActiveProp(index);
+  };
+
+  /** The colours of the prop being edited, as a list the controls can edit. */
+  const colors = prop ? prop.colors : [];
+  const writeColors = (next: string[]): void => patchProp({ colors: next });
 
   const duplicateButton = (index: number): void => {
     dispatch({ type: 'button/duplicate', ids: targets, index, id: crypto.randomUUID() });
@@ -269,6 +303,143 @@ export function SidePanel(props: Props) {
               + Додати кнопку
             </button>
           </div>
+
+          <hr />
+
+          <div className="group">
+            <div className="lab">
+              Предмети <span className="val">{photo.props.length}</span>
+            </div>
+            {many && propCount(project, targets).mixed ? (
+              <div className="warn">
+                У обраних фото різна кількість предметів — вони зіставляються за позицією.
+              </div>
+            ) : null}
+            {photo.props.length > 0 ? (
+              <div className="buttons-list">
+                {photo.props.map((x, i) => (
+                  <div
+                    key={x.id}
+                    className={'button-row' + (i === activeProp ? ' on' : '')}
+                    onClick={() => { setActiveButton(null); setActiveProp(i); }}
+                  >
+                    <span className="nm">{propById(x.propId)?.label ?? x.propId}</span>
+                    <button
+                      className="ic rm"
+                      title="Видалити"
+                      onClick={e => {
+                        e.stopPropagation();
+                        dispatch({ type: 'prop/remove', ids: targets, index: i });
+                        setActiveProp(null);
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <div className="note">Предмет лягає під панель і кнопки, поверх фото.</div>
+            <PropLibrary
+              selectedId={prop === null ? null : prop.propId}
+              onPick={id => (prop === null ? addProp(id) : patchProp({ propId: id }))}
+            />
+          </div>
+
+          {prop && activeProp !== null ? (
+            // Keyed like the button controls, so switching prop or photo builds
+            // them afresh rather than leaving a half-typed number behind.
+            <div key={`prop:${project.activeId}:${activeProp}`}>
+              <div className="group">
+                <div className="lab">
+                  Кольори
+                  {propChoice(project, targets, activeProp).mixed ? (
+                    <span className="val">різні предмети</span>
+                  ) : null}
+                </div>
+                {propById(prop.propId)?.hue === null ? (
+                  <div className="note">
+                    Цей предмет сірий — колір на нього не діє. Оберіть кольоровий,
+                    щоб увімкнути перефарбування.
+                  </div>
+                ) : (
+                  <div className="note">
+                    {colors.length > 1
+                      ? 'Предмет по черзі перебирає ці кольори.'
+                      : 'Додайте другий колір, щоб він почав змінюватись.'}
+                  </div>
+                )}
+                {propColors(project, targets, activeProp).mixed ? (
+                  <div className="warn">У обраних фото різні набори кольорів.</div>
+                ) : null}
+                {colors.map((c, i) => (
+                  <div className="row" key={i}>
+                    <input
+                      type="color"
+                      value={c}
+                      onChange={e =>
+                        writeColors(colors.map((v, k) => (k === i ? e.target.value : v)))}
+                    />
+                    <span className="hint">{c}</span>
+                    <button
+                      className="ic rm"
+                      title="Прибрати колір"
+                      onClick={() => writeColors(colors.filter((_, k) => k !== i))}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <button
+                  className="wide"
+                  style={{ marginTop: 8 }}
+                  onClick={() => writeColors([...colors, photo.accent])}
+                >
+                  + Додати колір
+                </button>
+              </div>
+
+              <div className="group">
+                <div className="lab">
+                  Позиція і розмір <span className="val">% полотна</span>
+                </div>
+                <div className="row">
+                  <NumberField
+                    value={propRectField(project, targets, activeProp, 'x')}
+                    onChange={x => patchProp({ rect: { x } })}
+                    min={0} max={100} step={0.1} suffix="X"
+                  />
+                  <NumberField
+                    value={propRectField(project, targets, activeProp, 'y')}
+                    onChange={y => patchProp({ rect: { y } })}
+                    min={0} max={100} step={0.1} suffix="Y"
+                  />
+                </div>
+                <div className="row">
+                  <NumberField
+                    value={propRectField(project, targets, activeProp, 'w')}
+                    onChange={w => patchProp({ rect: { w } })}
+                    min={0} max={100} step={0.1} suffix="Ш"
+                  />
+                  <NumberField
+                    value={propRectField(project, targets, activeProp, 'h')}
+                    onChange={h => patchProp({ rect: { h } })}
+                    min={0} max={100} step={0.1} suffix="В"
+                  />
+                </div>
+              </div>
+
+              <div className="group">
+                <div className="lab">Поява</div>
+                <TimingFields
+                  read={key => propTimingField(project, targets, activeProp, key)}
+                  onChange={timing => patchProp({ timing })}
+                  timing={prop.timing}
+                  duration={project.duration}
+                />
+              </div>
+            </div>
+          ) : null}
 
           {button && activeButton !== null ? (
             // Keyed by what is being edited, so switching button or photo builds
