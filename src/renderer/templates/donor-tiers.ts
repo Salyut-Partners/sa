@@ -10,53 +10,48 @@
 import { accent } from '../color.ts';
 import { easeOutBack, easeOutCubic } from '../easing.ts';
 import type { BuildContext, TemplateParts } from './index.ts';
-import { BADGE_ICONS, esc, icon, items, line, seg } from './kit.ts';
+import { BADGE_ICONS, icon, inFrom, items, line, say, seg } from './kit.ts';
+import { tierRows, tierRowsHtml } from './tier-stack.ts';
 
 /** When each band of the layout starts arriving. */
 const BADGES_AT = 0.35;
 const PLEDGE_AT = 0.75;
 const TIERS_AT = 1.05;
-/** The stagger inside a stack, and the span a long stack has to fit into. */
-const TIERS_SPAN = 2.4;
 
 /** The column everything is laid out in, inside the 1080-wide frame. */
 const COLUMN = 952;
 
-export function donorTiers({ spec, frame }: BuildContext): TemplateParts {
+export function donorTiers({ spec, frame, rtl }: BuildContext): TemplateParts {
   const a = accent(spec.color);
   const badges = items(spec, 'donorBadges');
   const tiers = items(spec, 'donorTiers');
-  const cta = esc(line(spec, 'donorCta'));
+  // Raw: the row builder escapes what it is given, and escaping it twice here
+  // would put "&amp;" on a button whose caption holds an ampersand.
+  const cta = line(spec, 'donorCta');
 
   frame.innerHTML =
     '<div class="cf-t-tint cf-dn-scrims"></div>' +
     '<div class="cf-dn-head">' +
-    `<span class="top">${esc(line(spec, 'donorTop'))}</span>` +
-    `<span class="bot">${esc(line(spec, 'donorBottom'))}</span>` +
+    `<span class="top">${say(line(spec, 'donorTop'))}</span>` +
+    `<span class="bot">${say(line(spec, 'donorBottom'))}</span>` +
     '</div>' +
     '<div class="cf-dn-mid">' +
     '<div class="cf-dn-badges">' +
     badges.map((text, i) =>
       '<div class="cf-dn-badge">' +
       `<span class="ic">${icon(BADGE_ICONS[i % BADGE_ICONS.length]!, 46, '#fff')}</span>` +
-      `<span class="tx">${esc(text)}</span>` +
+      `<span class="tx">${say(text)}</span>` +
       '</div>').join('') +
     '</div>' +
     '<div class="cf-dn-pledge">' +
     `<span class="ic">${icon('heart', 54, '#fff')}</span>` +
     '<span class="tx">' +
-    `<span class="a">${esc(line(spec, 'donorPledge'))}</span>` +
-    `<span class="b">${esc(line(spec, 'donorPledgeAccent'))}</span>` +
+    `<span class="a">${say(line(spec, 'donorPledge'))}</span>` +
+    `<span class="b">${say(line(spec, 'donorPledgeAccent'))}</span>` +
     '</span>' +
     '</div>' +
     '</div>' +
-    '<div class="cf-dn-tiers">' +
-    tiers.map(text =>
-      '<div class="cf-dn-tier">' +
-      `<span class="band"><span class="v">${esc(text)}</span></span>` +
-      `<span class="go">${cta}</span>` +
-      '</div>').join('') +
-    '</div>';
+    '<div class="cf-dn-tiers">' + tierRowsHtml(tiers, cta) + '</div>';
 
   const scrims = frame.querySelector<HTMLElement>('.cf-dn-scrims')!;
   const head = frame.querySelector<HTMLElement>('.cf-dn-head')!;
@@ -64,7 +59,7 @@ export function donorTiers({ spec, frame }: BuildContext): TemplateParts {
   const pledge = frame.querySelector<HTMLElement>('.cf-dn-pledge')!;
   const stack = frame.querySelector<HTMLElement>('.cf-dn-tiers')!;
   const badgeEls = [...frame.querySelectorAll<HTMLElement>('.cf-dn-badge')];
-  const tierEls = [...frame.querySelectorAll<HTMLElement>('.cf-dn-tier')];
+  const rows = tierRows(stack, a, rtl);
 
   // The copy runs the full height here, so the scrim does too — darker at the
   // top and bottom, where the title and the bands sit.
@@ -81,21 +76,6 @@ export function donorTiers({ spec, frame }: BuildContext): TemplateParts {
     badge.querySelector<HTMLElement>('.ic')!.style.background =
       `linear-gradient(160deg,${a.lift(0.28)},${a.dark(0.18)})`;
   }
-
-  // One step of the accent per band, top to bottom. The ladder stays in the pale
-  // half of the accent on purpose: the age sits on the band in dark ink, and a
-  // rung dark enough to look striking is a rung the figure stops reading on.
-  const rungs = Math.max(1, tierEls.length - 1);
-  tierEls.forEach((tier, i) => {
-    const k = 0.58 - 0.44 * (i / rungs);
-    tier.querySelector<HTMLElement>('.band')!.style.background =
-      `linear-gradient(96deg,${a.lift(k)},${a.lift(Math.max(0, k - 0.22))})`;
-    const go = tier.querySelector<HTMLElement>('.go')!;
-    go.style.background = `linear-gradient(180deg,${a.lift(0.2)},${a.dark(0.14)})`;
-    go.style.boxShadow = `0 10px 26px rgba(${a.rgb},.42)`;
-  });
-
-  const step = tierEls.length > 1 ? Math.min(0.34, TIERS_SPAN / tierEls.length) : 0;
 
   let scale = 1;
   /**
@@ -124,20 +104,14 @@ export function donorTiers({ spec, frame }: BuildContext): TemplateParts {
       const start = BADGES_AT + i * 0.16;
       const move = easeOutBack(seg(t, start, 0.58));
       badge.style.opacity = String(easeOutCubic(seg(t, start, 0.36)));
-      badge.style.transform = `translateX(${-120 * (1 - move)}px)`;
+      badge.style.transform = `translateX(${120 * inFrom(rtl) * (1 - move)}px)`;
     });
 
     const p = easeOutCubic(seg(t, PLEDGE_AT, 0.55));
     pledge.style.opacity = String(p);
     pledge.style.transform = `scale(${0.92 + 0.08 * p})`;
 
-    tierEls.forEach((tier, i) => {
-      const start = TIERS_AT + i * step;
-      const move = easeOutBack(seg(t, start, 0.6));
-      tier.style.opacity = String(easeOutCubic(seg(t, start, 0.38)));
-      tier.style.transform =
-        `translateX(${-160 * (1 - move)}px) scale(${0.92 + 0.08 * move})`;
-    });
+    rows.render(t, TIERS_AT);
   }
 
   return { fit, render };

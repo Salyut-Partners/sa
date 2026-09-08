@@ -4,6 +4,7 @@
 // Every frame is a pure function of `t`: no CSS transitions, no rAF, no clock.
 // The frame walk sets a time and screenshots; anything time-dependent that is
 // not derived from `t` would desync the export from what was on screen.
+import { localeDir } from '../core/locales.ts';
 import { layerStateAt } from '../core/timing.ts';
 import type { ButtonSpec, EnterAnimation, PropSpec, Spec, TemplateSpec } from '../core/types.ts';
 import { styleById, type ButtonStyle } from './button-styles.ts';
@@ -65,6 +66,23 @@ export function build(root: HTMLElement, spec: Spec): CreativeHandle {
   ensureRendererStyle(root.ownerDocument);
 
   root.className = 'cf-stage';
+  // The frame says which language it is in, because two of the things the
+  // browser does to text depend on knowing: `text-transform: uppercase`, which
+  // the banner headline and the rates headline both use, and hyphenation.
+  // Turkish is where it shows — its capital of "i" is "İ", so an unmarked frame
+  // uppercases "bu işi bul" to "BU IŞI BUL", which is not a Turkish sentence.
+  // Set here rather than in each template: it is a property of the frame, and a
+  // template that forgot would be wrong only in one language.
+  root.lang = spec.locale;
+  // And which way it is read. Hebrew makes this load-bearing twice over. The
+  // browser lays Hebrew letters out right to left whatever the frame says, but
+  // it resolves the neutrals — the full stop, the question mark, the bullet
+  // between two perks — to the *paragraph* direction, so in an unmarked frame
+  // the full stop of a Hebrew sentence lands at the end the sentence starts
+  // from. And the layouts read off it: a column pinned to the left of the
+  // picture belongs on the right when the eye enters there. See `localeDir`
+  // and the `[dir=rtl]` half of the template stylesheet.
+  root.dir = localeDir(spec.locale);
   root.style.width = spec.canvas.width + 'px';
   root.style.height = spec.canvas.height + 'px';
 
@@ -129,9 +147,24 @@ function dressTemplate(spec: Spec, root: HTMLElement): TemplatePlace | null {
   const frame = layer.querySelector<HTMLElement>('.cf-tpl-frame')!;
   // Every template is written against one frame size and scaled to the canvas,
   // so a second output size is this line rather than four re-measured layouts.
-  frame.style.transform = 'scale(' + spec.canvas.width / DESIGN.width + ')';
+  //
+  // The nudge is written after the scale, which puts it in the frame's own
+  // 1080x1920 units: the same figure then means the same place on the picture
+  // whatever size the canvas turns out to be. Percent of the frame rather than
+  // pixels for the same reason.
+  const fit = spec.canvas.width / DESIGN.width;
+  const lift = DESIGN.height * (spec.template.offsetY / 100);
+  frame.style.transform = `scale(${fit}) translateY(${lift}px)`;
 
-  return { spec: spec.template, layer, parts: definition.build({ spec: spec.template, frame }) };
+  return {
+    spec: spec.template,
+    layer,
+    parts: definition.build({
+      spec: spec.template,
+      frame,
+      rtl: localeDir(spec.locale) === 'rtl',
+    }),
+  };
 }
 
 function renderTemplate(place: TemplatePlace, t: number, spec: Spec): void {

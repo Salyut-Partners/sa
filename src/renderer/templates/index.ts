@@ -7,6 +7,7 @@
 // further change: nothing in the editor names a template.
 import { TEMPLATES, type TemplateInfo } from '../../core/templates.ts';
 import type { TemplateSpec } from '../../core/types.ts';
+import { aviaStrip } from './avia-strip.ts';
 import { cardPanel } from './card-panel.ts';
 import { cardPills } from './card-pills.ts';
 import { cardSheet } from './card-sheet.ts';
@@ -14,11 +15,25 @@ import { donorTiers } from './donor-tiers.ts';
 import { rateSlider } from './rate-slider.ts';
 import { rowsBanner } from './rows-banner.ts';
 import { scrimColumn } from './scrim-column.ts';
+import { tierRowsTemplate } from './tier-rows.ts';
 
 export interface BuildContext {
   spec: TemplateSpec;
   /** The 1080x1920 box the layout is written against, already scaled to the canvas. */
   frame: HTMLElement;
+  /**
+   * Whether the frame is read right to left.
+   *
+   * The stylesheet mirrors what it can off the frame's own `dir`, which covers
+   * every layout whose parts are laid out by the flow. What it cannot reach is
+   * anything a template writes as a number at build time — the direction a row
+   * slides in from, the end of the track a slider fills from — and those are the
+   * lines that would otherwise leave a Hebrew creative entering from the side
+   * the eye leaves by. Told rather than read off the DOM: a library thumbnail is
+   * built before it is anywhere, and a layout should not have to be attached to
+   * know which way round it is.
+   */
+  rtl: boolean;
 }
 
 export interface TemplateParts {
@@ -55,7 +70,9 @@ const BUILDERS: Record<string, (context: BuildContext) => TemplateParts> = {
   'jobs-card-panel': cardPanel,
   'jobs-card-sheet': cardSheet,
   'jobs-scrim': scrimColumn,
+  'avia-strip': aviaStrip,
   'donor-tiers': donorTiers,
+  'tier-rows': tierRowsTemplate,
   'rate-slider': rateSlider,
   rates: rowsBanner({
     headKey: 'ratesHead',

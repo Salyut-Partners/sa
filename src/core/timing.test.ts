@@ -167,7 +167,7 @@ describe('photoTimings', () => {
 
   it('counts the template among the layers, so the poster waits for the panel', () => {
     const panel = timing({ appearAt: 1.2, enterDuration: 0.9 });
-    const timings = photoTimings(base({ template: { definitionId: 'rates', timing: panel } }));
+    const timings = photoTimings(base({ template: { definitionId: 'rates', offsetY: 0, timing: panel } }));
     expect(posterTime(timings, 10)).toBeCloseTo(2.1, 10);
   });
 
@@ -175,7 +175,7 @@ describe('photoTimings', () => {
     const panel = timing({ appearAt: 0.3, enterDuration: 0.9 });
     const late = timing({ appearAt: 4, enterDuration: 0.4 });
     const timings = photoTimings(base({
-      template: { definitionId: 'rates', timing: panel },
+      template: { definitionId: 'rates', offsetY: 0, timing: panel },
       buttons: [{
         id: 'b', styleId: 'glow', fontId: 'anton', text: 'x', color: '#fff',
         rect: { x: 0, y: 0, w: 10, h: 10 }, timing: late,

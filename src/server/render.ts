@@ -14,9 +14,44 @@ const MAX_FRAMES = 36_000;
 
 let browserPromise: Promise<Browser> | null = null;
 
-const getBrowser = (): Promise<Browser> =>
-  (browserPromise ??= puppeteer.launch({
+/**
+ * The render browser: launched once and kept, because starting one costs more
+ * than a whole short video.
+ *
+ * Kept, but not trusted. A handle whose browser has gone answers every call
+ * with "Connection closed", and a memo that never looks would hand that same
+ * dead handle to every export from then until the server was restarted — a
+ * batch of twelve failing twelve times in a row, instantly, with a message
+ * about a connection the user never made. The browser outlives any one export
+ * and so has time to die between them: the machine sleeps, the shell is killed,
+ * a crash takes it. So liveness is asked at the moment of use, which is the
+ * only moment the answer is worth anything.
+ *
+ * A launch that failed is dropped for the same reason: a rejected promise left
+ * in the memo is a permanent outage caused by one bad minute.
+ */
+async function getBrowser(): Promise<Browser> {
+  const pending = browserPromise;
+  if (pending !== null) {
+    const browser = await pending.catch(() => null);
+    if (browser !== null && browser.connected) return browser;
+    // Only if no one has replaced it meanwhile: several workers reach here at
+    // once, and the second must not throw away the browser the first just made.
+    if (browserPromise === pending) browserPromise = null;
+  }
+  return (browserPromise ??= launchBrowser());
+}
+
+const launchBrowser = (): Promise<Browser> =>
+  puppeteer.launch({
     headless: 'shell',
+    // Over a pipe rather than a socket on a port, for two failures seen on this
+    // machine: a localhost connection does not always survive the laptop
+    // sleeping, and a browser attached only by a port lives on as an orphan
+    // when its parent is killed outright — one had been holding memory for
+    // eight days. A pipe closes when the process at the other end goes, and the
+    // browser leaves with it.
+    pipe: true,
     args: [
       '--no-sandbox',
       '--force-device-scale-factor=1',
@@ -24,12 +59,16 @@ const getBrowser = (): Promise<Browser> =>
       '--disable-lcd-text',
       '--font-render-hinting=none',
     ],
-  }));
+  });
 
 export async function closeBrowser(): Promise<void> {
   const pending = browserPromise;
   browserPromise = null;
-  if (pending) await (await pending).close().catch(() => {});
+  // Nothing here may throw: this runs on the way out of the process, and a
+  // launch that had failed would otherwise reject on shutdown and leave the
+  // exit that was waiting on it unreached.
+  const browser = pending === null ? null : await pending.catch(() => null);
+  if (browser !== null) await browser.close().catch(() => {});
 }
 
 export const tempFile = (ext: string): string =>
@@ -109,9 +148,7 @@ export async function renderSpecToFile(
       if (cancelled?.()) throw new CancelledError();
       await page.evaluate(t => window.__render(t), i / spec.fps);
       const frame = await page.screenshot({ type: 'jpeg', quality: 95 });
-      if (!encoder.stdin.write(frame)) {
-        await new Promise<void>(resolve => encoder!.stdin.once('drain', () => resolve()));
-      }
+      await encoder.write(frame);
     }
     encoder.stdin.end();
     await encoder.done;

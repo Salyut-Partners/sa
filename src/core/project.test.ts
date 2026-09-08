@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { apply, createProject, defaultButton, MAX_PHOTOS, nextSlot } from './project.ts';
+import {
+  apply, createProject, defaultButton, MAX_PHOTOS, nextSlot, TEMPLATE_LIFT,
+} from './project.ts';
 import { templateById } from './templates.ts';
 import type { Project } from './types.ts';
 
@@ -531,6 +533,48 @@ describe('template commands', () => {
     const before = withPhotos('a');
     expect(apply(before, { type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 1 } } }))
       .toBe(before);
+  });
+
+  it('slides a movable layout up and down the frame', () => {
+    let p = apply(withPhotos('a'), {
+      type: 'template/set', ids: ['a'], definitionId: 'tier-rows',
+    });
+    expect(p.photos[0]!.template!.offsetY).toBe(0);
+    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: -32 } });
+    expect(p.photos[0]!.template!.offsetY).toBe(-32);
+  });
+
+  it('holds the nudge inside the room the frame has', () => {
+    // Past the ends the stack leaves the picture, and a control whose far end
+    // hides the thing it moves is one the user has to be rescued from.
+    let p = apply(withPhotos('a'), {
+      type: 'template/set', ids: ['a'], definitionId: 'tier-rows',
+    });
+    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: -900 } });
+    expect(p.photos[0]!.template!.offsetY).toBe(TEMPLATE_LIFT.min);
+    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: 900 } });
+    expect(p.photos[0]!.template!.offsetY).toBe(TEMPLATE_LIFT.max);
+  });
+
+  it('refuses to nudge a layout that darkens the whole frame', () => {
+    // Not clamped to zero but ignored: a figure stored on one of these is a
+    // nudge the panel never shows and the frame never explains.
+    let p = apply(withPhotos('a'), {
+      type: 'template/set', ids: ['a'], definitionId: 'donor-tiers',
+    });
+    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: -30 } });
+    expect(p.photos[0]!.template!.offsetY).toBe(0);
+  });
+
+  it('puts a swapped layout back where it draws itself', () => {
+    // The window and the text survive a swap; the place does not. Where one
+    // layout was nudged to is a place the next one may have no use for.
+    let p = apply(withPhotos('a'), {
+      type: 'template/set', ids: ['a'], definitionId: 'tier-rows',
+    });
+    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: -40 } });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'donor-tiers' });
+    expect(p.photos[0]!.template!.offsetY).toBe(0);
   });
 });
 

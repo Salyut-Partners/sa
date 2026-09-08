@@ -17,12 +17,19 @@ export class ToolMissingError extends Error {
  *
  * JPEG frames are full-range; without the explicit conversion ffmpeg tags the
  * file yuvj420p and some players shift the contrast.
+ *
+ * The frames are named as mjpeg rather than left to be guessed. ffmpeg used to
+ * sniff the stream and work it out; from ffmpeg 8 an image2pipe input with no
+ * codec given is read as "Video: none, none" and the run dies before the first
+ * frame — an export that worked yesterday and stops on the day the machine
+ * upgrades ffmpeg. Saying what we are sending costs nothing and does not depend
+ * on which ffmpeg is installed.
  */
 export function spawnEncoder(fps: number, outFile: string) {
   const child = spawn(
     'ffmpeg',
     [
-      '-y', '-f', 'image2pipe', '-framerate', String(fps), '-i', 'pipe:0',
+      '-y', '-f', 'image2pipe', '-c:v', 'mjpeg', '-framerate', String(fps), '-i', 'pipe:0',
       '-vf', 'scale=in_range=full:out_range=limited,format=yuv420p',
       '-c:v', 'libx264', '-profile:v', 'high', '-preset', 'veryfast', '-crf', '20',
       '-color_range', 'tv', '-movflags', '+faststart', '-r', String(fps), outFile,
@@ -45,7 +52,30 @@ export function spawnEncoder(fps: number, outFile: string) {
   // caller's `await` gets its own.
   done.catch(() => {});
 
-  return { stdin: child.stdin, kill: () => child.kill('SIGKILL'), done };
+  // A dead encoder makes the next write raise EPIPE on this stream, and an
+  // unhandled 'error' on a stream takes the whole server down with it. What
+  // actually went wrong is already carried by `done`; this listener exists only
+  // so the fall is not fatal.
+  child.stdin.on('error', () => {});
+
+  /**
+   * Hand one frame over, waiting if the encoder is behind.
+   *
+   * The wait ends when the encoder catches up *or* when it dies. Waiting on
+   * 'drain' alone is the deadlock this had: a process that has gone will never
+   * drain, so an ffmpeg that refused the very first frame left the export
+   * sitting at nought per cent with an empty error list, for ever. Whatever
+   * ffmpeg said on its way out is what the user is shown instead.
+   */
+  const write = (frame: Uint8Array): Promise<void> => {
+    if (child.stdin.write(frame)) return Promise.resolve();
+    return Promise.race([
+      new Promise<void>(resolve => child.stdin.once('drain', () => resolve())),
+      done.then(() => { throw new Error('ffmpeg зупинився, не дочекавшись кадрів'); }),
+    ]);
+  };
+
+  return { stdin: child.stdin, write, kill: () => child.kill('SIGKILL'), done };
 }
 
 /** Run a tool to completion and hand back its stdout. */

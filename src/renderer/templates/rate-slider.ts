@@ -13,7 +13,7 @@ import { amountOf, counterFor } from '../../core/money.ts';
 import { accent } from '../color.ts';
 import { clamp01, easeInOutCubic, easeOutBack, easeOutCubic } from '../easing.ts';
 import type { BuildContext, TemplateParts } from './index.ts';
-import { DESIGN, esc, fitAcross, fitScale, icon, line, seg, sheenAt } from './kit.ts';
+import { DESIGN, fitAcross, fitScale, icon, inFrom, line, say, seg, sheenAt } from './kit.ts';
 
 /** Where the copy block starts, and the room it has before the button. */
 const TOP = 56;
@@ -39,31 +39,38 @@ const FALLBACK_AT = 0.29;
  * number declared in two places is a number that stops agreeing with itself.
  */
 const HEAD_SIZE = 104;
+/**
+ * The payment's size, here rather than in the CSS because the fit writes over
+ * it. The card is one width in every language and the figure is not: "40 500 kr"
+ * is half again the width of "3.532 €", and at the drawn size it runs off the
+ * white sheet it is printed on.
+ */
+const AMT_SIZE = 190;
 
-export function rateSlider({ spec, frame }: BuildContext): TemplateParts {
+export function rateSlider({ spec, frame, rtl }: BuildContext): TemplateParts {
   const a = accent(spec.color);
 
   frame.innerHTML =
     '<div class="cf-t-tint cf-pay-veil"></div>' +
     '<div class="cf-pay-top">' +
-      `<div class="head">${esc(line(spec, 'payHead'))} ` +
-        `<span class="ac">${esc(line(spec, 'payHeadAccent'))}</span></div>` +
-      `<div class="sub">${esc(line(spec, 'paySub'))}</div>` +
+      `<div class="head">${say(line(spec, 'payHead'))} ` +
+        `<span class="ac">${say(line(spec, 'payHeadAccent'))}</span></div>` +
+      `<div class="sub">${say(line(spec, 'paySub'))}</div>` +
       '<div class="cf-pay-card">' +
-        `<div class="lbl">${esc(line(spec, 'payRateLabel'))}</div>` +
-        `<div class="amt">${esc(line(spec, 'payRate'))}</div>` +
+        `<div class="lbl">${say(line(spec, 'payRateLabel'))}</div>` +
+        `<div class="amt">${say(line(spec, 'payRate'))}</div>` +
         '<div class="rule"></div>' +
-        `<div class="slbl">${esc(line(spec, 'paySliderLabel'))}</div>` +
+        `<div class="slbl">${say(line(spec, 'paySliderLabel'))}</div>` +
         '<div class="track"><span class="fill"></span><span class="knob"></span></div>' +
-        `<div class="ends"><span>${esc(line(spec, 'payMin'))}</span>` +
-          `<span>${esc(line(spec, 'payMax'))}</span></div>` +
+        `<div class="ends"><span>${say(line(spec, 'payMin'))}</span>` +
+          `<span>${say(line(spec, 'payMax'))}</span></div>` +
       '</div>' +
     '</div>' +
     '<div class="cf-pay-foot">' +
-      `<div class="cf-pay-cta">${esc(line(spec, 'payCta'))}` +
+      `<div class="cf-pay-cta">${say(line(spec, 'payCta'))}` +
         '<span class="cf-pay-sheen"></span></div>' +
       `<div class="hint">${icon('arrow', 44, '#fff')}` +
-        `<span>${esc(line(spec, 'paySwipe'))}</span></div>` +
+        `<span>${say(line(spec, 'paySwipe'))}</span></div>` +
     '</div>';
 
   const veil = frame.querySelector<HTMLElement>('.cf-pay-veil')!;
@@ -111,11 +118,31 @@ export function rateSlider({ spec, frame }: BuildContext): TemplateParts {
    * of "Swipe left", and a card laid out to one hand-tuned height loses the
    * bottom of its scale in the other six locales.
    */
+  /**
+   * Size the payment to the card, measured at the figure it finishes on.
+   *
+   * At the finished figure and not at whatever the counter is showing: the
+   * amount counts up, so a size taken from the current value would grow and
+   * shrink as it climbed. The last value is also the widest, so fitting there
+   * fits every step on the way.
+   *
+   * The block is a block: it stays the width of the card and the nowrap text
+   * spills out of it rather than widening it, so its own box is the room to
+   * measure against.
+   */
+  function fitAmount(): void {
+    const showing = amount.textContent;
+    amount.textContent = counter.say(target);
+    fitAcross(amount, amount.getBoundingClientRect().width, AMT_SIZE);
+    amount.textContent = showing;
+  }
+
   function fit(): void {
     top.style.transform = 'none';
     // Across as well as down: the question sits on the bare photo with nothing
     // past its edge, so a compound too wide for the block runs off the frame.
     fitAcross(head, top.getBoundingClientRect().width, HEAD_SIZE);
+    fitAmount();
     scale = fitScale(top, ROOM, scale);
     top.style.transform = `scale(${scale})`;
   }
@@ -139,7 +166,11 @@ export function rateSlider({ spec, frame }: BuildContext): TemplateParts {
     const travel = easeOutCubic(seg(t, SLIDE_AT, SLIDE_SPAN));
     const at = (rest * travel * 100).toFixed(2) + '%';
     fill.style.width = at;
-    knob.style.left = at;
+    // Placed from the start of the track rather than from its left, because in
+    // Hebrew the scale runs the other way: the cheap end is on the right, the
+    // fill grows leftwards out of it, and a knob pinned to `left` would sit at
+    // the far end of a scale it is supposed to be a third of the way along.
+    knob.style.insetInlineStart = at;
     amount.textContent = counter.say(target * travel);
     const settle = t > SLIDE_AT + SLIDE_SPAN
       ? Math.max(0, 1 - (t - SLIDE_AT - SLIDE_SPAN) * 3) : 0;
@@ -154,13 +185,18 @@ export function rateSlider({ spec, frame }: BuildContext): TemplateParts {
       `0 14px 34px rgba(${a.rgb},${(0.3 + 0.3 * ((beat + 1) / 2) * on).toFixed(3)})`;
     sheen.style.transform = sheenAt(t - CTA_AT, CTA_WIDTH, sheenWidth, easeInOutCubic);
 
-    // The swipe hint keeps drifting the way it is asking the viewer to go.
+    // The swipe hint keeps drifting the way it is asking the viewer to go —
+    // which is the other way in a mirrored feed, where the next card sits on the
+    // left and the thumb travels towards it. The arrow and the words move
+    // together: `paySwipe` says rightwards in Hebrew for the same reason, so if
+    // a live placement turns out to scroll the other way, both change or
+    // neither does.
     const drift = t > CTA_AT ? ((t - CTA_AT) % 1.6) / 1.6 : 0;
     hint.style.opacity = String(easeOutCubic(seg(t, CTA_AT + 0.3, 0.5)));
     // Flipped here rather than in the stylesheet: CSS `rotate` is composed
     // before `transform`, so the drift below it would run the other way.
     hint.querySelector<HTMLElement>('.cf-t-ic')!.style.transform =
-      `translateX(${-34 * easeInOutCubic(drift)}px) scaleX(-1)`;
+      `translateX(${34 * -inFrom(rtl) * easeInOutCubic(drift)}px) scaleX(${rtl ? 1 : -1})`;
   }
 
   return { fit, render };

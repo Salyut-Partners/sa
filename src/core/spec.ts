@@ -57,6 +57,7 @@ export function buildSpec(
       definitionId: layer.definitionId,
       fields: templateFields(layer.definitionId, locale),
       color: photo.accent,
+      offsetY: layer.offsetY,
       timing: { ...layer.timing },
     };
 

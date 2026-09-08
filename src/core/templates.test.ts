@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { newLocale } from './locales.ts';
+import { LOCALE_IDS, newLocale } from './locales.ts';
+import { amountOf, counterFor } from './money.ts';
 import { phrase } from './phrasebook.ts';
-import { fieldEdited, fieldText, fieldValue, TEMPLATES, templateById, templateFields } from './templates.ts';
+import {
+  fieldEdited, fieldText, fieldValue, TEMPLATES, templateById, templateFields, templateMoves,
+} from './templates.ts';
 import type { Locale, LocaleId } from './types.ts';
 
-const ALL_LOCALES: LocaleId[] = ['en', 'de', 'it', 'es', 'fr', 'nl', 'pl'];
+// Read off the release list rather than written out again. A tenth language
+// added to one list and forgotten in the other would leave this suite passing
+// while the new locale opened every template with blank boxes.
+const ALL_LOCALES: readonly LocaleId[] = LOCALE_IDS;
 
 describe('the template library', () => {
   it('carries every record the library is meant to offer', () => {
@@ -13,7 +19,7 @@ describe('the template library', () => {
     // a number that still adds up.
     expect(TEMPLATES.map(t => t.id)).toEqual([
       'jobs-banner', 'jobs-card-pills', 'jobs-card-panel', 'jobs-card-sheet',
-      'jobs-scrim', 'rates', 'donor-tiers', 'rate-slider',
+      'jobs-scrim', 'avia-strip', 'rates', 'donor-tiers', 'tier-rows', 'rate-slider',
     ]);
   });
 
@@ -59,16 +65,76 @@ describe('the template library', () => {
     for (const field of scrim.schema) expect(labels.get(field.key), field.key).toBe(field.label);
   });
 
-  it('quotes the slider figures identically in every locale, as figures do not translate', () => {
-    // The payment, and the two ends of the slider, are numbers in one currency.
-    // They sit in the shared half of the phrase book on purpose: a locale that
-    // carried its own copy is a locale where the knob comes to rest somewhere
-    // else, because the position is read back out of these three.
-    for (const key of ['payRate', 'payMin', 'payMax']) {
-      const said = ALL_LOCALES.map(id => phrase(id, key));
-      expect(new Set(said).size, key).toBe(1);
-      expect(said[0], key).not.toBeUndefined();
+  it('quotes every figure in the currency of the country it is going to', () => {
+    // The failure this is here for is a copy-paste: a language added by pasting
+    // the one above it and its money left alone, so a Swedish advert offers
+    // euro. A reader notices the wrong currency before they read the offer.
+    for (const id of ALL_LOCALES) {
+      const symbol = String(phrase(id, 'cur'));
+      expect(symbol, `${id}.cur`).not.toBe('');
+      for (const row of phrase(id, 'rates') as string[]) {
+        expect(row, `${id}.rates`).toContain(symbol);
+      }
+      for (const key of ['payMin', 'payRate', 'payMax']) {
+        expect(String(phrase(id, key)), `${id}.${key}`).toContain(symbol);
+      }
     }
+  });
+
+  it('gives every locale a pay scale that stands up on its own', () => {
+    // The three slider figures are money, so they are the locale's own. What
+    // has to hold in their place is that each set is coherent: the layout reads
+    // them back as numbers to place the knob, so a figure it cannot take apart,
+    // or a payment outside its own scale, is a slider pointing nowhere.
+    for (const id of ALL_LOCALES) {
+      const amount = (key: string): number | null => amountOf(String(phrase(id, key)));
+      const min = amount('payMin');
+      const rate = amount('payRate');
+      const max = amount('payMax');
+      for (const [key, value] of [['payMin', min], ['payRate', rate], ['payMax', max]] as const) {
+        expect(value, `${id}.${key}`).not.toBeNull();
+      }
+      expect(min!, id).toBeLessThan(rate!);
+      expect(rate!, id).toBeLessThan(max!);
+      // Countable, too: the payment counts up as the knob travels, which means
+      // being taken apart and re-spelled at every frame. A figure the counter
+      // cannot read holds still — right, but not what this card was drawn for.
+      expect(counterFor(String(phrase(id, 'payRate'))).value, id).toBe(rate);
+    }
+  });
+
+  it('rests the knob at the same point on the scale in every language', () => {
+    // Nine languages, one design. The figures differ because the money does,
+    // but the picture was laid out once: a locale whose payment sat at the far
+    // end of its own scale would be a different card, not a translated one.
+    const restingAt = (id: LocaleId): number => {
+      const at = (key: string): number => amountOf(String(phrase(id, key)))!;
+      return (at('payRate') - at('payMin')) / (at('payMax') - at('payMin'));
+    };
+    for (const id of ALL_LOCALES) expect(restingAt(id), id).toBeCloseTo(restingAt('en'), 2);
+  });
+
+  it('states the strip in the donor keys, so nothing is retyped to switch', () => {
+    // Narrowed from the donor schema, which a typo would silently shorten
+    // rather than break. Pinned to the keys the layout actually draws.
+    const strip = templateById('tier-rows')!;
+    expect(strip.schema.map(f => f.key)).toEqual(['donorTiers', 'donorCta']);
+    const donor = templateById('donor-tiers')!;
+    const labels = new Map(donor.schema.map(f => [f.key, f.label]));
+    for (const field of strip.schema) expect(labels.get(field.key), field.key).toBe(field.label);
+  });
+
+  it('lets only the layout that carries no scrim be moved', () => {
+    // Every other layout darkens the whole picture behind itself, so sliding it
+    // drags the shading off one edge and leaves the other bare. The list is
+    // named rather than counted: making a layout movable is a decision about
+    // how it is drawn, and it should have to be made here too.
+    expect(TEMPLATES.filter(t => t.movable === true).map(t => t.id)).toEqual(['tier-rows']);
+    expect(templateMoves('tier-rows')).toBe(true);
+    expect(templateMoves('donor-tiers')).toBe(false);
+    // A layout this build no longer carries cannot be moved either: an offset
+    // nothing can show is one nobody could undo.
+    expect(templateMoves('no-such-template')).toBe(false);
   });
 
   it('holds the three card versions to one schema, as they are one offer in three layouts', () => {
@@ -109,7 +175,7 @@ describe('what a field says', () => {
 
   it('reads every kind as text for the box that edits it', () => {
     expect(fieldText(en(), { key: 'rates', label: '', kind: 'list' }))
-      .toBe('200 – 300 €\n500 – 800 €\n900 – 1200 €');
+      .toBe('£200 – 300\n£450 – 700\n£800 – 1,100');
   });
 
   it('says which fields were written by hand, so the dictionary ones can be told apart', () => {

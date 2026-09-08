@@ -5,7 +5,7 @@ import { accent } from '../color.ts';
 import { easeInOutCubic, easeOutBack, easeOutCubic } from '../easing.ts';
 import type { BuildContext, TemplateParts } from './index.ts';
 import {
-  DESIGN, esc, fitScale, icon, items, line, panelInk, seg, sheenAt, SHIFT_ICONS,
+  DESIGN, fitScale, icon, items, line, panelInk, say, seg, sheenAt, SHIFT_ICONS,
 } from './kit.ts';
 
 /** How far above the bottom of the frame the panel sits, and what that leaves it. */
@@ -17,13 +17,13 @@ export function cardPills({ spec, frame }: BuildContext): TemplateParts {
   const ink = panelInk(a);
 
   const pills = items(spec, 'jobs')
-    .map(job => `<span class="pill">${esc(job)}</span>`).join('');
+    .map(job => `<span class="pill">${say(job)}</span>`).join('');
   const shifts = items(spec, 'shifts').map((time, i) =>
     `<div class="shift">${icon(SHIFT_ICONS[i % 3]!, 44, a.base)}` +
-    `<span class="tm">${esc(time)}</span></div>`).join('');
+    `<span class="tm">${say(time)}</span></div>`).join('');
   const perks = items(spec, 'perks').map((perk, i) =>
     `<div class="perk">${icon(i === 0 ? 'person' : i === 1 ? 'speech' : 'check', 27, a.base)}` +
-    `${esc(perk)}</div>`).join('');
+    `${say(perk)}</div>`).join('');
 
   frame.innerHTML =
     '<div class="cf-t-tint"></div>' +
@@ -31,28 +31,28 @@ export function cardPills({ spec, frame }: BuildContext): TemplateParts {
       // Not on the layout this was ported from, which had no eyebrow. It is here
       // because the three cards share one schema by design, and a box in the
       // panel that draws nothing on the frame is a box that lies about the card.
-      `<div class="eyebrow">${esc(line(spec, 'eyebrow'))}</div>` +
-      `<div class="head">${esc(line(spec, 'headline'))}` +
-        `<span class="flag">${esc(line(spec, 'flag'))}</span></div>` +
+      `<div class="eyebrow">${say(line(spec, 'eyebrow'))}</div>` +
+      `<div class="head">${say(line(spec, 'headline'))}` +
+        `<span class="flag">${say(line(spec, 'flag'))}</span></div>` +
       '<div class="rule"></div>' +
-      `<div class="age">${esc(line(spec, 'age'))}</div>` +
-      `<div class="aud">${esc(line(spec, 'audience'))}</div>` +
+      `<div class="age">${say(line(spec, 'age'))}</div>` +
+      `<div class="aud">${say(line(spec, 'audience'))}</div>` +
       '<div class="cf-rate">' +
-        `<span class="big">${esc(line(spec, 'rate'))}</span>` +
-        `<span class="unit"><b>${esc(line(spec, 'cur'))}</b> / ${esc(line(spec, 'unitTop'))}` +
-        `<br>${esc(line(spec, 'unitBot'))}</span>` +
+        `<span class="big">${say(line(spec, 'rate'))}</span>` +
+        `<span class="unit"><b>${say(line(spec, 'cur'))}</b> / ${say(line(spec, 'unitTop'))}` +
+        `<br>${say(line(spec, 'unitBot'))}</span>` +
       '</div>' +
-      `<div class="sec"><div class="sec-h">${esc(line(spec, 'jobsLabel'))}` +
+      `<div class="sec"><div class="sec-h">${say(line(spec, 'jobsLabel'))}` +
         '<span class="ln"></span><span class="dot"></span></div>' +
         `<div class="pills">${pills}</div></div>` +
-      `<div class="sec"><div class="sec-h">${esc(line(spec, 'shiftsLabel'))}` +
+      `<div class="sec"><div class="sec-h">${say(line(spec, 'shiftsLabel'))}` +
         '<span class="ln"></span><span class="dot"></span></div>' +
         `<div class="shifts">${shifts}</div></div>` +
       `<div class="perks">${perks}</div>` +
-      `<div class="cf-cta">${esc(line(spec, 'cta'))}` +
+      `<div class="cf-cta">${say(line(spec, 'cta'))}` +
         icon('arrow', 46, '#fff') +
         '<div class="cf-sheen"></div></div>' +
-      `<div class="cf-disc">${esc(line(spec, 'disclaimer'))}</div>` +
+      `<div class="cf-disc">${say(line(spec, 'disclaimer'))}</div>` +
     '</div>';
 
   const tint = frame.querySelector<HTMLElement>('.cf-t-tint')!;

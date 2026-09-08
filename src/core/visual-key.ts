@@ -25,6 +25,9 @@ function visualParts(spec: Spec): unknown[] {
     template === null ? null : [
       template.definitionId,
       template.color,
+      // Where on the frame it sits. Two photos identical but for this are two
+      // pictures, and leaving it out would have them share one frame walk.
+      template.offsetY,
       timingParts(template.timing),
       // Sorted, because a field bag is a map and a map has no order — the same
       // two fields written the other way round are the same frame.

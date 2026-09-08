@@ -16,6 +16,12 @@ export function TextField({ value, onChange }: TextProps) {
   return (
     <input
       type="text"
+      // The box takes its direction from what is in it, because what is in it is
+      // a release language and one of them is read right to left. Written into
+      // an unmarked box, a Hebrew line puts its own full stop at the end it
+      // starts from — the same thing the frame carries `dir` to avoid, and the
+      // panel is where the user would see it first and doubt the tool.
+      dir="auto"
       spellCheck={false}
       className={value.mixed ? 'mixed' : ''}
       value={value.mixed ? '' : value.value}
@@ -46,6 +52,7 @@ export function TextAreaField({ value, onChange, rows, holdUntilBlur }: TextArea
 
   return (
     <textarea
+      dir="auto"
       spellCheck={false}
       rows={rows ?? 3}
       className={value.mixed ? 'mixed' : ''}

@@ -127,6 +127,26 @@ describe('a project file carrying templates', () => {
     expect((result as { project: Project }).project.photos[0]!.template).toBeNull();
   });
 
+  it('opens a version 4 file, whose layouts sat where they drew themselves', () => {
+    // Written before a layout could be slid up the frame. The field it is
+    // missing has one right answer, and normalising it on the way in is what
+    // lets the rest of the app assume every template carries one.
+    const file = toFile(saved()) as unknown as Record<string, unknown>;
+    const older = {
+      ...file,
+      version: 4,
+      photos: (file['photos'] as Record<string, unknown>[]).map(p => {
+        const template = p['template'] as Record<string, unknown> | null;
+        if (template === null) return p;
+        const { offsetY: _dropped, ...rest } = template;
+        return { ...p, template: rest };
+      }),
+    };
+    const result = fromFile(older);
+    expect(result.ok).toBe(true);
+    expect((result as { project: Project }).project.photos[0]!.template!.offsetY).toBe(0);
+  });
+
   it('refuses a file whose template is not one', () => {
     const file = toFile(saved()) as unknown as Record<string, unknown>;
     const photos = (file['photos'] as Record<string, unknown>[])

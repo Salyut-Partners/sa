@@ -1,8 +1,8 @@
 // Every change to the model goes through `apply`. One funnel means broadcast,
 // undo and persistence each need to understand one thing, not one per control.
-import { clampRect, nudgeRect } from './canvas.ts';
+import { clamp, clampRect, nudgeRect } from './canvas.ts';
 import { newLocale } from './locales.ts';
-import { templateById } from './templates.ts';
+import { templateById, templateMoves } from './templates.ts';
 import { DEFAULT_MODEL_ID } from './voice.ts';
 import type {
   ButtonLayer, FieldValue, Locale, LocaleId, Photo, Project, PropLayer, Rect, Timing,
@@ -23,6 +23,18 @@ export const MIN_BUTTON_SIZE = { w: 12, h: 3 };
  * of cropping anything, and a prop nobody can see is a prop nobody can grab.
  */
 export const MIN_PROP_SIZE = { w: 8, h: 6 };
+
+/**
+ * How far a movable layout may be slid, in percent of frame height.
+ *
+ * Lopsided because the strip it was built for rests near the foot of the frame:
+ * almost all the room it has is above it. The downward end is measured rather
+ * than picked — the stack sits 118px off the foot of a 1920 frame, which is
+ * 6 per cent, so six takes it flush to the bottom edge and no further. Seven
+ * would start cutting the last row off, and a control whose far end hides the
+ * thing it moves is one the user has to be rescued from.
+ */
+export const TEMPLATE_LIFT = { min: -70, max: 6 };
 
 /**
  * How many photos one project holds. Images live inside the project as data
@@ -52,7 +64,7 @@ export type PropPatch =
   & { rect?: Partial<Rect>; timing?: Partial<Timing> };
 export type ProjectPatch =
   Partial<Pick<Project, 'duration' | 'fps' | 'canvas' | 'voiceId' | 'modelId' | 'fitToVoice'>>;
-export type TemplatePatch = { timing?: Partial<Timing> };
+export type TemplatePatch = { timing?: Partial<Timing>; offsetY?: number };
 export type LocalePatch = Partial<Pick<Locale, 'script' | 'voiceId' | 'include'>>;
 
 /**
@@ -469,6 +481,10 @@ export function apply(project: Project, command: Command): Project {
         // offer in three layouts, and trying the next one must not cost the offer.
         template: {
           definitionId,
+          // Not carried across the swap, unlike the window and the text: an
+          // offset is a place on the frame that one layout has and the next
+          // one may not, so a layout arrives where it draws itself.
+          offsetY: 0,
           timing: p.template?.timing ?? { ...info.defaultTiming },
         },
       }));
@@ -477,10 +493,17 @@ export function apply(project: Project, command: Command): Project {
     case 'template/patch':
       return mapPhotos(project, command.ids, p => {
         if (p.template === null) return p;
-        const { timing } = command.patch;
-        return timing === undefined
-          ? p
-          : { ...p, template: { ...p.template, timing: { ...p.template.timing, ...timing } } };
+        const { timing, offsetY } = command.patch;
+        if (timing === undefined && offsetY === undefined) return p;
+        const template = { ...p.template };
+        if (timing !== undefined) template.timing = { ...template.timing, ...timing };
+        // Refused rather than clamped for a layout that does not move: a figure
+        // stored on one is a nudge nothing in the panel can show and nothing on
+        // the frame can explain.
+        if (offsetY !== undefined && templateMoves(template.definitionId)) {
+          template.offsetY = clamp(offsetY, TEMPLATE_LIFT.min, TEMPLATE_LIFT.max);
+        }
+        return { ...p, template };
       });
 
     case 'locale/add': {

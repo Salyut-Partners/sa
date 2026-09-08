@@ -92,7 +92,7 @@ describe('buildSpec and the template', () => {
   it('fills every field of the schema from the dictionary', () => {
     const { fields } = buildSpec(withTemplate('rates'), 'a')!.template!;
     expect(fields['ratesHead']).toBe('Find this');
-    expect(fields['rates']).toEqual(['200 – 300 €', '500 – 800 €', '900 – 1200 €']);
+    expect(fields['rates']).toEqual(['£200 – 300', '£450 – 700', '£800 – 1,100']);
   });
 
   it('puts what the user typed over what the dictionary says', () => {

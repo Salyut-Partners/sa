@@ -20,6 +20,16 @@ export interface TemplateInfo {
    * unlike a button, which is there from the start unless told not to be.
    */
   defaultTiming: Timing;
+  /**
+   * Whether the user may slide the layout up and down the frame.
+   *
+   * Absent means no, which is the answer for every layout that darkens the
+   * whole picture behind itself. Their scrim is the frame, so moving them
+   * drags the shading off one edge and leaves the other bare — a control that
+   * only breaks the thing it moves. A strip that carries its own background
+   * and no scrim can sit anywhere over the photo, and says so here.
+   */
+  movable?: boolean;
 }
 
 /**
@@ -96,6 +106,20 @@ const DONOR_FIELDS: FieldSchema = [
 ];
 
 /**
+ * The bands on their own, with nothing above them.
+ *
+ * The donor layout states a whole offer and ends on these rows; this is the
+ * rows and only the rows, to be laid over a photograph that is already saying
+ * the rest. Narrowed from the donor schema for the reason the scrim layout is
+ * narrowed from the card: these are the donor layout's own keys, not lookalikes
+ * of them, so bands typed on one appear on the other and swapping between the
+ * two costs the user nothing.
+ */
+const TIER_KEEPS: ReadonlySet<string> = new Set(['donorTiers', 'donorCta']);
+
+const TIER_FIELDS: FieldSchema = DONOR_FIELDS.filter(f => TIER_KEEPS.has(f.key));
+
+/**
  * The payment offer: a question for a headline, one figure, and the slider that
  * picks it. Its own schema — it shares no field with the job or donor calls,
  * because it is asking about a purchase rather than about work.
@@ -116,6 +140,25 @@ const PAYMENT_FIELDS: FieldSchema = [
   { key: 'payMax', label: 'Максимум шкали', kind: 'line' },
   { key: 'payCta', label: 'Напис на кнопці', kind: 'line' },
   { key: 'paySwipe', label: 'Підказка внизу', kind: 'line' },
+];
+
+/**
+ * The airport strip carries two fields and no more, because everything else it
+ * would have said is already in the photograph: the headline and the rate are
+ * printed into the scene when the picture is generated. What is left is the half
+ * that has to stay editable per batch and per language — the perks and the line
+ * that keeps the creative on the right side of a job-advert rule.
+ *
+ * Its own keys rather than the cards' `perks` and `disclaimer`, though it asks
+ * the same two questions. A card's perks are the long claims that answer "why
+ * this job" over a whole sheet of white; these are four words that have to fit a
+ * strip 240px tall, and the disclaimer here is one short line rather than the
+ * cards' paragraph. Sharing the keys would mean one of the two layouts always
+ * showing copy written for the other.
+ */
+const AVIA_FIELDS: FieldSchema = [
+  { key: 'aviaPerks', label: 'Переваги', kind: 'list' },
+  { key: 'aviaDisclaimer', label: 'Дисклеймер', kind: 'text' },
 ];
 
 const LANDS: Timing = { appearAt: 0.3, hideAt: null, enter: 'none', enterDuration: 0.9 };
@@ -157,6 +200,15 @@ export const TEMPLATES: readonly TemplateInfo[] = [
     defaultTiming: { ...OPENS },
   },
   {
+    id: 'avia-strip',
+    label: 'Аеропорт · смуга',
+    schema: AVIA_FIELDS,
+    // A strip is not the frame's subject — the photograph is, and it already
+    // carries the headline. So it draws itself in from the first beat rather
+    // than making the viewer wait for a panel to land.
+    defaultTiming: { ...OPENS },
+  },
+  {
     id: 'rates',
     label: 'Список ставок',
     schema: RATES_FIELDS,
@@ -170,6 +222,18 @@ export const TEMPLATES: readonly TemplateInfo[] = [
     defaultTiming: { ...OPENS },
   },
   {
+    id: 'tier-rows',
+    label: 'Смуги груп',
+    schema: TIER_FIELDS,
+    // Rows and nothing else, so they build themselves in from the first beat
+    // like the other stacks rather than making the viewer wait for a panel.
+    defaultTiming: { ...OPENS },
+    // The one layout in the library that carries no scrim: each row is its own
+    // opaque strip, so the picture around it is untouched and the stack can sit
+    // wherever on the frame the photograph leaves room for it.
+    movable: true,
+  },
+  {
     id: 'rate-slider',
     label: 'Платіж · повзунок',
     schema: PAYMENT_FIELDS,
@@ -181,6 +245,13 @@ export const TEMPLATES: readonly TemplateInfo[] = [
 
 export const templateById = (id: string): TemplateInfo | null =>
   TEMPLATES.find(t => t.id === id) ?? null;
+
+/**
+ * Whether this layout may be slid up and down the frame. A layout the library
+ * no longer carries answers no, which is the safe answer: an offset nobody can
+ * see to undo is worse than a layout that simply sits where it was drawn.
+ */
+export const templateMoves = (id: string): boolean => templateById(id)?.movable === true;
 
 
 /**

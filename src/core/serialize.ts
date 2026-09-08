@@ -8,14 +8,14 @@ import type {
   TemplateLayer, Timing,
 } from './types.ts';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /**
  * Schemas this build can still read. A file from before templates existed is
  * opened rather than refused: the half it is missing is a template nobody had
  * chosen, and refusing it would mean yesterday's batch cannot be opened today.
  */
-const READABLE_VERSIONS = new Set([1, 2, 3, SCHEMA_VERSION]);
+const READABLE_VERSIONS = new Set([1, 2, 3, 4, SCHEMA_VERSION]);
 
 /**
  * What lands on disk. Selection and the active photo are deliberately absent:
@@ -125,7 +125,13 @@ export function fromFile(data: unknown): LoadResult {
     props: p.props ?? [],
     template: p.template == null
       ? null
-      : { definitionId: p.template.definitionId, timing: p.template.timing },
+      : {
+        definitionId: p.template.definitionId,
+        // Every file written before layouts could be moved says nothing here,
+        // and means where the layout draws itself.
+        offsetY: p.template.offsetY ?? 0,
+        timing: p.template.timing,
+      },
   }));
 
   const locales = readLocales(data['locales'], stored);

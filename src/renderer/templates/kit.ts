@@ -18,8 +18,40 @@ export const DESIGN = { width: 1080, height: 1920 } as const;
 export const seg = (t: number, start: number, span: number): number =>
   clamp01((t - start) / span);
 
-export const esc = (value: string): string =>
-  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/**
+ * A figure: digits, and the separators that join two of them into one number,
+ * one range or one clock time. A trailing plus or per-cent belongs to it too.
+ *
+ * The separators only count between digits, which is what keeps "10 men and 20
+ * women" three words rather than one figure.
+ */
+const FIGURE = /\d+(?:[\s.,:'\u2013\u2014/-]+\d+)*[+%]?/gu;
+
+/**
+ * One phrase, as markup a frame can hold: escaped, and with its figures pinned
+ * to read left to right.
+ *
+ * The second half is for Hebrew and for whatever right-to-left language comes
+ * after it. A number does not turn round — "18–25" is eighteen to twenty-five
+ * in every language on the list — but the dash between the two digits is a
+ * neutral, so a right-to-left frame resolves it to its own direction and paints
+ * the band as "25–18". The same goes for "07:00–15:00" and for a price range.
+ *
+ * Done here, in the one function every template's copy already passes through,
+ * for three reasons. Two of the fields it saves are in the shared half of the
+ * phrase book and appear in all twelve languages, so there is no Hebrew string
+ * to fix. A layout cannot forget it. And the text a user types over the
+ * dictionary comes through here as well, which no rule written against a
+ * stylesheet selector could reach — an age band typed into the box in Hebrew is
+ * right without the user knowing any of this.
+ *
+ * In a left-to-right frame the wrapper changes nothing: `bdi` is inline, and an
+ * isolated left-to-right run inside a left-to-right paragraph reads as it did.
+ */
+export const say = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(FIGURE, figure => `<bdi dir="ltr">${figure}</bdi>`);
 
 /** One field as a line. A list asked for as a line reads as a sentence. */
 export const line = (spec: TemplateSpec, key: string): string => {
@@ -27,6 +59,42 @@ export const line = (spec: TemplateSpec, key: string): string => {
   if (value === undefined) return '';
   return typeof value === 'string' ? value : value.join(' · ');
 };
+
+/**
+ * Currencies that are written before the figure rather than after it.
+ *
+ * Most of the book's money follows the number — 18–24 €, 35–50 zł, 200–270 kr,
+ * 250–400 ₺ — and the pound does not. "15–20 £" is exactly the sort of detail
+ * that tells a British reader the advert was written for somewhere else, which
+ * is the whole thing the language list exists to avoid. The rule belongs to the
+ * symbol rather than to the language: two locales quoting pounds would both
+ * want it, and a locale that switched currency would carry it across.
+ */
+const LEADING = new Set(['£', '$']);
+
+/**
+ * The pay figure with its currency, in the order that currency is written in.
+ *
+ * Here rather than in each layout: three templates draw this same pair, and a
+ * rule kept in three places is a rule that will hold in two of them.
+ */
+export const money = (spec: TemplateSpec): string => {
+  const figure = line(spec, 'rate');
+  const symbol = line(spec, 'cur');
+  if (symbol === '') return figure;
+  return LEADING.has(symbol) ? symbol + figure : figure + ' ' + symbol;
+};
+
+/**
+ * Which side a layer slides in from, as a sign on a distance.
+ *
+ * Everything in this library enters from the side the reader's eye starts on,
+ * which is the left in eleven of the twelve languages and the right in Hebrew.
+ * A sign rather than two branches: how far a row travels is a decision each
+ * layout made once and should keep stating once, and only which way it goes is
+ * the frame's business.
+ */
+export const inFrom = (rtl: boolean): number => rtl ? 1 : -1;
 
 /** One field as items. A line asked for as items is one item. */
 export const items = (spec: TemplateSpec, key: string): readonly string[] => {
@@ -112,13 +180,39 @@ export function fitAcross(el: HTMLElement, room: number, size: number): void {
  * for what was actually painted, which every engine answers the same way. Both
  * figures are read as rendered rects, so the ratio survives the frame being
  * scaled down to a grid cell or a library thumbnail.
+ *
+ * The rects are gathered into lines rather than taken one at a time, because a
+ * line does not always come back as one rect: text broken by anything with its
+ * own direction — an isolated figure, chiefly — is returned a run at a time.
+ * Reading the widest rect would then measure a fragment and pronounce the whole
+ * line a comfortable fit. That is not hypothetical; it let a Hebrew payment run
+ * 37px off its card, and it would have been quietly wrong in the other eleven
+ * languages too, since every one of them has a price in it somewhere.
  */
 function overrun(el: HTMLElement, room: number): number {
   if (room <= 0) return 1;
   const range = el.ownerDocument.createRange();
   range.selectNodeContents(el);
+
+  // Same line, in the only sense that matters here: the two rects overlap
+  // vertically. Grouping by the top edge instead would split a line whose runs
+  // are set at different sizes, which is the case this exists to catch.
+  const lines: { top: number; bottom: number; left: number; right: number }[] = [];
+  for (const rect of range.getClientRects()) {
+    if (rect.width < 0.5) continue;
+    const line = lines.find(l => rect.top < l.bottom && rect.bottom > l.top);
+    if (line === undefined) {
+      lines.push({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right });
+    } else {
+      line.top = Math.min(line.top, rect.top);
+      line.bottom = Math.max(line.bottom, rect.bottom);
+      line.left = Math.min(line.left, rect.left);
+      line.right = Math.max(line.right, rect.right);
+    }
+  }
+
   let widest = 0;
-  for (const rect of range.getClientRects()) widest = Math.max(widest, rect.width);
+  for (const line of lines) widest = Math.max(widest, line.right - line.left);
   return widest > 0 ? widest / room : 1;
 }
 

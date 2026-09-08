@@ -5,7 +5,8 @@ import { FLAGS } from './phrasebook.ts';
 import type { Locale, LocaleId, Project } from './types.ts';
 
 /** Every language the phrase book is written for, in the order the bar shows them. */
-export const LOCALE_IDS: readonly LocaleId[] = ['en', 'de', 'it', 'es', 'fr', 'nl', 'pl'];
+export const LOCALE_IDS: readonly LocaleId[] =
+  ['en', 'de', 'it', 'es', 'fr', 'nl', 'pl', 'tr', 'sv', 'pt', 'he', 'hu'];
 
 /**
  * What each one is called, in itself. A media buyer picking a geo reads the
@@ -19,13 +20,37 @@ export const LOCALE_NAMES: Record<LocaleId, string> = {
   fr: 'Français',
   nl: 'Nederlands',
   pl: 'Polski',
+  tr: 'Türkçe',
+  sv: 'Svenska',
+  pt: 'Português',
+  he: 'עברית',
+  hu: 'Magyar',
 };
 
 /** What each one is called in English, for a translator that wants prose. */
 export const LOCALE_ENGLISH: Record<LocaleId, string> = {
   en: 'English', de: 'German', it: 'Italian', es: 'Spanish',
-  fr: 'French', nl: 'Dutch', pl: 'Polish',
+  fr: 'French', nl: 'Dutch', pl: 'Polish', tr: 'Turkish', sv: 'Swedish',
+  // European Portuguese. Named rather than left as "Portuguese" because the
+  // geo is Portugal and the two varieties differ on exactly the words an advert
+  // is made of — a Brazilian "you" in a Lisbon creative is the same class of
+  // mistake as the wrong currency.
+  pt: 'European Portuguese (Portugal)', he: 'Hebrew', hu: 'Hungarian',
 };
+
+/**
+ * Which way a language is read.
+ *
+ * Almost everything here is a property of the words; this one is a property of
+ * the page. Hebrew is the first language in the set that is read right to left,
+ * and the frame has to say so — otherwise the browser lays a Hebrew sentence out
+ * inside a left-to-right paragraph and its full stop comes out at the wrong end.
+ * The layouts mirror off the same flag, so the list is here rather than in the
+ * renderer: it is the language that is right-to-left, not the stylesheet.
+ */
+const RTL: ReadonlySet<LocaleId> = new Set<LocaleId>(['he']);
+
+export const localeDir = (id: LocaleId): 'ltr' | 'rtl' => RTL.has(id) ? 'rtl' : 'ltr';
 
 export const isLocaleId = (value: unknown): value is LocaleId =>
   typeof value === 'string' && (LOCALE_IDS as readonly string[]).includes(value);

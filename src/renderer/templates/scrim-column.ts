@@ -14,7 +14,9 @@
 import { accent } from '../color.ts';
 import { easeInOutCubic, easeOutBack, easeOutCubic } from '../easing.ts';
 import type { BuildContext, TemplateParts } from './index.ts';
-import { DESIGN, esc, fitAcross, fitScale, icon, items, line, seg, sheenAt } from './kit.ts';
+import {
+  DESIGN, fitAcross, fitScale, icon, inFrom, items, line, money, say, seg, sheenAt,
+} from './kit.ts';
 
 /**
  * The copy column, as the stylesheet places it: 132px down, 600 wide. Repeated
@@ -42,7 +44,7 @@ const SCRIM_SPAN = 1.6;
  */
 const HEAD_SIZE = 92;
 
-export function scrimColumn({ spec, frame }: BuildContext): TemplateParts {
+export function scrimColumn({ spec, frame, rtl }: BuildContext): TemplateParts {
   const a = accent(spec.color);
 
   // The pill states who is wanted and at what age, which are two fields and one
@@ -52,22 +54,22 @@ export function scrimColumn({ spec, frame }: BuildContext): TemplateParts {
     .filter(part => part.trim() !== '').join(' · ');
 
   const perks = items(spec, 'perks').map(perk =>
-    `<div class="perk">${icon('check', 38, a.lift(0.3))}<span>${esc(perk)}</span></div>`).join('');
+    `<div class="perk">${icon('check', 38, a.lift(0.3))}<span>${say(perk)}</span></div>`).join('');
 
   frame.innerHTML =
     '<div class="cf-t-tint cf-sc-scrim"></div>' +
-    `<div class="cf-sc-flag">${esc(line(spec, 'flag'))}</div>` +
+    `<div class="cf-sc-flag">${say(line(spec, 'flag'))}</div>` +
     '<div class="cf-sc-col">' +
-      `<span class="eyebrow">${esc(badge)}</span>` +
-      `<div class="h1">${esc(line(spec, 'headline'))}</div>` +
-      `<div class="aud">${esc(line(spec, 'audience'))}</div>` +
+      `<span class="eyebrow">${say(badge)}</span>` +
+      `<div class="h1">${say(line(spec, 'headline'))}</div>` +
+      `<div class="aud">${say(line(spec, 'audience'))}</div>` +
       '<div class="cf-sc-rate">' +
-        `<span class="top"><span class="big">${esc(line(spec, 'rate'))} ` +
-          `${esc(line(spec, 'cur'))}</span><span class="u">${esc(line(spec, 'unitTop'))}</span></span>` +
-        `<span class="bot">${esc(line(spec, 'unitBot'))}</span>` +
+        `<span class="top"><span class="big">${say(money(spec))}</span>` +
+          `<span class="u">${say(line(spec, 'unitTop'))}</span></span>` +
+        `<span class="bot">${say(line(spec, 'unitBot'))}</span>` +
       '</div>' +
       `<div class="perks">${perks}</div>` +
-      `<div class="cf-sc-cta">${esc(line(spec, 'cta'))}${icon('arrow', 46, '#fff')}` +
+      `<div class="cf-sc-cta">${say(line(spec, 'cta'))}${icon('arrow', 46, '#fff')}` +
         '<span class="cf-sc-sheen"></span></div>' +
     '</div>';
 
@@ -126,7 +128,7 @@ export function scrimColumn({ spec, frame }: BuildContext): TemplateParts {
     [eyebrow, head, aud].forEach((el, i) => {
       const p = easeOutCubic(seg(t, HEAD_AT + i * 0.18, 0.5));
       el.style.opacity = String(p);
-      el.style.transform = `translateX(${-60 * (1 - p)}px)`;
+      el.style.transform = `translateX(${60 * inFrom(rtl) * (1 - p)}px)`;
     });
     flag.style.opacity = String(easeOutCubic(seg(t, HEAD_AT, 0.7)));
 
@@ -142,7 +144,7 @@ export function scrimColumn({ spec, frame }: BuildContext): TemplateParts {
     perkEls.forEach((perk, i) => {
       const p = easeOutCubic(seg(t, PERKS_AT + i * 0.14, 0.46));
       perk.style.opacity = String(p);
-      perk.style.transform = `translateX(${-52 * (1 - p)}px)`;
+      perk.style.transform = `translateX(${52 * inFrom(rtl) * (1 - p)}px)`;
     });
 
     const on = seg(t, CTA_AT, 0.3);

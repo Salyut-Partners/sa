@@ -1,14 +1,16 @@
 import type { BatchPlan } from '../core/batch.ts';
 import { activeLocale, editedFieldCount, LOCALE_NAMES } from '../core/locales.ts';
 import {
-  defaultButton, defaultProp, nextPropSlot, nextSlot, photoById,
+  defaultButton, defaultProp, nextPropSlot, nextSlot, photoById, TEMPLATE_LIFT,
   type ButtonPatch, type Command, type PropPatch,
 } from '../core/project.ts';
 import { propById, PROPS } from '../core/props.ts';
 import {
   buttonCount, buttonField, buttonRectField, buttonTimingField, photoField, propChoice,
-  propColors, propCount, propRectField, propTimingField, templateChoice, templateTimingField,
+  propColors, propCount, propRectField, propTimingField, templateChoice, templateOffsetField,
+  templateTimingField,
 } from '../core/selection.ts';
+import { templateMoves } from '../core/templates.ts';
 import type { Project } from '../core/types.ts';
 import { BUTTON_STYLES, FONTS } from '../renderer/index.ts';
 import type { ExportRun } from './export.ts';
@@ -193,6 +195,37 @@ export function SidePanel(props: Props) {
             // the boxes afresh rather than leaving a half-typed draft sitting in
             // a box that now belongs to a different field.
             <div key={`${project.activeId}:${photo.template.definitionId}`}>
+              {templateMoves(photo.template.definitionId) ? (
+                <div className="group">
+                  <div className="lab">
+                    Положення <span className="val">% висоти кадру</span>
+                  </div>
+                  <div className="row">
+                    <NumberField
+                      value={templateOffsetField(project, targets)}
+                      onChange={offsetY =>
+                        dispatch({ type: 'template/patch', ids: targets, patch: { offsetY } })}
+                      min={TEMPLATE_LIFT.min}
+                      max={TEMPLATE_LIFT.max}
+                      step={1}
+                      suffix="↕"
+                    />
+                    <button
+                      className="wide"
+                      onClick={() => dispatch({
+                        type: 'template/patch', ids: targets, patch: { offsetY: 0 },
+                      })}
+                    >
+                      На місце
+                    </button>
+                  </div>
+                  <div className="note">
+                    Від'ємне — вгору. Тільки ця смуга рухається: решта шаблонів
+                    затемнює все фото, і зсув потягнув би затемнення за край.
+                  </div>
+                </div>
+              ) : null}
+
               <div className="group">
                 <div className="lab">Час на екрані шаблону</div>
                 <TimingFields

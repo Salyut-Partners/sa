@@ -8,7 +8,7 @@
 import { accent } from '../color.ts';
 import { easeOutBack, easeOutCubic } from '../easing.ts';
 import type { BuildContext, TemplateParts } from './index.ts';
-import { esc, items, line, seg } from './kit.ts';
+import { inFrom, items, line, say, seg } from './kit.ts';
 
 export interface RowsOptions {
   /** Which field the headline comes from, and the word to set in the accent. */
@@ -38,20 +38,20 @@ const rowWidth = (row: HTMLElement): number => {
 };
 
 export function rowsBanner(options: RowsOptions) {
-  return function build({ spec, frame }: BuildContext): TemplateParts {
+  return function build({ spec, frame, rtl }: BuildContext): TemplateParts {
     const a = accent(spec.color);
     const rows = items(spec, options.listKey);
-    const head = esc(line(spec, options.headKey));
-    const word = options.accentKey === undefined ? '' : esc(line(spec, options.accentKey));
+    const head = say(line(spec, options.headKey));
+    const word = options.accentKey === undefined ? '' : say(line(spec, options.accentKey));
 
     frame.innerHTML =
       '<div class="cf-t-tint cf-bn-scrims"></div>' +
       `<div class="cf-bn-head">${head}${word === '' ? '' : ` <span class="hl">${word}</span>`}</div>` +
       '<div class="cf-bn-rule"></div>' +
       '<div class="cf-bn-rows">' +
-      rows.map(row => `<div class="cf-bn-row"><span class="val">${esc(row)}</span></div>`).join('') +
+      rows.map(row => `<div class="cf-bn-row"><span class="val">${say(row)}</span></div>`).join('') +
       '</div>' +
-      `<div class="cf-bn-cta"><span class="pill">${esc(line(spec, options.ctaKey))}</span></div>`;
+      `<div class="cf-bn-cta"><span class="pill">${say(line(spec, options.ctaKey))}</span></div>`;
 
     const scrims = frame.querySelector<HTMLElement>('.cf-bn-scrims')!;
     const headline = frame.querySelector<HTMLElement>('.cf-bn-head')!;
@@ -119,7 +119,7 @@ export function rowsBanner(options: RowsOptions) {
         const move = easeOutBack(seg(t, start, 0.62));
         row.style.opacity = String(easeOutCubic(seg(t, start, 0.4)));
         row.style.transform =
-          `translateX(${-150 * (1 - move)}px) scale(${0.9 + 0.1 * move})`;
+          `translateX(${150 * inFrom(rtl) * (1 - move)}px) scale(${0.9 + 0.1 * move})`;
       });
 
       const p = easeOutCubic(seg(t, CTA_AT, 0.6));

@@ -1,21 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
-  activeLocale, availableLocales, editedFieldCount, isLocaleId, LOCALE_IDS, LOCALE_NAMES,
-  newLocale, releaseLocales,
+  activeLocale, availableLocales, editedFieldCount, isLocaleId, localeDir, LOCALE_ENGLISH,
+  LOCALE_IDS, LOCALE_NAMES, newLocale, releaseLocales,
 } from './locales.ts';
 import { apply, createProject } from './project.ts';
 import type { LocaleId, Project } from './types.ts';
 
-const withLocales = (...ids: LocaleId[]): Project =>
+const withLocales = (...ids: readonly LocaleId[]): Project =>
   ids.reduce((p, id) => apply(p, { type: 'locale/add', id }), createProject());
 
 describe('the languages the phrase book is written for', () => {
-  it('carries the seven the contract names', () => {
-    expect([...LOCALE_IDS]).toEqual(['en', 'de', 'it', 'es', 'fr', 'nl', 'pl']);
+  it('carries the twelve the contract names', () => {
+    expect([...LOCALE_IDS])
+      .toEqual(['en', 'de', 'it', 'es', 'fr', 'nl', 'pl', 'tr', 'sv', 'pt', 'he', 'hu']);
   });
 
   it('names every one of them', () => {
     for (const id of LOCALE_IDS) expect(LOCALE_NAMES[id], id).toBeTruthy();
+  });
+
+  it('names every one of them in English too, for the translator', () => {
+    for (const id of LOCALE_IDS) expect(LOCALE_ENGLISH[id], id).toBeTruthy();
   });
 
   it('recognises its own ids and nothing else', () => {
@@ -25,6 +30,30 @@ describe('the languages the phrase book is written for', () => {
     expect(isLocaleId('kl')).toBe(false);
     expect(isLocaleId('')).toBe(false);
     expect(isLocaleId(7)).toBe(false);
+  });
+});
+
+describe('which way a language is read', () => {
+  it('answers for every language on the list', () => {
+    // Not a lookup that can be silent: the frame writes whatever comes back
+    // into its `dir`, and a language this could not answer for would be laid
+    // out left to right without anything having gone visibly wrong.
+    for (const id of LOCALE_IDS) expect(['ltr', 'rtl'], id).toContain(localeDir(id));
+  });
+
+  it('reads Hebrew right to left and the other eleven left to right', () => {
+    expect(localeDir('he')).toBe('rtl');
+    expect(LOCALE_IDS.filter(id => localeDir(id) === 'rtl')).toEqual(['he']);
+  });
+
+  it('does not turn a language round for being written in its own script', () => {
+    // The trap this is here for: Hebrew is the language whose *name* is also in
+    // Hebrew, and a direction guessed from the label rather than named would
+    // make every language that renames itself right-to-left by accident.
+    expect(LOCALE_NAMES.he).toBe('עברית');
+    expect(localeDir('tr')).toBe('ltr');
+    expect(localeDir('hu')).toBe('ltr');
+    expect(localeDir('pt')).toBe('ltr');
   });
 });
 
@@ -73,11 +102,15 @@ describe('releaseLocales', () => {
 
 describe('availableLocales', () => {
   it('offers only what the project does not already carry', () => {
-    expect(availableLocales(withLocales('de'))).toEqual(['it', 'es', 'fr', 'nl', 'pl']);
+    expect(availableLocales(withLocales('de')))
+      .toEqual(['it', 'es', 'fr', 'nl', 'pl', 'tr', 'sv', 'pt', 'he', 'hu']);
   });
 
   it('offers nothing once every language is in', () => {
-    expect(availableLocales(withLocales('de', 'it', 'es', 'fr', 'nl', 'pl'))).toEqual([]);
+    // Read off the release list rather than written out again: a thirteenth
+    // language named in one place and forgotten here would leave this passing
+    // while it went on being offered to a project that already carried it.
+    expect(availableLocales(withLocales(...LOCALE_IDS))).toEqual([]);
   });
 });
 

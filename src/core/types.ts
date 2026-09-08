@@ -42,7 +42,8 @@ export type EnterAnimation = 'none' | 'fade' | 'pop' | 'rise';
  * ships translated for exactly these, and a locale nobody wrote the dictionary
  * for would render as a frame full of blanks.
  */
-export type LocaleId = 'en' | 'de' | 'it' | 'es' | 'fr' | 'nl' | 'pl';
+export type LocaleId =
+  'en' | 'de' | 'it' | 'es' | 'fr' | 'nl' | 'pl' | 'tr' | 'sv' | 'pt' | 'he' | 'hu';
 
 /** What one template field holds. A list is a list all the way down — see FieldKind. */
 export type FieldValue = string | readonly string[];
@@ -100,6 +101,14 @@ export interface PropLayer {
  */
 export interface TemplateLayer {
   definitionId: string;
+  /**
+   * How far down the frame the layout is nudged, as a percent of frame height.
+   * Zero is where the layout draws itself; negative is up.
+   *
+   * Only layouts that say they can be moved are ever given a figure other than
+   * zero — see `TemplateInfo.movable`.
+   */
+  offsetY: number;
   timing: Timing;
 }
 
@@ -200,6 +209,8 @@ export interface TemplateSpec {
   fields: Readonly<Record<string, FieldValue>>;
   /** The photo's accent, which the template paints itself in. */
   color: string;
+  /** Percent of frame height the layout is nudged down by; negative is up. */
+  offsetY: number;
   timing: Timing;
 }
 

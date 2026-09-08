@@ -36,8 +36,18 @@ export interface Translation {
   detected: string;
 }
 
-/** DeepL dropped bare EN as a target; the rest of our set maps one to one. */
-const DEEPL_TARGET: Partial<Record<LocaleId, string>> = { en: 'EN-GB' };
+/**
+ * Where a locale's DeepL code is not just its id in capitals.
+ *
+ * Two of them are not. DeepL dropped bare EN as a target, and bare PT is the
+ * same story one step behind — still accepted, still deprecated, and resolved
+ * to a variety by the server rather than by us. The geo is Portugal, so it is
+ * named here: left to DeepL's default, a script sent for Lisbon could come back
+ * in Brazilian, which is precisely the difference the phrase book is written to
+ * respect. Everything else in the set — Hebrew and Hungarian included — is its
+ * own id uppercased.
+ */
+const DEEPL_TARGET: Partial<Record<LocaleId, string>> = { en: 'EN-GB', pt: 'PT-PT' };
 
 async function viaDeepl(text: string, to: LocaleId): Promise<Translation> {
   const key = process.env['DEEPL_API_KEY']!;

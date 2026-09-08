@@ -5,7 +5,8 @@ import { accent } from '../color.ts';
 import { easeInOutCubic, easeOutCubic } from '../easing.ts';
 import type { BuildContext, TemplateParts } from './index.ts';
 import {
-  DESIGN, esc, fitScale, icon, items, line, panelInk, seg, sheenAt, SHIFT_ICONS, stripePaint,
+  DESIGN, fitScale, icon, items, line, money, panelInk, say, seg, sheenAt, SHIFT_ICONS,
+  stripePaint,
 } from './kit.ts';
 
 const OFFSET = 140;
@@ -17,30 +18,30 @@ export function cardSheet({ spec, frame }: BuildContext): TemplateParts {
 
   const shifts = items(spec, 'shifts').map((time, i) =>
     `<div class="shift">${icon(SHIFT_ICONS[i % 3]!, 38, a.base)}` +
-    `<span class="tm">${esc(time)}</span></div>`).join('');
+    `<span class="tm">${say(time)}</span></div>`).join('');
   const perks = items(spec, 'perks').map(perk =>
-    `<div class="perk">${icon('check', 33, a.base)}${esc(perk)}</div>`).join('');
+    `<div class="perk">${icon('check', 33, a.base)}${say(perk)}</div>`).join('');
 
   frame.innerHTML =
     '<div class="cf-t-tint"></div>' +
     '<div class="cf-card cf-sheet-card">' +
       '<div class="stripe"></div>' +
-      `<span class="eyebrow">${esc(line(spec, 'eyebrow'))}</span>` +
-      `<div class="h1">${esc(line(spec, 'headline'))}` +
-        `<span class="flag">${esc(line(spec, 'flag'))}</span></div>` +
-      `<div class="meta"><span class="chip">${esc(line(spec, 'age'))}</span>` +
-        `<span class="chip soft">${esc(line(spec, 'audience'))}</span></div>` +
+      `<span class="eyebrow">${say(line(spec, 'eyebrow'))}</span>` +
+      `<div class="h1">${say(line(spec, 'headline'))}` +
+        `<span class="flag">${say(line(spec, 'flag'))}</span></div>` +
+      `<div class="meta"><span class="chip">${say(line(spec, 'age'))}</span>` +
+        `<span class="chip soft">${say(line(spec, 'audience'))}</span></div>` +
       '<div class="cf-rate">' +
-        `<span class="big">${esc(line(spec, 'rate'))} ${esc(line(spec, 'cur'))}</span>` +
-        `<span class="unit">${esc(line(spec, 'unitTop'))}<br>${esc(line(spec, 'unitBot'))}</span>` +
+        `<span class="big">${say(money(spec))}</span>` +
+        `<span class="unit">${say(line(spec, 'unitTop'))}<br>${say(line(spec, 'unitBot'))}</span>` +
       '</div>' +
-      `<div class="sec"><div class="sec-h">${esc(line(spec, 'jobsLabel'))}</div>` +
-        `<div class="sec-b">${esc(line(spec, 'jobs'))}</div></div>` +
-      `<div class="sec"><div class="sec-h">${esc(line(spec, 'shiftsLabel'))}</div>` +
+      `<div class="sec"><div class="sec-h">${say(line(spec, 'jobsLabel'))}</div>` +
+        `<div class="sec-b">${say(line(spec, 'jobs'))}</div></div>` +
+      `<div class="sec"><div class="sec-h">${say(line(spec, 'shiftsLabel'))}</div>` +
         `<div class="shifts">${shifts}</div></div>` +
       `<div class="perks">${perks}</div>` +
-      `<div class="cf-cta">${esc(line(spec, 'cta'))}<div class="cf-sheen"></div></div>` +
-      `<div class="cf-disc">${esc(line(spec, 'disclaimer'))}</div>` +
+      `<div class="cf-cta">${say(line(spec, 'cta'))}<div class="cf-sheen"></div></div>` +
+      `<div class="cf-disc">${say(line(spec, 'disclaimer'))}</div>` +
     '</div>';
 
   const tint = frame.querySelector<HTMLElement>('.cf-t-tint')!;

@@ -114,6 +114,7 @@ describe('visualKey', () => {
           definitionId: 'rates',
           fields: { ratesHead: 'Find this', rates: ['200 €', '500 €'] },
           color: '#1fa94b',
+          offsetY: 0,
           timing: { appearAt: 0, hideAt: null, enter: 'none', enterDuration: 0.6 },
           ...over,
         },
@@ -125,6 +126,14 @@ describe('visualKey', () => {
 
     it('by which layout it is', () => {
       expect(visualKey(withTemplate({ definitionId: 'jobs-banner' })))
+        .not.toBe(visualKey(withTemplate()));
+    });
+
+    it('by where on the frame it sits', () => {
+      // Two photos alike but for the nudge are two pictures. Leaving it out of
+      // the key would have them share one frame walk, and one of the two would
+      // ship with the other's stack halfway up the photograph.
+      expect(visualKey(withTemplate({ offsetY: -24 })))
         .not.toBe(visualKey(withTemplate()));
     });
 

@@ -12,32 +12,37 @@ export const DEFAULT_LOCALE: LocaleId = 'en';
 
 export const FLAGS: Record<LocaleId, string> = {
   en: '🇬🇧', de: '🇩🇪', it: '🇮🇹', es: '🇪🇸', fr: '🇫🇷', nl: '🇳🇱', pl: '🇵🇱',
+  tr: '🇹🇷', sv: '🇸🇪', pt: '🇵🇹', he: '🇮🇱', hu: '🇭🇺',
 };
 
 type Phrases = Readonly<Record<string, FieldValue>>;
 
 /**
- * Numbers and clock times, which are the same sentence in every language. Kept
- * apart so that adding a locale is writing prose, not re-typing a rate.
+ * The figures that really are the same in every language: the clock, and the
+ * age bands.
+ *
+ * Money used to live here too, on the reasoning that a number does not
+ * translate. A number does not, but a currency does — a Swedish job is paid in
+ * kronor and a Polish one in złoty, and quoting either in euro is the kind of
+ * mistake a reader notices before they read the offer. So every locale now
+ * carries its own pay, and what is left here is what genuinely does not move.
  */
 const SHARED: Phrases = {
-  rate: '18–24',
-  cur: '€',
   shifts: ['07:00–15:00', '15:00–23:00', '23:00–07:00'],
-  // The rates banner is a column of figures; only the words around it translate.
-  // In the currency the rest of the book quotes: the geos are the same seven.
-  rates: ['200 – 300 €', '500 – 800 €', '900 – 1200 €'],
   // Age bands are figures too: only the word after them changes language, and
   // that word is part of the band in every locale that needs one.
   donorTiers: ['18–25', '26–35', '36–45'],
-  // The payment and the two ends of its slider. Shared for the same reason the
-  // rate list is, and for one more: the layout reads these three back as numbers
-  // to work out where the knob rests, so a locale holding its own copy would be
-  // a locale where the slider quietly points somewhere else.
-  payRate: '3.532 €',
-  payMin: '890 €',
-  payMax: '10.000 €',
 };
+
+/**
+ * The pay slider's three figures — the payment, and the two ends of the scale —
+ * are read back as numbers by the layout to work out where the knob rests. They
+ * are per-locale like the rest of the money, so each set has to stand up on its
+ * own: min below the payment, payment below max, and all three written so they
+ * can be taken apart again. Every locale is quoted at the same point on its
+ * scale, which is why the card looks laid out rather than translated. There is
+ * a test that holds each set to this.
+ */
 
 const BY_LOCALE: Record<LocaleId, Phrases> = {
   en: {
@@ -47,6 +52,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     audience: 'Students • Retirees • Parents',
     unitTop: 'net',
     unitBot: 'per hour',
+    rate: '15–20',
+    cur: '£',
+    rates: ['£200 – 300', '£450 – 700', '£800 – 1,100'],
+    payRate: '£3,000',
+    payMin: '£750',
+    payMax: '£8,500',
     jobsLabel: 'VACANCIES',
     jobs: ['Ground staff', 'Baggage handling', 'Cleaning', 'Security', 'Check-in', 'Catering', 'and more'],
     shiftsLabel: 'WORKING HOURS',
@@ -72,6 +83,10 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     paySliderLabel: 'Choose the payment you want',
     payCta: 'Discover now',
     paySwipe: 'Swipe left',
+    // The airport strip's own two fields. Short by design: they sit in a
+    // 240px band under a photograph that is already saying the rest.
+    aviaPerks: ['Pay', 'Shift premiums', 'Insurance', 'Paid leave'],
+    aviaDisclaimer: 'Information only. Not a job placement service.',
   },
   de: {
     eyebrow: 'TEILZEIT',
@@ -80,6 +95,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     audience: 'Studenten • Rentner • Eltern',
     unitTop: 'netto',
     unitBot: 'pro Stunde',
+    rate: '18–24',
+    cur: '€',
+    rates: ['200 – 300 €', '500 – 800 €', '900 – 1200 €'],
+    payRate: '3.532 €',
+    payMin: '890 €',
+    payMax: '10.000 €',
     jobsLabel: 'STELLENANGEBOTE',
     jobs: ['Bodenpersonal', 'Gepäckabfertigung', 'Reinigung', 'Sicherheitsdienst', 'Check-in', 'Catering', 'und weitere'],
     shiftsLabel: 'ARBEITSZEITEN',
@@ -103,6 +124,8 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     paySliderLabel: 'Wählen Sie Ihre Wunschrate',
     payCta: 'Jetzt entdecken',
     paySwipe: 'Nach links wischen',
+    aviaPerks: ['Lohn', 'Schichtzulagen', 'Versicherung', 'Urlaubsanspruch'],
+    aviaDisclaimer: 'Informationsangebot. Keine Stellenvermittlung.',
   },
   it: {
     eyebrow: 'PART-TIME',
@@ -111,6 +134,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     audience: 'Studenti • Pensionati • Genitori',
     unitTop: 'netto',
     unitBot: "all'ora",
+    rate: '18–24',
+    cur: '€',
+    rates: ['200 – 300 €', '500 – 800 €', '900 – 1200 €'],
+    payRate: '3.532 €',
+    payMin: '890 €',
+    payMax: '10.000 €',
     jobsLabel: 'POSIZIONI APERTE',
     jobs: ['Personale di terra', 'Gestione bagagli', 'Pulizie', 'Sicurezza', 'Check-in', 'Catering', 'e altre'],
     shiftsLabel: 'ORARI DI LAVORO',
@@ -134,6 +163,8 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     paySliderLabel: 'Scegli la rata che preferisci',
     payCta: 'Scopri ora',
     paySwipe: 'Scorri a sinistra',
+    aviaPerks: ['Retribuzione', 'Maggiorazioni turni', 'Assicurazione', 'Ferie retribuite'],
+    aviaDisclaimer: 'Solo a scopo informativo. Non è un’agenzia di collocamento.',
   },
   es: {
     eyebrow: 'MEDIA JORNADA',
@@ -142,6 +173,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     audience: 'Estudiantes • Jubilados • Padres',
     unitTop: 'neto',
     unitBot: 'por hora',
+    rate: '18–24',
+    cur: '€',
+    rates: ['200 – 300 €', '500 – 800 €', '900 – 1200 €'],
+    payRate: '3.532 €',
+    payMin: '890 €',
+    payMax: '10.000 €',
     jobsLabel: 'VACANTES',
     jobs: ['Personal de tierra', 'Manejo de equipaje', 'Limpieza', 'Seguridad', 'Check-in', 'Catering', 'y más'],
     shiftsLabel: 'HORARIOS',
@@ -165,6 +202,8 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     paySliderLabel: 'Elige la cuota que prefieras',
     payCta: 'Descúbrelo ya',
     paySwipe: 'Desliza a la izquierda',
+    aviaPerks: ['Salario', 'Pluses por turno', 'Seguro', 'Vacaciones pagadas'],
+    aviaDisclaimer: 'Solo información. No es una agencia de colocación.',
   },
   fr: {
     eyebrow: 'TEMPS PARTIEL',
@@ -173,6 +212,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     audience: 'Étudiants • Retraités • Parents',
     unitTop: 'net',
     unitBot: "de l'heure",
+    rate: '18–24',
+    cur: '€',
+    rates: ['200 – 300 €', '500 – 800 €', '900 – 1200 €'],
+    payRate: '3 532 €',
+    payMin: '890 €',
+    payMax: '10 000 €',
     jobsLabel: 'POSTES À POURVOIR',
     jobs: ['Personnel au sol', 'Traitement des bagages', 'Nettoyage', 'Sécurité', 'Enregistrement', 'Restauration', 'et plus'],
     shiftsLabel: 'HORAIRES',
@@ -196,6 +241,8 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     paySliderLabel: 'Choisissez votre mensualité',
     payCta: 'Découvrir',
     paySwipe: 'Balayez vers la gauche',
+    aviaPerks: ['Salaire', 'Primes d’équipe', 'Assurance', 'Congés payés'],
+    aviaDisclaimer: 'Information uniquement. Pas un service de placement.',
   },
   nl: {
     eyebrow: 'PARTTIME',
@@ -204,6 +251,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     audience: 'Studenten • Gepensioneerden • Ouders',
     unitTop: 'netto',
     unitBot: 'per uur',
+    rate: '18–24',
+    cur: '€',
+    rates: ['200 – 300 €', '500 – 800 €', '900 – 1200 €'],
+    payRate: '3.532 €',
+    payMin: '890 €',
+    payMax: '10.000 €',
     jobsLabel: 'VACATURES',
     jobs: ['Grondpersoneel', 'Bagageafhandeling', 'Schoonmaak', 'Beveiliging', 'Check-in', 'Catering', 'en meer'],
     shiftsLabel: 'WERKTIJDEN',
@@ -227,6 +280,8 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     paySliderLabel: 'Kies het maandbedrag dat u wilt',
     payCta: 'Ontdek het nu',
     paySwipe: 'Veeg naar links',
+    aviaPerks: ['Loon', 'Ploegentoeslag', 'Verzekering', 'Betaald verlof'],
+    aviaDisclaimer: 'Alleen informatie. Geen arbeidsbemiddeling.',
   },
   pl: {
     eyebrow: 'NIEPEŁNY ETAT',
@@ -235,6 +290,12 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     audience: 'Studenci • Emeryci • Rodzice',
     unitTop: 'netto',
     unitBot: 'za godzinę',
+    rate: '35–50',
+    cur: 'zł',
+    rates: ['900 – 1 300 zł', '2 200 – 3 500 zł', '4 000 – 5 300 zł'],
+    payRate: '15 200 zł',
+    payMin: '3 800 zł',
+    payMax: '43 000 zł',
     jobsLabel: 'OFERTY PRACY',
     jobs: ['Personel naziemny', 'Obsługa bagażu', 'Sprzątanie', 'Ochrona', 'Check-in', 'Catering', 'i więcej'],
     shiftsLabel: 'GODZINY PRACY',
@@ -258,6 +319,238 @@ const BY_LOCALE: Record<LocaleId, Phrases> = {
     paySliderLabel: 'Wybierz wysokość raty',
     payCta: 'Sprawdź teraz',
     paySwipe: 'Przesuń w lewo',
+    aviaPerks: ['Wynagrodzenie', 'Dodatki zmianowe', 'Ubezpieczenie', 'Płatny urlop'],
+    aviaDisclaimer: 'Wyłącznie informacja. To nie jest pośrednictwo pracy.',
+  },
+  tr: {
+    eyebrow: 'YARI ZAMANLI',
+    headline: 'Havalimanı personeli aranıyor',
+    age: '18–65+ yaş',
+    audience: 'Öğrenciler • Emekliler • Ebeveynler',
+    unitTop: 'net',
+    unitBot: 'saat başına',
+    rate: '250–400',
+    cur: '₺',
+    rates: ['7.000 – 10.000 ₺', '17.000 – 27.000 ₺', '30.000 – 40.000 ₺'],
+    payRate: '60.000 ₺',
+    payMin: '15.000 ₺',
+    payMax: '170.000 ₺',
+    jobsLabel: 'AÇIK POZİSYONLAR',
+    jobs: ['Yer hizmetleri', 'Bagaj taşıma', 'Temizlik', 'Güvenlik', 'Check-in', 'İkram', 've daha fazlası'],
+    shiftsLabel: 'ÇALIŞMA SAATLERİ',
+    perks: ['Kadın ve erkekler için', 'Dil bilgisi gerekmez', 'Deneyim gerekmez',
+            'Yarı veya tam zamanlı', 'Haftalık ödeme · Primler'],
+    cta: 'DAHA FAZLA BİLGİ',
+    disclaimer: 'Bu içerik yalnızca bilgilendirme amaçlıdır ve bu teklifin geçerli olacağını garanti etmez.',
+    linkLine: 'Bağlantı açıklamada',
+    // Turkish puts the verb last, so the highlighted half is "find" rather than
+    // "job". The banner reads as one sentence either way, and bending the word
+    // order to keep the noun in the accent is how a translation starts sounding
+    // like one.
+    ratesHead: 'Bu işi',
+    ratesAccent: 'bul',
+    donorTop: 'SPERM',
+    donorBottom: 'BAĞIŞI',
+    donorBadges: ['Klinikler donör arıyor', '%100 gizli'],
+    donorPledge: 'Bir aileye yardım edin,',
+    donorPledgeAccent: 'karşılığını alın.',
+    donorCta: 'DAHA FAZLA BİLGİ',
+    payHead: 'Banka olmadan ev',
+    payHeadAccent: 'almak?',
+    paySub: 'Opsiyonlu satın alma programı sayesinde mümkün.',
+    payRateLabel: 'Aylık ödemeniz:',
+    paySliderLabel: 'İstediğiniz ödemeyi seçin',
+    payCta: 'Hemen keşfedin',
+    paySwipe: 'Sola kaydırın',
+    aviaPerks: ['Maaş', 'Vardiya primi', 'Sigorta', 'Ücretli izin'],
+    aviaDisclaimer: 'Yalnızca bilgilendirme. İş bulma hizmeti değildir.',
+  },
+  sv: {
+    eyebrow: 'DELTID',
+    headline: 'Flygplatspersonal sökes',
+    age: '18–65+ år',
+    audience: 'Studenter • Pensionärer • Föräldrar',
+    unitTop: 'netto',
+    unitBot: 'per timme',
+    rate: '180–240',
+    cur: 'kr',
+    rates: ['2 300 – 3 400 kr', '5 700 – 9 000 kr', '10 000 – 13 500 kr'],
+    payRate: '40 500 kr',
+    payMin: '10 000 kr',
+    payMax: '115 000 kr',
+    jobsLabel: 'LEDIGA TJÄNSTER',
+    jobs: ['Markpersonal', 'Bagagehantering', 'Städning', 'Säkerhet', 'Incheckning', 'Catering', 'med mera'],
+    shiftsLabel: 'ARBETSTIDER',
+    perks: ['För kvinnor och män', 'Inga språkkunskaper krävs', 'Ingen erfarenhet krävs',
+            'Deltid eller heltid', 'Veckovis utbetalning · Bonusar'],
+    cta: 'LÄS MER',
+    disclaimer: 'Detta innehåll är endast informativt och garanterar inte att just detta erbjudande finns tillgängligt.',
+    linkLine: 'Länk i beskrivningen',
+    ratesHead: 'Hitta det här',
+    ratesAccent: 'jobbet',
+    donorTop: 'SPERMA',
+    donorBottom: 'DONATION',
+    donorBadges: ['Kliniker söker donatorer', '100 % konfidentiellt'],
+    donorPledge: 'Hjälp en familj och',
+    donorPledgeAccent: 'få ersättning.',
+    donorCta: 'LÄS MER',
+    payHead: 'Köpa hus utan',
+    payHeadAccent: 'bank?',
+    paySub: 'Det är möjligt tack vare optionsköpsprogrammet.',
+    payRateLabel: 'Din månadskostnad:',
+    paySliderLabel: 'Välj den månadskostnad du vill ha',
+    payCta: 'Upptäck nu',
+    paySwipe: 'Svep åt vänster',
+    // OB-tillägg is the Swedish name for the premium paid for inconvenient
+    // hours. "Skifttillägg" is a literal translation of the German and reads as
+    // one; this is the word on a Swedish payslip.
+    aviaPerks: ['Lön', 'OB-tillägg', 'Försäkring', 'Betald semester'],
+    aviaDisclaimer: 'Endast information. Ingen arbetsförmedling.',
+  },
+  // European Portuguese, not Brazilian. The two split on exactly the words an
+  // advert is built from -- "reformados" against "aposentados", "dadores"
+  // against "doadores", "prémios" against "prêmios" -- so a Lisbon creative
+  // written in the Brazilian variety reads as imported, which is the same thing
+  // the wrong currency does.
+  pt: {
+    eyebrow: 'TEMPO PARCIAL',
+    headline: 'Procura-se pessoal de aeroporto',
+    age: '18–65+ anos',
+    audience: 'Estudantes • Reformados • Pais',
+    unitTop: 'líquido',
+    unitBot: 'por hora',
+    rate: '9–13',
+    cur: '€',
+    rates: ['150 – 250 €', '350 – 550 €', '650 – 900 €'],
+    payRate: '1.190 €',
+    payMin: '450 €',
+    payMax: '3.000 €',
+    jobsLabel: 'VAGAS',
+    jobs: ['Pessoal de terra', 'Bagagem', 'Limpeza', 'Segurança', 'Check-in', 'Catering', 'e muito mais'],
+    shiftsLabel: 'HORÁRIO DE TRABALHO',
+    perks: ['Para mulheres e homens', 'Não é preciso saber idiomas', 'Não é preciso experiência',
+            'Tempo parcial ou inteiro', 'Pagamento semanal · Prémios'],
+    cta: 'SAIBA MAIS',
+    disclaimer: 'Este conteúdo é apenas informativo e não garante a disponibilidade desta oferta em concreto.',
+    // "Link", not "ligação". The dictionary word is the second one and nobody
+    // writing a caption uses it.
+    linkLine: 'Link na descrição',
+    ratesHead: 'Encontra este',
+    ratesAccent: 'emprego',
+    // Portuguese will not put the noun first: the phrase is "doação de esperma"
+    // and there is no arrangement that leaves "esperma" on the top line without
+    // it reading as a caption someone reordered.
+    donorTop: 'DOAÇÃO',
+    donorBottom: 'DE ESPERMA',
+    donorBadges: ['As clínicas procuram dadores', '100% confidencial'],
+    donorPledge: 'Ajude uma família e',
+    donorPledgeAccent: 'seja compensado.',
+    donorCta: 'SABER MAIS',
+    payHead: 'Comprar casa sem',
+    payHeadAccent: 'banco?',
+    paySub: 'É possível graças ao programa de compra com opção.',
+    payRateLabel: 'A sua prestação mensal:',
+    paySliderLabel: 'Escolha a prestação que quer',
+    payCta: 'Descobrir agora',
+    paySwipe: 'Deslize para a esquerda',
+    aviaPerks: ['Salário', 'Subsídio de turno', 'Seguro', 'Férias pagas'],
+    aviaDisclaimer: 'Apenas informativo. Não é um serviço de colocação.',
+  },
+  // The first language in the set that is read right to left. Everything below
+  // is written in logical order -- first word first -- which is what the file
+  // and the browser both mean by order; the frame carries `dir` and turns it
+  // round. See `localeDir`.
+  he: {
+    eyebrow: 'משרה חלקית',
+    headline: 'דרושים עובדים לשדה התעופה',
+    age: 'גילאי 18–65+',
+    audience: 'סטודנטים • גמלאים • הורים',
+    unitTop: 'נטו',
+    unitBot: 'לשעה',
+    rate: '45–60',
+    cur: '₪',
+    rates: ['900 – 1,400 ₪', '2,200 – 3,500 ₪', '4,000 – 5,500 ₪'],
+    payRate: '6,420 ₪',
+    payMin: '2,500 ₪',
+    payMax: '16,000 ₪',
+    jobsLabel: 'משרות פנויות',
+    jobs: ['צוות קרקע', 'שינוע מזוודות', 'ניקיון', 'אבטחה', 'צ׳ק-אין', 'קייטרינג', 'ועוד'],
+    shiftsLabel: 'שעות עבודה',
+    perks: ['לנשים ולגברים', 'לא נדרשת ידיעת שפות', 'לא נדרש ניסיון',
+            'משרה חלקית או מלאה', 'תשלום שבועי · בונוסים'],
+    cta: 'מידע נוסף',
+    disclaimer: 'התוכן נועד למידע בלבד ואינו מהווה התחייבות לזמינות ההצעה הזו.',
+    linkLine: 'קישור בתיאור',
+    ratesHead: 'מצאו את',
+    ratesAccent: 'העבודה',
+    donorTop: 'תרומת',
+    donorBottom: 'זרע',
+    donorBadges: ['מרפאות מחפשות תורמים', '100% חסוי'],
+    donorPledge: 'עזרו למשפחה',
+    donorPledgeAccent: 'וקבלו פיצוי.',
+    donorCta: 'קראו עוד',
+    // An apartment, not a house. The offer is aimed at cities, and in Israel a
+    // city home is a flat -- "בית" would read as a detached house nobody
+    // buys on a monthly payment this size.
+    payHead: 'לקנות דירה בלי',
+    payHeadAccent: 'בנק?',
+    paySub: 'זה אפשרי הודות לתוכנית הרכישה באופציה.',
+    payRateLabel: 'התשלום החודשי שלך:',
+    paySliderLabel: 'בחרו את התשלום שמתאים לכם',
+    payCta: 'גלו עכשיו',
+    // Rightwards, because a Hebrew feed is mirrored: the next card in the
+    // carousel sits on the left, and the thumb travels towards it. This is the
+    // one line in the block that is a claim about the ad platform rather than
+    // about the language, and it is worth checking against a live placement.
+    paySwipe: 'החליקו ימינה',
+    aviaPerks: ['שכר', 'תוספת משמרת', 'ביטוח', 'חופשה בתשלום'],
+    aviaDisclaimer: 'למידע בלבד. איננו שירות השמה.',
+  },
+  hu: {
+    eyebrow: 'RÉSZMUNKAIDŐ',
+    headline: 'Repülőtéri munkatársakat keresünk',
+    age: '18–65+ év',
+    audience: 'Diákok • Nyugdíjasok • Szülők',
+    unitTop: 'nettó',
+    unitBot: 'óránként',
+    // Hungarian groups from five digits up and not before, which is why the
+    // hourly rate runs together and the monthly figures below are spaced.
+    rate: '2500–3500',
+    cur: 'Ft',
+    rates: ['60 000 – 90 000 Ft', '140 000 – 220 000 Ft', '260 000 – 350 000 Ft'],
+    payRate: '164 500 Ft',
+    payMin: '60 000 Ft',
+    payMax: '420 000 Ft',
+    jobsLabel: 'ÁLLÁSAJÁNLATOK',
+    jobs: ['Földi személyzet', 'Poggyászkezelés', 'Takarítás', 'Biztonsági szolgálat', 'Check-in', 'Vendéglátás', 'és még több'],
+    shiftsLabel: 'MUNKAIDŐ',
+    perks: ['Nőknek és férfiaknak', 'Nyelvtudás nem szükséges', 'Tapasztalat nem szükséges',
+            'Rész- vagy teljes munkaidő', 'Heti kifizetés · Bónuszok'],
+    cta: 'TUDJ MEG TÖBBET',
+    disclaimer: 'Ez a tartalom kizárólag tájékoztató jellegű, és nem garantálja az adott ajánlat elérhetőségét.',
+    linkLine: 'A link a leírásban',
+    ratesHead: 'Találd meg ezt a',
+    ratesAccent: 'munkát',
+    // "Spermaadományozás" is one word in Hungarian. Broken where a poster
+    // would break it rather than hyphenated, which is what the two lines of
+    // this layout are for.
+    donorTop: 'SPERMA',
+    donorBottom: 'ADOMÁNYOZÁS',
+    donorBadges: ['Klinikák donorokat keresnek', '100% bizalmas'],
+    donorPledge: 'Segíts egy családnak, és',
+    donorPledgeAccent: 'kapj térítést.',
+    donorCta: 'TUDJ MEG TÖBBET',
+    // Hungarian postpositions follow the noun, so the highlighted half is
+    // "without" and not "bank" -- the same bend the Turkish rates line takes.
+    payHead: 'Lakást venni bank',
+    payHeadAccent: 'nélkül?',
+    paySub: 'Lehetséges az opciós vásárlási programnak köszönhetően.',
+    payRateLabel: 'A havi törlesztőrészleted:',
+    paySliderLabel: 'Válaszd ki a neked megfelelő részletet',
+    payCta: 'Fedezd fel most',
+    paySwipe: 'Húzd balra',
+    aviaPerks: ['Bér', 'Műszakpótlék', 'Biztosítás', 'Fizetett szabadság'],
+    aviaDisclaimer: 'Csak tájékoztatás. Nem munkaközvetítés.',
   },
 };
 
