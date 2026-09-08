@@ -1,0 +1,14 @@
+# Obsidian: персональний стан робочого простору, у кожного свій
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.obsidian/plugins/
+.obsidian/themes/
+
+# Локальні налаштування Claude Code (дозволи тощо) — у кожного свої
+.claude/settings.local.json
+
+.DS_Store
+
+# Секрети — ніколи не комітити
+secret/
