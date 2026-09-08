@@ -1,0 +1,347 @@
+/* Two palettes, one set of names. `data-theme` is written on <html> — by the
+   inline script in index.html before first paint, and by the editor after — so
+   it is always resolved to a real theme here, never left as "system".
+
+   What deliberately does *not* live here: anything drawn over a creative. The
+   caption gradient, the drag box and its handles keep their own colours further
+   down, because the creative underneath is artwork on its way to an mp4 and does
+   not know what theme the editor is wearing. A preview that changed with the
+   chrome would be lying about the export. */
+/* Three depths, and light keeps the same order dark does: the workspace sits
+   at the back, the panel is raised off it, and a well is sunk into the panel.
+   Inverting that (white workspace, grey panel) flattens the editor — the panel
+   stops reading as a surface laid over the grid. */
+:root {
+  --bg: #f2f2f5;
+  --panel: #ffffff;
+  --line: #e2e2e9;
+  --ink: #1f1f23;
+  --muted: #6e6e80;
+  --accent: #6c5cff;
+  --danger: #d93636;
+  --warn: #a86400;
+  /* Sunken things: inputs, cards, tracks. */
+  --well: #f6f6f9;
+  --btn: #ffffff;
+  --btn-line-hover: #c2c2ce;
+  /* Selected but not active — the accent stepped back, so the active cell still
+     reads as the one the panel writes its single values to. */
+  --sel: #a79dff;
+}
+
+:root[data-theme='dark'] {
+  --bg: #0d0d12;
+  --panel: #14141b;
+  --line: #24242f;
+  --ink: #ececf2;
+  --muted: #8e8ea0;
+  --accent: #6c5cff;
+  --danger: #ff6b6b;
+  --warn: #ffb020;
+  --well: #0b0b10;
+  --btn: #1b1b24;
+  --btn-line-hover: #3a3a4a;
+  --sel: #4b3fd6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  height: 100vh;
+  overflow: hidden;
+}
+
+#root { height: 100%; }
+.app { height: 100%; display: flex; flex-direction: column; }
+.app.dropping { outline: 2px dashed var(--accent); outline-offset: -6px; }
+
+header {
+  display: flex; align-items: center; gap: 12px;
+  height: 56px; padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+/* One glyph, square, so the row does not reflow as the label behind it changes
+   from sun to moon to half-moon. */
+.tools .theme { width: 34px; padding: 8px 0; text-align: center; font-size: 15px; line-height: 1; }
+
+.brand { font-weight: 700; letter-spacing: .2px; display: flex; align-items: center; gap: 9px; }
+.mark { width: 14px; height: 14px; border-radius: 4px; background: var(--accent); }
+.spacer { flex: 1; }
+.tools { display: flex; gap: 6px; margin-left: 10px; }
+.tools button { padding: 6px 10px; font-size: 13px; }
+.hint { color: var(--muted); font-variant-numeric: tabular-nums; }
+.save-state { font-size: 12px; color: var(--muted); }
+.save-state.failed { color: var(--danger); }
+
+main { flex: 1; display: flex; min-height: 0; }
+
+.stage-area {
+  flex: 1; min-width: 0; overflow: auto; padding: 20px;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.grid { display: grid; grid-template-columns: repeat(4, max-content); gap: 16px; }
+
+.cell {
+  position: relative; border-radius: 10px; overflow: hidden;
+  border: 2px solid transparent; cursor: pointer; background: #000;
+  flex: none;
+}
+/* Two states, not one: everything in the selection takes the change, but the
+   panel's single-value controls and the drag box belong to the active cell. */
+.cell.selected { border-color: var(--sel); }
+.cell.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.cell .scaler { transform-origin: 0 0; }
+.cell .caption {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 6px 8px; font-size: 11px; color: #fff;
+  background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.72) 100%);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.box {
+  position: absolute; border: 1.5px dashed rgba(255,255,255,.85);
+  border-radius: 4px; cursor: move;
+}
+.box .grip {
+  position: absolute; right: -6px; bottom: -6px; width: 13px; height: 13px;
+  background: #fff; border-radius: 3px; cursor: nwse-resize;
+}
+/* The buttons that are not being edited: enough of an outline to aim at,
+   quiet enough not to read as part of the creative. */
+.box.idle {
+  border: 1px solid rgba(255,255,255,.28); cursor: pointer;
+}
+.box.idle:hover { border-color: rgba(255,255,255,.7); }
+
+.timeline {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; max-width: 1100px; flex: none;
+  padding: 9px 14px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel);
+}
+.timeline input[type=range] { flex: 1; }
+.timeline .transport { width: 40px; padding: 6px 0; text-align: center; flex: none; }
+.timeline .readout {
+  color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; flex: none;
+}
+.timeline .readout b { color: var(--ink); font-weight: 600; }
+
+.empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; color: var(--muted); text-align: center;
+  width: 320px; height: 569px; border: 1px dashed var(--line); border-radius: 10px;
+}
+.empty b { color: var(--ink); font-size: 15px; }
+
+.side {
+  /* Wide enough for a style chip to read as the button it is previewing, and
+     for two number boxes side by side. */
+  width: 360px; flex: none; border-left: 1px solid var(--line);
+  background: var(--panel); overflow-y: auto; padding: 16px;
+}
+.group { margin-bottom: 16px; }
+.lab {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; text-transform: uppercase; letter-spacing: .7px;
+  color: var(--muted); margin-bottom: 7px;
+}
+.lab .val { margin-left: auto; text-transform: none; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
+
+input[type=text], select, textarea {
+  width: 100%; background: var(--well); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font: inherit;
+}
+input[type=range] { width: 100%; accent-color: var(--accent); }
+input[type=color] { width: 46px; height: 34px; background: none; border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
+.row { display: flex; gap: 8px; align-items: center; }
+/* A control in a row shares the width instead of claiming all of it. Selects
+   and text boxes are 100%-wide by default, which in a row pushes its neighbour
+   off the edge of the panel. */
+.row .wide, .row > select, .row > input[type=text] { flex: 1; width: auto; min-width: 0; }
+
+button {
+  font: inherit; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--btn); color: var(--ink); padding: 8px 12px;
+}
+button:hover:not(:disabled) { border-color: var(--btn-line-hover); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { width: 100%; background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: 11px; }
+button.wide { width: 100%; }
+button.link { margin-left: auto; background: none; border: none; color: var(--accent); padding: 0; font-size: 11px; text-transform: none; letter-spacing: 0; }
+
+.drop {
+  width: 100%; background: none;
+  border: 1px dashed var(--line); border-radius: 9px; padding: 16px;
+  text-align: center; cursor: pointer; color: var(--muted);
+}
+.drop .t { display: block; color: var(--ink); }
+.drop .s { display: block; font-size: 12px; margin-top: 3px; }
+
+.check { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; cursor: pointer; }
+.check input { accent-color: var(--accent); }
+
+.note { margin-top: 10px; font-size: 12px; color: var(--muted); min-height: 18px; }
+input[type=text].mixed::placeholder { color: var(--warn); font-style: italic; }
+.mixed-note { color: var(--warn); }
+.warn { margin-top: 8px; font-size: 12px; color: var(--warn); }
+.error { margin-top: 8px; font-size: 12px; color: var(--danger); }
+
+/* One column, and capped: at ten entries the library would push the rest of the
+   panel off the bottom, and a chip narrow enough for two columns is a swatch. */
+.styles {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 330px; overflow-y: auto; padding-right: 4px;
+}
+.style-card {
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: var(--well);
+  display: flex; flex-direction: column; gap: 6px; align-items: stretch;
+  /* The stage inside is 560 layout pixels however far it is scaled down, and a
+     grid or flex item sized to its content would drag the panel out with it. */
+  min-width: 0; flex: none;
+}
+.style-card.on { border-color: var(--accent); }
+.style-card .name { font-size: 11px; color: var(--muted); }
+.style-preview { height: 34px; overflow: hidden; border-radius: 5px; }
+.style-preview .scaler { transform-origin: 0 0; }
+
+/* Three to a row: the artwork is what tells one object from another, so a tile
+   has to be big enough to read as a vacuum rather than as a grey smudge, and
+   capped in height so ten of them do not push the panel off the bottom. */
+.prop-lib { margin-top: 8px; max-height: 300px; overflow-y: auto; padding-right: 4px; }
+.prop-lib .cat {
+  font-size: 11px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .08em; margin-bottom: 6px;
+}
+.prop-lib .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.prop-lib .chip {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 4px; background: var(--well);
+  cursor: pointer; min-width: 0;
+}
+.prop-lib .chip.on { border-color: var(--accent); }
+/* The artwork was drawn to sit on a photo, so a lot of it is black and chrome.
+   A flat mid-tone behind the tile is what keeps those parts visible in both
+   themes without the tile pretending to be a creative. */
+.prop-lib .chip img {
+  width: 100%; height: 54px; object-fit: contain;
+  background: #6b7480; border-radius: 5px; padding: 3px;
+}
+.prop-lib .chip .nm {
+  font-size: 10px; color: var(--muted); line-height: 1.2; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+.prop-lib .chip .grey {
+  position: absolute; top: 8px; right: 6px; font-size: 9px; color: var(--muted);
+  background: var(--panel); border-radius: 4px; padding: 1px 4px;
+}
+
+.buttons-list { display: flex; flex-direction: column; gap: 6px; }
+.button-row {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; cursor: pointer;
+  background: var(--well);
+}
+.button-row.on { border-color: var(--accent); }
+.button-row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.button-row .ic {
+  border: none; background: none; color: var(--muted); padding: 0 3px; font-size: 13px;
+  line-height: 1; flex: none;
+}
+.button-row .ic:hover:not(:disabled) { color: var(--ink); }
+.button-row .ic:disabled { opacity: .25; }
+.button-row .rm:hover:not(:disabled) { color: var(--danger); }
+
+.num { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.num input[type=number] {
+  width: 100%; min-width: 0; background: var(--well); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 7px; padding: 8px 9px; font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.num .suffix { color: var(--muted); font-size: 11px; flex: none; }
+.num.mixed input::placeholder { color: var(--warn); font-style: italic; }
+select.mixed { color: var(--warn); font-style: italic; }
+
+/* Two to a row: a template is a whole 9:16 frame, and a chip wide enough to
+   tell the three cards apart is too wide for three across the panel. */
+.templates {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  max-height: 420px; overflow-y: auto; padding-right: 4px;
+}
+.template-card {
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px; background: var(--well);
+  display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 0;
+}
+.template-card.on { border-color: var(--accent); }
+.template-card .name {
+  font-size: 11px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.template-preview { overflow: hidden; border-radius: 5px; }
+.template-preview .scaler { transform-origin: 0 0; }
+.template-preview.empty {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); border: 1px dashed var(--line); font-size: 20px;
+}
+
+/* The field no longer follows the dictionary. Worth a mark, not a warning: it
+   is usually deliberate, and only matters when the batch goes out in seven
+   languages and this one field does not follow along. */
+.lab .edited { color: var(--warn); font-size: 8px; line-height: 1; }
+
+textarea { resize: vertical; min-height: 60px; line-height: 1.4; }
+textarea.mixed::placeholder { color: var(--warn); font-style: italic; }
+
+/* The languages strip over the grid. It sits with the transport rather than in
+   the panel because switching language redraws every cell — this is a control
+   over the batch, not over the creative the panel is editing. */
+.locale-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  width: 100%; max-width: 1100px; flex: none;
+  padding: 8px 14px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel);
+}
+.locale-bar .lab { margin-bottom: 0; flex: none; }
+.locale-bar .hint { margin-left: auto; font-size: 12px; }
+
+.locale-chip {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--well);
+  padding: 3px 6px 3px 8px;
+}
+.locale-chip.on { border-color: var(--accent); }
+/* A language kept out of the release still edits and still previews — it just
+   is not going anywhere yet, and reads that way. */
+.locale-chip.out { opacity: .5; }
+.locale-chip .ship { display: flex; align-items: center; cursor: pointer; }
+.locale-chip .ship input { accent-color: var(--accent); }
+.locale-chip .pick {
+  border: none; background: none; padding: 3px 2px; font-size: 13px;
+  display: flex; align-items: center; gap: 5px;
+}
+.locale-chip .voiced { color: var(--accent); font-size: 11px; }
+.locale-chip .ic {
+  border: none; background: none; color: var(--muted); padding: 0 2px;
+  font-size: 13px; line-height: 1; flex: none;
+}
+.locale-chip .ic:hover:not(:disabled) { color: var(--danger); }
+.locale-chip .ic:disabled { opacity: .25; }
+.add-locale { width: auto; padding: 6px 8px; font-size: 13px; }
+
+/* Progress: the bar answers "how far", the line under it answers "on what". */
+.export-progress .bar {
+  height: 6px; border-radius: 3px; background: var(--well); overflow: hidden;
+  border: 1px solid var(--line);
+}
+.export-progress .bar .fill {
+  height: 100%; background: var(--accent); transition: width .25s linear;
+}
+.export-progress .note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
