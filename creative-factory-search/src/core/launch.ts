@@ -18,6 +18,8 @@ export const isLaunchKey = (value: unknown): value is string =>
 
 export const TRAFFIC_SOURCES = ['tiktok', 'facebook'] as const;
 export type TrafficSource = (typeof TRAFFIC_SOURCES)[number];
+export const isTrafficSource = (value: unknown): value is TrafficSource =>
+  typeof value === 'string' && (TRAFFIC_SOURCES as readonly string[]).includes(value);
 
 /**
  * A cabinet the topic may launch from, and the pixel that belongs to it. Keyed
@@ -42,12 +44,24 @@ export interface TopicManifest {
   rules: string[];
 }
 
+/**
+ * The Traffic Source Profile a campaign is published with. Budget and bid are
+ * the two numbers a buyer always sets; the rest default to «All», which is what
+ * the admin sends when nothing is picked.
+ */
 export interface TspManifest {
   budget: number;
   bid: number;
   launch_tomorrow: boolean;
   /** ISO date, or null for no end. */
   end_date: string | null;
+  /** Age bands as the platform names them, or `All`. */
+  age: string[];
+  gender: string;
+  devices: string[];
+  os: string[];
+  /** Hours of the week the campaign runs, as the platform's schedule rows; empty means always. */
+  schedule: string[];
 }
 
 export interface CampaignManifest {
@@ -102,6 +116,18 @@ function positive(bag: Bag, field: string, errors: string[]): number {
   return 0;
 }
 
+/** A list of names, a single name, or nothing — the platform takes `All` for nothing. */
+function names(bag: Bag, field: string, errors: string[], fallback: string[]): string[] {
+  const value = bag[field];
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value) && value.every(v => typeof v === 'string' || typeof v === 'number')) {
+    return value.map(String);
+  }
+  errors.push(`поле \`${field}\` має бути назвою або списком назв`);
+  return fallback;
+}
+
 function flag(bag: Bag, field: string, errors: string[], fallback: boolean): boolean {
   const value = bag[field];
   if (value === undefined) return fallback;
@@ -130,10 +156,10 @@ export function parseTopicManifest(source: string): ParseResult<TopicManifest> {
     }
   }
   const sourceText = text(bag, 'traffic_source', errors);
-  if (sourceText !== '' && !(TRAFFIC_SOURCES as readonly string[]).includes(sourceText)) {
+  if (sourceText !== '' && !isTrafficSource(sourceText)) {
     errors.push(`поле \`traffic_source\` має бути одним із: ${TRAFFIC_SOURCES.join(', ')}`);
   }
-  const source_ = sourceText as TrafficSource;
+  const trafficSource = sourceText as TrafficSource;
   const site = text(bag, 'site', errors);
 
   const accounts: Record<string, Account> = {};
@@ -161,7 +187,7 @@ export function parseTopicManifest(source: string): ParseResult<TopicManifest> {
   if (errors.length > 0) return { ok: false, errors };
   return {
     ok: true,
-    value: { launch_key: launchKey, name, internal_name: internal, traffic_source: source_, site, accounts, rules },
+    value: { launch_key: launchKey, name, internal_name: internal, traffic_source: trafficSource, site, accounts, rules },
   };
 }
 
@@ -184,7 +210,10 @@ export function parseCampaignManifest(source: string, topic: TopicManifest): Par
   const keywordRotation = flag(bag, 'keyword_rotation', errors, false);
   const headline = text(bag, 'headline', errors);
 
-  let tsp: TspManifest = { budget: 0, bid: 0, launch_tomorrow: true, end_date: null };
+  let tsp: TspManifest = {
+    budget: 0, bid: 0, launch_tomorrow: true, end_date: null,
+    age: ['All'], gender: 'All', devices: ['All'], os: ['All'], schedule: [],
+  };
   if (!isBag(bag['tsp'])) {
     errors.push('поле `tsp` обов\'язкове: бюджет і бід кампанії');
   } else {
@@ -199,6 +228,11 @@ export function parseCampaignManifest(source: string, topic: TopicManifest): Par
       bid: positive(raw, 'bid', own),
       launch_tomorrow: flag(raw, 'launch_tomorrow', own, true),
       end_date: typeof endDate === 'string' ? endDate : null,
+      age: names(raw, 'age', own, ['All']),
+      gender: names(raw, 'gender', own, ['All'])[0] ?? 'All',
+      devices: names(raw, 'devices', own, ['All']),
+      os: names(raw, 'os', own, ['All']),
+      schedule: names(raw, 'schedule', own, []),
     };
     for (const e of own) errors.push('tsp: ' + e);
   }
@@ -226,10 +260,16 @@ export function checkNewLaunch(existingKeys: readonly string[], launchKey: strin
 
 export interface NewLaunchOptions {
   launchKey: string;
-  /** The topic's display name; the key with spaces when not given. */
+  /**
+   * The topic's display name. Not derived from the key when left out — the
+   * PRD keeps the three names independent — so the manifest carries a
+   * placeholder the buyer must replace before the first plan.
+   */
   name?: string;
   trafficSource?: TrafficSource;
 }
+
+export const NAME_PLACEHOLDER = 'REPLACE_TOPIC_NAME';
 
 export interface LaunchTree {
   /** Folders to create, relative to the launch folder. */
@@ -246,7 +286,7 @@ export const LAUNCH_DIRS = ['termgroups', 'articles', 'batches', 'campaigns'] as
  * buyer replaces before the first plan.
  */
 export function newLaunchTree(options: NewLaunchOptions): LaunchTree {
-  const name = options.name?.trim() || options.launchKey.replace(/-/g, ' ');
+  const name = options.name?.trim() || NAME_PLACEHOLDER;
   const source = options.trafficSource ?? 'tiktok';
   const topic = [
     '# Топік — коренева сутність платформи й одиниця роботи. Один топік = один тікет = ця тека.',
@@ -280,22 +320,36 @@ export function newLaunchTree(options: NewLaunchOptions): LaunchTree {
     'rsoc_count: 5',
     'keyword_rotation: false',
     'headline: Learn more',
+    '# Traffic Source Profile цієї кампанії. Що не задано — платформа бере як All.',
     'tsp:',
     '  budget: 20',
     '  bid: 0.45',
     '  launch_tomorrow: true',
     '  end_date: null',
+    '  age: [All]',
+    '  gender: All',
+    '  devices: [All]',
+    '  os: [All]',
+    '  schedule: []',
     '',
   ].join('\n');
 
   return {
-    dirs: [...LAUNCH_DIRS],
+    dirs: [...LAUNCH_DIRS, 'campaigns/example/creatives'],
     files: [
       { path: 'topic.yaml', content: topic },
       { path: 'campaigns/example/campaign.yaml', content: campaign },
       { path: 'campaigns/example/script.md', content: '' },
     ],
   };
+}
+
+/** What `sa new` answers: the folder is always there, the ticket may not be. */
+export interface LaunchCreated {
+  launchKey: string;
+  folder: string;
+  files: string[];
+  ticket: { ok: true; id: string; url: string } | { ok: false; note: string };
 }
 
 // --------------------------------------------------------- ticket fields --

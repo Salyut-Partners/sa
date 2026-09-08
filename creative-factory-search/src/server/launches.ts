@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  checkNewLaunch, newLaunchTree, resolveTicketFields, type TrafficSource,
+  checkNewLaunch, newLaunchTree, resolveTicketFields, type LaunchCreated, type TrafficSource,
 } from '../core/launch.ts';
 import { ClickUpError, clickupState, createTask, listFields, type Ticket } from './clickup.ts';
 import { ensureLaunchesRoot, type SaConfig } from './config.ts';
@@ -18,13 +18,6 @@ export interface NewLaunchRequest {
   trafficSource?: TrafficSource;
   vertical?: string;
   geo?: string[];
-}
-
-export interface LaunchCreated {
-  launchKey: string;
-  folder: string;
-  files: string[];
-  ticket: { ok: true; id: string; url: string } | { ok: false; note: string };
 }
 
 /** The launch keys that already have a folder. */

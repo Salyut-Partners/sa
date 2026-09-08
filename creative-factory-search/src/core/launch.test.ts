@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  checkNewLaunch, internalName, isLaunchKey, newLaunchTree, parseCampaignManifest,
+  checkNewLaunch, internalName, isLaunchKey, NAME_PLACEHOLDER, newLaunchTree, parseCampaignManifest,
   parseTopicManifest, resolveTicketFields, type TopicManifest,
 } from './launch.ts';
 
@@ -120,6 +120,20 @@ describe('a campaign manifest', () => {
     expect(result.value.tsp.launch_tomorrow).toBe(true);
     expect(result.value.tsp.end_date).toBeNull();
     expect(result.value.keyword_rotation).toBe(false);
+    expect(result.value.tsp).toMatchObject({ age: ['All'], gender: 'All', devices: ['All'], os: ['All'], schedule: [] });
+  });
+
+  it('takes the audience block of the TSP as names or lists of names', () => {
+    const withAudience = CAMPAIGN + '  age: [25-34, 35-44]\n  gender: female\n  devices: mobile\n  os: [ios]\n';
+    const result = parseCampaignManifest(withAudience, topic());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.tsp.age).toEqual(['25-34', '35-44']);
+    expect(result.value.tsp.gender).toBe('female');
+    expect(result.value.tsp.devices).toEqual(['mobile']);
+    expect(result.value.tsp.os).toEqual(['ios']);
+    const bad = parseCampaignManifest(CAMPAIGN + '  age: { from: 25 }\n', topic());
+    expect(!bad.ok && bad.errors.join()).toMatch(/age/);
   });
 
   it('refuses an account the topic does not have', () => {
@@ -169,7 +183,7 @@ describe('starting a launch', () => {
 
   it('lays out the folder tree with a topic manifest and a campaign example', () => {
     const tree = newLaunchTree({ launchKey: 'ai-vadim-sperm-it', name: 'AI Vadim Sperm IT' });
-    expect(tree.dirs).toEqual(['termgroups', 'articles', 'batches', 'campaigns']);
+    expect(tree.dirs.slice(0, 4)).toEqual(['termgroups', 'articles', 'batches', 'campaigns']);
     const names = tree.files.map(f => f.path);
     expect(names).toContain('topic.yaml');
     expect(names.some(n => n.startsWith('campaigns/') && n.endsWith('campaign.yaml'))).toBe(true);
@@ -195,10 +209,11 @@ describe('starting a launch', () => {
     expect(parseCampaignManifest(campaignText, t.value).ok).toBe(true);
   });
 
-  it('makes a name out of the key when none is given', () => {
+  it('leaves a placeholder name when none is given, never one derived from the key', () => {
     const tree = newLaunchTree({ launchKey: 'ai-mob-nl-trap' });
     const parsed = parseTopicManifest(tree.files.find(f => f.path === 'topic.yaml')!.content);
-    expect(parsed.ok && parsed.value.name).toBe('ai mob nl trap');
+    expect(parsed.ok && parsed.value.name).toBe(NAME_PLACEHOLDER);
+    expect(tree.dirs).toContain('campaigns/example/creatives');
   });
 });
 

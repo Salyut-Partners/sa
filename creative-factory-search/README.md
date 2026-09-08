@@ -84,7 +84,7 @@ bin/sa config
 
 `sa` is a thin HTTP client to the server: flags in, one JSON object out, an
 exit code that means something (0 done · 1 usage · 2 refused · 3 folder made
-but no ticket · 4 no server). It starts the server if none answers. `sa new`
+but no ticket · 4 no server · 5 server failed). It starts the server if none answers. `sa new`
 lays out the launch folder under `launches_root` and files a ticket in
 ClickUp; the folder always comes first, so a missing token leaves the buyer
 with somewhere to work and a sentence saying why there is no ticket.

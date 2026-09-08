@@ -7,9 +7,8 @@ import type { SaConfig } from './config.ts';
 
 const API = 'https://api.clickup.com/api/v2';
 
-export type ClickUpState =
-  | { ready: true; token: string; listId: string }
-  | { ready: false; note: string };
+export type ClickUpReady = { ready: true; token: string; listId: string };
+export type ClickUpState = ClickUpReady | { ready: false; note: string };
 
 export function clickupState(config: SaConfig): ClickUpState {
   const { token, list_id: listId } = config.clickup;
@@ -36,7 +35,7 @@ async function call<T>(token: string, url: string, init?: RequestInit): Promise<
 }
 
 /** The custom fields the list carries — what `resolveTicketFields` matches against. */
-export async function listFields(state: ClickUpState & { ready: true }): Promise<TicketFieldDef[]> {
+export async function listFields(state: ClickUpReady): Promise<TicketFieldDef[]> {
   const body = await call<{ fields?: TicketFieldDef[] }>(state.token, `${API}/list/${state.listId}/field`);
   return body.fields ?? [];
 }
@@ -47,7 +46,7 @@ export interface Ticket {
 }
 
 export async function createTask(
-  state: ClickUpState & { ready: true },
+  state: ClickUpReady,
   name: string,
   fields: TicketField[],
 ): Promise<Ticket> {

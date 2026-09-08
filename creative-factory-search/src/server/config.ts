@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export interface SaConfig {
   /** The folder that holds one sub-folder per launch key. */
@@ -21,11 +22,14 @@ export const configPath = (): string =>
   process.env['SA_CONFIG'] ?? path.join(os.homedir(), '.config', 'sa', 'config.json');
 
 /**
- * Next to the repository by default: `~/sa/launches` when the workspace is
- * checked out where the PRD puts it. Drive, later, is this one line changed
- * in the buyer's config — nothing else knows the path.
+ * Next to the repository by default — `~/sa/launches` when the workspace is
+ * checked out where the PRD puts it, and still inside the mono-repo's
+ * `.gitignore` when it is not. Drive, later, is this one value changed in the
+ * buyer's config; nothing else knows the path.
  */
-export const DEFAULT_LAUNCHES_ROOT = path.join(os.homedir(), 'sa', 'launches');
+export const DEFAULT_LAUNCHES_ROOT = path.join(
+  path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'launches',
+);
 
 const expandHome = (p: string): string =>
   p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p;

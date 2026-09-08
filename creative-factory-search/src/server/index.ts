@@ -14,6 +14,7 @@ import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
 import { clickupState } from './clickup.ts';
 import { configPath, ensureLaunchesRoot, loadConfig } from './config.ts';
 import { createLaunch, existingLaunchKeys, RefusedError } from './launches.ts';
+import { isTrafficSource } from '../core/launch.ts';
 import { closeBrowser } from './render.ts';
 import { listVoices } from './tts.ts';
 import { NoTranslatorError, translateAll, translator } from './translate.ts';
@@ -96,12 +97,12 @@ app.get('/api/launches', (_req, res) => {
 app.post('/api/launches', async (req, res) => {
   const body = req.body as { launchKey?: unknown; name?: unknown; trafficSource?: unknown; vertical?: unknown; geo?: unknown };
   if (typeof body.launchKey !== 'string') {
-    res.status(400).json({ error: 'потрібен launchKey' });
+    res.status(400).json({ error: 'у запиті немає launchKey' });
     return;
   }
   const source = body.trafficSource;
-  if (source !== undefined && source !== 'tiktok' && source !== 'facebook') {
-    res.status(400).json({ error: 'trafficSource має бути tiktok або facebook' });
+  if (source !== undefined && !isTrafficSource(source)) {
+    res.status(400).json({ error: 'trafficSource має бути одним із: tiktok, facebook' });
     return;
   }
   try {

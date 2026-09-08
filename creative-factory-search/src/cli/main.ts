@@ -4,12 +4,12 @@
 // the tool cannot answer.
 //
 // Exit codes: 0 done · 1 usage · 2 refused · 3 done in part (folder made, no
-// ticket) · 4 the server could not be reached or started.
+// ticket) · 4 the server could not be reached or started · 5 the server failed.
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import type { LaunchCreated } from '../server/launches.ts';
+import type { LaunchCreated } from '../core/launch.ts';
 
 const PORT = Number(process.env['SA_PORT'] ?? process.env['PORT'] ?? 5180);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -106,7 +106,7 @@ async function commandNew(args: string[]): Promise<number> {
   const { status, body } = await ask<LaunchCreated | { error: string }>('/api/launches', asJson(request));
   out(body);
   if (status === 400) return 2;
-  if (status !== 200) return 4;
+  if (status !== 200) return 5;
   return 'ticket' in body && body.ticket.ok ? 0 : 3;
 }
 
