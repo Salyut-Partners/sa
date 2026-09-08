@@ -11,6 +11,9 @@ import {
   BadRequestError, cancelJob, jobById, outputsOf, startBatch, statusOf,
 } from './batch.ts';
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
+import { clickupState } from './clickup.ts';
+import { configPath, ensureLaunchesRoot, loadConfig } from './config.ts';
+import { createLaunch, existingLaunchKeys, RefusedError } from './launches.ts';
 import { closeBrowser } from './render.ts';
 import { listVoices } from './tts.ts';
 import { NoTranslatorError, translateAll, translator } from './translate.ts';
@@ -64,6 +67,57 @@ app.post('/api/translate', async (req, res) => {
     res.json(await translateAll(texts, targets));
   } catch (e) {
     res.status(e instanceof NoTranslatorError ? 501 : 502).json({ error: (e as Error).message });
+  }
+});
+
+// ---------------------------------------------------------------- launches --
+
+/** Where things are and whether the ticket side can work — for `sa config`. */
+app.get('/api/config', (_req, res) => {
+  const config = loadConfig();
+  const clickup = clickupState(config);
+  res.json({
+    path: configPath(),
+    launches_root: config.launches_root,
+    clickup: clickup.ready ? { ready: true, list_id: clickup.listId } : { ready: false, note: clickup.note },
+  });
+});
+
+app.get('/api/launches', (_req, res) => {
+  const config = loadConfig();
+  res.json({ launches_root: config.launches_root, launches: existingLaunchKeys(config.launches_root) });
+});
+
+/**
+ * A new launch: the folder tree, then the ticket. A refusal is a 400 with the
+ * sentence for the buyer; a ticket that could not be filed is not a failure of
+ * the request — the folder is there — and comes back inside the 200.
+ */
+app.post('/api/launches', async (req, res) => {
+  const body = req.body as { launchKey?: unknown; name?: unknown; trafficSource?: unknown; vertical?: unknown; geo?: unknown };
+  if (typeof body.launchKey !== 'string') {
+    res.status(400).json({ error: 'потрібен launchKey' });
+    return;
+  }
+  const source = body.trafficSource;
+  if (source !== undefined && source !== 'tiktok' && source !== 'facebook') {
+    res.status(400).json({ error: 'trafficSource має бути tiktok або facebook' });
+    return;
+  }
+  try {
+    res.json(await createLaunch(loadConfig(), {
+      launchKey: body.launchKey,
+      ...(typeof body.name === 'string' ? { name: body.name } : {}),
+      ...(source !== undefined ? { trafficSource: source } : {}),
+      ...(typeof body.vertical === 'string' ? { vertical: body.vertical } : {}),
+      ...(Array.isArray(body.geo) ? { geo: body.geo.map(String) } : {}),
+    }));
+  } catch (e) {
+    if (e instanceof RefusedError) res.status(400).json({ error: e.message });
+    else {
+      console.error('launch failed:', (e as Error).message);
+      res.status(500).json({ error: (e as Error).message });
+    }
   }
 });
 
@@ -137,6 +191,13 @@ app.get('/api/batch/:id/download', (req, res) => {
 
 const server = app.listen(PORT, () => {
   console.log(`Creative Factory Search -> ${ORIGIN}`);
+  // The launches folder exists from the first start, so the editor and `sa`
+  // never meet a missing root. Where it is comes from the buyer's config.
+  try {
+    console.log(`launches -> ${ensureLaunchesRoot(loadConfig())}`);
+  } catch (e) {
+    console.error((e as Error).message);
+  }
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

@@ -1,0 +1,4 @@
+#!/bin/sh
+# `sa` from anywhere: runs the CLI through the repository's own tsx.
+here="$(cd "$(dirname "$0")" && pwd)"
+exec "$here/../node_modules/.bin/tsx" "$here/../src/cli/main.ts" "$@"

@@ -74,6 +74,26 @@ Keys go in `.env` (see `.env.example`) and none of them are required:
 silent creatives, and the panel says which key is missing rather than failing.
 `RENDER_CONCURRENCY` sets how many pages walk frames at once (default 2).
 
+### `sa` — the buyer's command line
+
+```sh
+bin/sa new ai-vadim-sperm-it --name "AI Vadim Sperm IT" --vertical jobs --geo DE,IT
+bin/sa launches
+bin/sa config
+```
+
+`sa` is a thin HTTP client to the server: flags in, one JSON object out, an
+exit code that means something (0 done · 1 usage · 2 refused · 3 folder made
+but no ticket · 4 no server). It starts the server if none answers. `sa new`
+lays out the launch folder under `launches_root` and files a ticket in
+ClickUp; the folder always comes first, so a missing token leaves the buyer
+with somewhere to work and a sentence saying why there is no ticket.
+
+The buyer's own settings — `launches_root` and the ClickUp token and list —
+live in `~/.config/sa/config.json`, outside the repository (`SA_CONFIG`
+points elsewhere for tests). Without the file everything defaults to
+`~/sa/launches` and no ticket.
+
 ## Shape of the code
 
 Three build units and one rule.
@@ -92,6 +112,9 @@ Three build units and one rule.
   preview looks the same in either theme and still matches the mp4. The choice
   cycles system → light → dark in the header, lives in `localStorage`, and is
   never written into a project file.
+- **`src/cli`** — `sa`. Parses flags, calls the server, prints JSON. Knows
+  nothing about launches beyond the route names; the server does the work and
+  `core/launch.ts` decides what a launch is: the manifests, the key, the tree.
 - **`src/server`** — Express, Puppeteer, ffmpeg. Bundles the render target from
   source at startup, so the headless page can never drift from the editor. An
   export is a job in memory: the editor posts a plan, gets an id, and watches it.
