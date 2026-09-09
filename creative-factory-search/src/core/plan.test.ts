@@ -31,7 +31,7 @@ const SITES = [{ id: 182, url: 'useconsumer.com' }];
 
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   topics: [], configurations: [], termGroups: [], posts: [], countries: COUNTRIES, sites: SITES,
-  creatives: [], tsps: [], builders: [], pixels: [], adAccounts: [], themes: [], rsocCounts: [], languages: [],
+  creatives: [], tsps: [], builders: [], campaigns: [], pixels: [], adAccounts: [], themes: [], rsocCounts: [], languages: [],
   ...over,
 });
 

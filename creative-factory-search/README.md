@@ -191,8 +191,7 @@ for one campaign is four steps, in order:
   that are missing. The same name in two campaigns of one plan is refused
   before anything goes up — the pairing is by name. Each file's hash goes
   into the state beside its id, so a creative re-exported under the same
-  name is uploaded again while the campaign is unbuilt, and only warned
-  about after — a relaunch is ticket 12.
+  name is uploaded again, whether or not the campaign is built.
 - **Headline** — one per text per topic, wrapped as the admin wraps it,
   matched by its words; two campaigns with one headline share the entry.
 - **TSP** — the profile as the admin's form sends it. Profiles are shared by
@@ -210,8 +209,29 @@ for one campaign is four steps, in order:
 
 Each campaign has its own `state.json` beside its manifest: file name → id
 and hash, the headline, the profile with the name the platform composed,
-the builder with its campaign. The read-back pairing and the create-or-share
-decisions are `core/campaign-plan.ts` and tested there.
+the builder with its campaign, and the history of every campaign the folder
+ran before. The read-back pairing and the create-or-share decisions are
+`core/campaign-plan.ts` and tested there.
+
+### A relaunch
+
+A built campaign cannot be edited, only replaced. When the creatives in the
+folder no longer match what the builder was built with — a file remade
+under its name after a reject, a new one added, one taken out — the plan is
+a relaunch: the changed files go up, a new builder is made from the same
+post and term group with the new creative ids, and the old campaign retires
+into the state's `history` with its ids and a fate. The plan says what the
+relaunch costs — a new link, and Google's keys on it from half an hour to a
+day — and what happens to the old campaign, which is one of three things.
+Rejected before it was published, or taken down by the provider: nothing to
+pause. Live: paused through the admin's bulk update, by campaign id and
+never builder id, but only once it is in the analytics — the campaign list
+shows no spend, so the first cent is read off its revenue — because the
+vault's stop rule says a status changed before that point stops the
+platform tracking it. A live campaign that has not spent is left alone and
+named, and asked about again on every later plan until it settles. The
+verdict is `judgeRetired` in `core/campaign-plan.ts`, and the pause is
+planned after the new builder, never before it.
 
 ### A batch in its topic folder
 

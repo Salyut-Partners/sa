@@ -7,7 +7,8 @@
 // `core/queue.ts` reads outcomes: a timeout is a fact to reason about, not an
 // exception to unwind.
 import type {
-  AdAccount, HeadlineBody, Pixel, PlatformBuilder, PlatformCreative, PlatformTsp, Theme, TspBody, TspFields,
+  AdAccount, HeadlineBody, PauseBody, Pixel, PlatformBuilder, PlatformCampaign, PlatformCreative, PlatformTsp, Theme, TspBody,
+  TspFields,
 } from '../core/campaign-plan.ts';
 import type {
   Country, PlatformConfiguration, PlatformPost, PlatformTermGroup, PlatformTopic, Site, TermGroupBody,
@@ -342,6 +343,54 @@ export async function readBuilders(client: PlatformClient, topicId: number): Pro
   return builders;
 }
 
+/**
+ * The campaign list is the analytics page: organisation-wide, newest first,
+ * a hundred a page, over a date window. It is read only as far as the
+ * campaigns asked for — the topic's own, a handful among thousands — and
+ * stops the moment every one of them has been seen.
+ */
+const CAMPAIGN_PAGE = 100;
+/** How far back the list is asked to look. The admin asks for a week; a campaign being relaunched may be older. */
+const CAMPAIGN_WINDOW_DAYS = 90;
+
+const usDate = (d: Date): string => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+
+const money = (v: unknown): number | null => {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+export async function readCampaigns(client: PlatformClient, wanted: readonly number[]): Promise<PlatformCampaign[]> {
+  if (wanted.length === 0) return [];
+  const left = new Set(wanted);
+  const found: PlatformCampaign[] = [];
+  const to = new Date();
+  const from = new Date(to.getTime() - CAMPAIGN_WINDOW_DAYS * 86_400_000);
+  const query = { date_type: 'last7days', date_formatted: `${usDate(from)}-${usDate(to)}` };
+  for (let pageId = 0; pageId < 100 && left.size > 0; pageId++) {
+    const body = need(await client.get('/v2/campaigns', { ...query, pageId, limit: CAMPAIGN_PAGE }), 'GET /v2/campaigns');
+    const page = listOf(body, 'data');
+    for (const raw of page) {
+      const c = bag(raw);
+      const id = num(c['id']);
+      if (!left.has(id)) continue;
+      left.delete(id);
+      found.push({
+        id,
+        name: str(c['name']),
+        status: str(c['status']),
+        published: c['campaign_id'] != null && str(c['campaign_id']) !== '',
+        revenue: money(c['revenue']) ?? 0,
+        // The list carries no spend today; read if it ever does, under the names such a field tends to get.
+        spend: money(c['spend']) ?? money(c['cost']) ?? money(c['amount_spent']),
+      });
+    }
+    if (page.length < CAMPAIGN_PAGE) break;
+  }
+  return found;
+}
+
 // --------------------------------------------------------------- writes --
 
 export const createTopic = (client: PlatformClient, body: { name: string; internal_name: string }): Promise<Answer> =>
@@ -458,3 +507,7 @@ export interface BuilderFields {
 
 export const createBuilder = (client: PlatformClient, fields: BuilderFields): Promise<Answer> =>
   client.postForm('/campaign-builder', { ...fields });
+
+/** The admin's bulk status change: multipart, campaign ids — never builder ids. */
+export const pauseCampaigns = (client: PlatformClient, body: PauseBody): Promise<Answer> =>
+  client.postForm('/v2/campaign/bulk-update', { status: body.status, 'campaign_ids[]': body.campaign_ids.map(String) });

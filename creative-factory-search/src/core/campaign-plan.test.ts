@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseArticle } from './article.ts';
 import {
   emptyCampaignState, headlineHtml, headlineText, matchUploads, parseCampaignState, sameTsp, tspFieldsOf,
-  type CampaignSource, type CampaignState, type PlatformBuilder, type PlatformCreative, type PlatformTsp,
+  type CampaignSource, type CampaignState, type PlatformBuilder, type PlatformCampaign, type PlatformCreative, type PlatformTsp,
 } from './campaign-plan.ts';
 import { parseCampaignManifest, parseTopicManifest, type TopicManifest } from './launch.ts';
 import {
@@ -70,6 +70,7 @@ const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   creatives: [],
   tsps: [],
   builders: [],
+  campaigns: [],
   pixels: [{ id: 35967, name: 'Джобс', ad_account_id: '7680550759062339602' }, { id: 35968, name: 'Лонс', ad_account_id: '7680552058193297426' }],
   adAccounts: [
     { id: 53560, name: 'GB / Salyut_Partners / Account 16', account_id: '7680550759062339602' },
@@ -134,6 +135,7 @@ const DONE_CAMPAIGN = (): CampaignState => ({
   tsp: { id: 141653, name: 'AIVadimSpermIT-tk-DE-db-20' },
   builder: { id: 707000, campaign_id: 1267704, campaign_name: '34-AIVadimSpermIT-tgmain-tk-de-ia-0908-GE01' },
   pending: null,
+  history: [],
 });
 
 const DONE_SNAPSHOT = () => snapshot({
@@ -292,13 +294,6 @@ describe('a campaign already on the platform', () => {
     });
   });
 
-  it('warns rather than relaunches when a creative changed after the campaign was built', () => {
-    const remade = campaign('de-a');
-    remade.creatives[0] = { name: '01.mp4', hash: 'h-remade' };
-    const result = plan(contents(remade), DONE_SNAPSHOT(), topicState({ 'de-a': DONE_CAMPAIGN() }));
-    expect(result.steps).toEqual([]);
-    expect(result.warnings.join()).toMatch(/01\.mp4/);
-  });
 
   it('updates the TSP in place when the manifest budget changed and the campaign is not built yet', () => {
     const changed = campaign('de-a', { yaml: CAMPAIGN.replace('budget: 20', 'budget: 30') });
@@ -315,6 +310,143 @@ describe('a campaign already on the platform', () => {
     expect(kinds(result)).toEqual(['tsp.create', 'builder.create']);
     expect(result.steps[0]).toMatchObject({ kind: 'tsp.create', fields: { budget: 30 }, body: { budget: 30 } });
     expect(result.warnings.join()).toMatch(/de-b/);
+  });
+});
+
+describe('a relaunch: the campaign was built and a creative in the folder changed', () => {
+  const live = (over: Partial<PlatformCampaign> = {}): PlatformCampaign => ({
+    id: 1267704, name: '34-AIVadimSpermIT-tgmain-tk-de-ia-0908-GE01', status: 'ACTIVE', published: true, revenue: 1.2, spend: null, ...over,
+  });
+  const remade = () => {
+    const c = campaign('de-a');
+    c.creatives[0] = { name: '01.mp4', hash: 'h-remade' };
+    return c;
+  };
+  const withOld = (campaigns: PlatformCampaign[], over: Partial<PlatformBuilder> = {}) =>
+    snapshot({ ...DONE_SNAPSHOT(), builders: [builderOnPlatform(707000, [1503646, 1001, 1002], over)], campaigns });
+
+  it('uploads the changed file and builds a new campaign from the same post, term group and the new creative id', () => {
+    const result = plan(contents(remade()), withOld([live()]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(result.errors).toEqual([]);
+    expect(kinds(result)).toEqual(['creatives.upload', 'builder.create', 'campaign.pause']);
+    expect(result.steps[0]).toMatchObject({ kind: 'creatives.upload', files: ['01.mp4'] });
+    expect(result.steps[1]).toMatchObject({
+      kind: 'builder.create',
+      body: { post_id: 130892, term_group_ids: [211532], creative_repo_ids: [1503646, { campaign: 'de-a', file: '01.mp4' }, 1002], traffic_source_profile_ids: [141653] },
+      retires: { builder: { id: 707000, campaign_id: 1267704 }, creatives: { '01.mp4': { id: 1001 }, '02.mp4': { id: 1002 } }, fate: 'live' },
+    });
+    expect(result.warnings.join()).toMatch(/30 хвилин/);
+  });
+
+  it('pauses the old campaign by its campaign id, not the builder id, when it is live and in the analytics', () => {
+    const result = plan(contents(remade()), withOld([live()]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(result.steps[2]).toMatchObject({ kind: 'campaign.pause', campaign: 'de-a', body: { status: 'PAUSED', campaign_ids: [1267704] } });
+    const spent = plan(contents(remade()), withOld([live({ revenue: 0, spend: 0.4 })]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(kinds(spent)).toContain('campaign.pause');
+  });
+
+  it('leaves a live campaign alone until its first cent is in the analytics, and says why', () => {
+    const result = plan(contents(remade()), withOld([live({ revenue: 0, spend: null })]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(kinds(result)).toEqual(['creatives.upload', 'builder.create']);
+    expect(result.warnings.join()).toMatch(/аналітиц/);
+    expect(result.resolved.campaigns['de-a']?.history).toMatchObject([{ builder: { id: 707000 }, fate: 'live' }]);
+  });
+
+  it('has nothing to pause when the old campaign was rejected before publication', () => {
+    const result = plan(contents(remade()), withOld([], { campaigns: [], status: 'Rejected' }), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(kinds(result)).toEqual(['creatives.upload', 'builder.create']);
+    expect(result.resolved.campaigns['de-a']?.history).toMatchObject([{ fate: 'unpublished' }]);
+    const pending = plan(contents(remade()), withOld([live({ status: 'PENDING', published: false })]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(kinds(pending)).toEqual(['creatives.upload', 'builder.create']);
+    expect(pending.resolved.campaigns['de-a']?.history).toMatchObject([{ fate: 'unpublished' }]);
+  });
+
+  it('has nothing to pause when the provider already took it down, or it is paused already', () => {
+    const deleted = plan(contents(remade()), withOld([live({ status: 'DELETED' })]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(kinds(deleted)).toEqual(['creatives.upload', 'builder.create']);
+    expect(deleted.resolved.campaigns['de-a']?.history).toMatchObject([{ fate: 'deleted' }]);
+    const paused = plan(contents(remade()), withOld([live({ status: 'PAUSED' })]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(kinds(paused)).toEqual(['creatives.upload', 'builder.create']);
+    expect(paused.resolved.campaigns['de-a']?.history).toMatchObject([{ fate: 'paused' }]);
+  });
+
+  it('does not touch a campaign the list does not show, and says so', () => {
+    const result = plan(contents(remade()), withOld([]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(kinds(result)).toEqual(['creatives.upload', 'builder.create']);
+    expect(result.warnings.join()).toMatch(/1267704/);
+  });
+
+  it('is also a relaunch when a file was taken out of the folder', () => {
+    const result = plan(contents(campaign('de-a', { files: ['02.mp4'] })), withOld([live()]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(kinds(result)).toEqual(['builder.create', 'campaign.pause']);
+    expect(result.steps[0]).toMatchObject({ body: { creative_repo_ids: [1503646, 1002] } });
+  });
+
+  it('plans the pause again when an earlier apply built the new campaign but never paused the old', () => {
+    const state = topicState({ 'de-a': {
+      ...DONE_CAMPAIGN(),
+      creatives: { '01.mp4': { id: 1005, hash: 'h-remade' }, '02.mp4': { id: 1002, hash: 'h-02.mp4' } },
+      builder: { id: 707001, campaign_id: null, campaign_name: null },
+      history: [{ builder: { id: 707000, campaign_id: 1267704, campaign_name: 'old' }, creatives: DONE_CAMPAIGN().creatives, fate: 'live' }],
+    } });
+    const both = snapshot({
+      ...DONE_SNAPSHOT(),
+      creatives: [...DONE_SNAPSHOT().creatives, video(1005, '01.mp4')],
+      builders: [builderOnPlatform(707000, [1503646, 1001, 1002]), builderOnPlatform(707001, [1503646, 1005, 1002], { campaigns: [] })],
+      campaigns: [live()],
+    });
+    const result = plan(contents(remade()), both, state);
+    expect(kinds(result)).toEqual(['campaign.pause']);
+    expect(result.steps[0]).toMatchObject({ body: { campaign_ids: [1267704] } });
+    // Once the platform shows it paused, the history says so and nothing is planned.
+    const settled = plan(contents(remade()), { ...both, campaigns: [live({ status: 'PAUSED' })] }, state);
+    expect(settled.steps).toEqual([]);
+    expect(settled.resolved.campaigns['de-a']?.history).toMatchObject([{ builder: { id: 707000 }, fate: 'paused' }]);
+  });
+
+  it('adopts the new builder a crashed apply made, found by its creative set, and retires the old one', () => {
+    const state = topicState({ 'de-a': {
+      ...DONE_CAMPAIGN(),
+      creatives: { '01.mp4': { id: 1005, hash: 'h-remade' }, '02.mp4': { id: 1002, hash: 'h-02.mp4' } },
+      pending: { step: 'builder.create', key: 'de-a', before: [] },
+    } });
+    const both = snapshot({
+      ...DONE_SNAPSHOT(),
+      creatives: [...DONE_SNAPSHOT().creatives, video(1005, '01.mp4')],
+      builders: [builderOnPlatform(707000, [1503646, 1001, 1002]), builderOnPlatform(707001, [1503646, 1005, 1002], { campaigns: [] })],
+      campaigns: [live()],
+    });
+    const result = plan(contents(remade()), both, state);
+    expect(kinds(result)).toEqual(['campaign.pause']);
+    expect(result.resolved.campaigns['de-a']).toMatchObject({
+      builder: { id: 707001 },
+      history: [{ builder: { id: 707000, campaign_id: 1267704 }, fate: 'live' }],
+    });
+  });
+
+  it('keeps every earlier campaign of the folder, not only the last', () => {
+    const state = topicState({ 'de-a': {
+      ...DONE_CAMPAIGN(),
+      history: [{ builder: { id: 706000, campaign_id: 1260000, campaign_name: 'first' }, creatives: {}, fate: 'paused' }],
+    } });
+    const result = plan(contents(remade()), withOld([live()]), state);
+    expect(result.resolved.campaigns['de-a']?.history.map(h => h.builder.id)).toEqual([706000, 707000]);
+  });
+
+  it('is the same plan when nothing changed after a relaunch', () => {
+    const state = topicState({ 'de-a': {
+      ...DONE_CAMPAIGN(),
+      creatives: { '01.mp4': { id: 1005, hash: 'h-remade' }, '02.mp4': { id: 1002, hash: 'h-02.mp4' } },
+      builder: { id: 707001, campaign_id: null, campaign_name: null },
+      history: [{ builder: { id: 707000, campaign_id: 1267704, campaign_name: 'old' }, creatives: DONE_CAMPAIGN().creatives, fate: 'paused' }],
+    } });
+    const both = snapshot({
+      ...DONE_SNAPSHOT(),
+      creatives: [...DONE_SNAPSHOT().creatives, video(1005, '01.mp4')],
+      builders: [builderOnPlatform(707000, [1503646, 1001, 1002]), builderOnPlatform(707001, [1503646, 1005, 1002], { campaigns: [] })],
+      campaigns: [live({ status: 'PAUSED' })],
+    });
+    expect(plan(contents(remade()), both, state).steps).toEqual([]);
   });
 });
 
@@ -457,9 +589,19 @@ describe('campaign state', () => {
     const parsed = parseCampaignState('{"creatives":{"01.mp4":{"id":5,"hash":"x"}},"tsp":{"id":7,"name":"n"}}');
     expect(parsed).toEqual({
       ok: true,
-      value: { creatives: { '01.mp4': { id: 5, hash: 'x' } }, headline: null, tsp: { id: 7, name: 'n' }, builder: null, pending: null },
+      value: { creatives: { '01.mp4': { id: 5, hash: 'x' } }, headline: null, tsp: { id: 7, name: 'n' }, builder: null, pending: null, history: [] },
     });
     expect(parseCampaignState('[]').ok).toBe(false);
+  });
+
+  it('keeps the history of earlier campaigns of the folder', () => {
+    const parsed = parseCampaignState(JSON.stringify({
+      builder: { id: 2, campaign_id: null, campaign_name: null },
+      history: [{ builder: { id: 1, campaign_id: 10, campaign_name: 'old' }, creatives: { '01.mp4': { id: 5, hash: 'x' } }, fate: 'paused' }, { nonsense: true }],
+    }));
+    expect(parsed.ok && parsed.value.history).toEqual([
+      { builder: { id: 1, campaign_id: 10, campaign_name: 'old' }, creatives: { '01.mp4': { id: 5, hash: 'x' } }, fate: 'paused' },
+    ]);
   });
 });
 

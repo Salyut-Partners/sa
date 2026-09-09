@@ -7,6 +7,11 @@
 // while the campaign it belongs to has not been built. The ids of what the
 // platform holds live in the campaign's own `state.json`, next to the hash of
 // each file that went up, so a remade creative is told from an unchanged one.
+//
+// Once built, a campaign whose creatives changed is relaunched: a new builder
+// from the same post and term group with the new creative ids, and the old
+// campaign retired into the folder's history — paused, when it is live and
+// already spending, and left alone otherwise, as the vault's stop rules say.
 import type { CampaignManifest, TopicManifest, TspManifest } from './launch.ts';
 import type { ParseResult } from './launch.ts';
 import {
@@ -34,6 +39,22 @@ export interface CampaignSource {
 
 // -------------------------------------------------------------- state --
 
+export interface BuilderRef { id: number; campaign_id: number | null; campaign_name: string | null }
+
+/**
+ * What became of a campaign this folder no longer runs. `live` is the one
+ * open case — left alone because it has not spent yet, or the list did not
+ * show it — and is asked about again on every plan until it settles.
+ */
+export type RetiredFate = 'unpublished' | 'deleted' | 'paused' | 'live';
+
+/** An earlier campaign of the folder: what it was built from, and how it ended. */
+export interface RetiredCampaign {
+  builder: BuilderRef;
+  creatives: Record<string, { id: number; hash: string }>;
+  fate: RetiredFate;
+}
+
 export interface CampaignState {
   /** File name → creative repo id and the hash of the file that was sent. */
   creatives: Record<string, { id: number; hash: string }>;
@@ -41,15 +62,35 @@ export interface CampaignState {
   /** The profile's id and the name the platform composed for it. */
   tsp: { id: number; name: string } | null;
   /** The builder's id, and the campaign it produced once the platform has made it. */
-  builder: { id: number; campaign_id: number | null; campaign_name: string | null } | null;
+  builder: BuilderRef | null;
   pending: PendingWrite | null;
+  /** Every campaign the folder ran before the current one, oldest first. */
+  history: RetiredCampaign[];
 }
 
-export const emptyCampaignState = (): CampaignState => ({ creatives: {}, headline: null, tsp: null, builder: null, pending: null });
+export const emptyCampaignState = (): CampaignState => ({ creatives: {}, headline: null, tsp: null, builder: null, pending: null, history: [] });
+
+const FATES: readonly RetiredFate[] = ['unpublished', 'deleted', 'paused', 'live'];
 
 const isBag = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const asId = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null);
 const asText = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+const creativesOf = (raw: unknown): CampaignState['creatives'] => {
+  const creatives: CampaignState['creatives'] = {};
+  if (!isBag(raw)) return creatives;
+  for (const [name, entry] of Object.entries(raw)) {
+    if (!isBag(entry)) continue;
+    const id = asId(entry['id']);
+    if (id !== null) creatives[name] = { id, hash: asText(entry['hash']) };
+  }
+  return creatives;
+};
+
+const builderOf = (raw: unknown): BuilderRef | null => {
+  if (!isBag(raw) || asId(raw['id']) === null) return null;
+  return { id: asId(raw['id'])!, campaign_id: asId(raw['campaign_id']), campaign_name: typeof raw['campaign_name'] === 'string' ? raw['campaign_name'] : null };
+};
 
 /** A campaign's `state.json` read back, tolerant of fields a later version added. */
 export function parseCampaignState(text: string): ParseResult<CampaignState> {
@@ -61,24 +102,19 @@ export function parseCampaignState(text: string): ParseResult<CampaignState> {
   }
   if (!isBag(data)) return { ok: false, errors: ['state.json має бути об\'єктом'] };
   const state = emptyCampaignState();
-  if (isBag(data['creatives'])) {
-    for (const [name, raw] of Object.entries(data['creatives'])) {
-      if (!isBag(raw)) continue;
-      const id = asId(raw['id']);
-      if (id !== null) state.creatives[name] = { id, hash: asText(raw['hash']) };
-    }
-  }
+  state.creatives = creativesOf(data['creatives']);
   const headline = data['headline'];
   if (isBag(headline) && asId(headline['id']) !== null) state.headline = { id: asId(headline['id'])!, text: asText(headline['text']) };
   const tsp = data['tsp'];
   if (isBag(tsp) && asId(tsp['id']) !== null) state.tsp = { id: asId(tsp['id'])!, name: asText(tsp['name']) };
-  const builder = data['builder'];
-  if (isBag(builder) && asId(builder['id']) !== null) {
-    state.builder = {
-      id: asId(builder['id'])!,
-      campaign_id: asId(builder['campaign_id']),
-      campaign_name: typeof builder['campaign_name'] === 'string' ? builder['campaign_name'] : null,
-    };
+  state.builder = builderOf(data['builder']);
+  if (Array.isArray(data['history'])) {
+    for (const raw of data['history']) {
+      if (!isBag(raw)) continue;
+      const builder = builderOf(raw['builder']);
+      const fate = FATES.find(f => f === raw['fate']);
+      if (builder !== null && fate !== undefined) state.history.push({ builder, creatives: creativesOf(raw['creatives']), fate });
+    }
   }
   const pending = data['pending'];
   if (isBag(pending) && typeof pending['step'] === 'string' && typeof pending['key'] === 'string' && Array.isArray(pending['before'])) {
@@ -136,6 +172,23 @@ export interface PlatformBuilder {
   campaigns: { id: number; name: string; term_group_id: number | null }[];
 }
 
+/**
+ * A campaign as the platform's campaign list shows it: the status the buyer
+ * can change, whether the source has it (`campaign_id` is null until then),
+ * and what the analytics window holds. The list carries no spend, so `spend`
+ * is null unless the platform starts sending one; revenue is the other sign
+ * that the first cent has landed.
+ */
+export interface PlatformCampaign {
+  id: number;
+  name: string;
+  /** `ACTIVE`, `PAUSED`, `PENDING`, `DELETED` as the list spells them. */
+  status: string;
+  published: boolean;
+  revenue: number;
+  spend: number | null;
+}
+
 /** `ad_account_id` is the TikTok account the pixel was made under — routinely not the cabinet it is launched from, so it is shown, not checked. */
 export interface Pixel { id: number; name: string; ad_account_id: string }
 export interface AdAccount { id: number; name: string; account_id: string }
@@ -147,6 +200,8 @@ export interface CampaignSnapshot {
   creatives: PlatformCreative[];
   tsps: PlatformTsp[];
   builders: PlatformBuilder[];
+  /** The campaigns the topic's builders made, as far as the campaign list showed them. */
+  campaigns: PlatformCampaign[];
   pixels: Pixel[];
   adAccounts: AdAccount[];
   themes: Theme[];
@@ -229,12 +284,20 @@ export interface BuilderBody {
   themes: string[];
 }
 
+/** The pause as the admin's bulk update sends it: campaign ids, never builder ids. */
+export interface PauseBody { status: 'PAUSED'; campaign_ids: number[] }
+
 export type CampaignStep =
   | { kind: 'creatives.upload'; label: string; campaign: string; files: string[]; body: UploadBody }
   | { kind: 'headline.create'; label: string; campaign: string; text: string; body: HeadlineBody }
   | { kind: 'tsp.create'; label: string; campaign: string; fields: TspFields; body: TspBody }
   | { kind: 'tsp.update'; label: string; campaign: string; id: number; name: string; body: TspBody }
-  | { kind: 'builder.create'; label: string; campaign: string; from: { account: string; pixel: string; theme: string }; body: BuilderBody };
+  | {
+    kind: 'builder.create'; label: string; campaign: string; from: { account: string; pixel: string; theme: string }; body: BuilderBody;
+    /** The campaign this one replaces, for the state's history — null for a first build. */
+    retires: RetiredCampaign | null;
+  }
+  | { kind: 'campaign.pause'; label: string; campaign: string; body: PauseBody };
 
 /** Ids the snapshot answered for a campaign that its state did not hold. Same shape as the state, minus `pending`. */
 export type ResolvedCampaign = Omit<CampaignState, 'pending'>;
@@ -356,6 +419,64 @@ export function matchUploads(before: readonly number[], after: readonly Platform
   return match;
 }
 
+// ------------------------------------------------------------ relaunch --
+
+export interface Verdict {
+  fate: RetiredFate;
+  /** Whether a pause is to be sent now. */
+  pause: boolean;
+  /** Why, for the plan's reader. */
+  note: string;
+}
+
+/**
+ * What to do about a campaign the folder no longer runs, from what the
+ * platform shows of it. Three cases the PRD names — rejected before it was
+ * published, taken down by the provider, live — and the vault's rule inside
+ * the third: a status is only changed once the campaign is in the analytics,
+ * which is when its first cent has been spent. Until then the platform would
+ * stop tracking it, so it is left alone and the buyer told.
+ */
+export function judgeRetired(builder: PlatformBuilder | undefined, campaigns: readonly PlatformCampaign[]): Verdict {
+  if (builder === undefined) return { fate: 'deleted', pause: false, note: 'builder на платформі вже немає — паузити нема чого' };
+  const made = builder.campaigns[0];
+  if (made === undefined) return { fate: 'unpublished', pause: false, note: 'кампанію не опубліковано (реджект до публікації) — паузити нема чого' };
+  const record = campaigns.find(c => c.id === made.id);
+  const who = `кампанію ${made.id} «${made.name}»`;
+  if (record === undefined) {
+    return { fate: 'live', pause: false, note: `${who} не знайдено в списку кампаній платформи — статус не чіпаю; перевірте її руками` };
+  }
+  const status = record.status.toUpperCase();
+  if (status === 'DELETED') return { fate: 'deleted', pause: false, note: `${who} провайдер уже зняв` };
+  if (status === 'PAUSED') return { fate: 'paused', pause: false, note: `${who} вже на паузі` };
+  if (!record.published || status === 'PENDING') return { fate: 'unpublished', pause: false, note: `${who} ще не опубліковано (${record.status}) — паузити нема чого` };
+  if (status !== 'ACTIVE') return { fate: 'unpublished', pause: false, note: `${who} має статус ${record.status} — не жива, паузити нема чого` };
+  if ((record.spend ?? 0) > 0 || record.revenue > 0) return { fate: 'live', pause: true, note: `${who} жива й уже в аналітиці — буде поставлена на паузу` };
+  return {
+    fate: 'live', pause: false,
+    note: `${who} жива, але ще не в аналітиці (спенду немає) — статус не чіпаю, інакше платформа перестане її трекати; за потреби зупиніть групу руками або опустіть бід у мінімум`,
+  };
+}
+
+/** The history with one record put in — replacing the entry for the same builder, so a plan run twice does not list it twice. */
+export const withRetired = (history: readonly RetiredCampaign[], record: RetiredCampaign): RetiredCampaign[] =>
+  history.some(h => h.builder.id === record.builder.id)
+    ? history.map(h => (h.builder.id === record.builder.id ? record : h))
+    : [...history, record];
+
+const builderRef = (builder: PlatformBuilder): BuilderRef => {
+  const made = builder.campaigns[0];
+  return { id: builder.id, campaign_id: made?.id ?? null, campaign_name: made?.name ?? null };
+};
+
+/** The pause step for a retired campaign, when its verdict asks for one. */
+const pauseStep = (campaign: string, record: RetiredCampaign): CampaignStep => ({
+  kind: 'campaign.pause',
+  label: `${campaign}: поставити на паузу стару кампанію ${record.builder.campaign_id} «${record.builder.campaign_name ?? ''}»`,
+  campaign,
+  body: { status: 'PAUSED', campaign_ids: [record.builder.campaign_id!] },
+});
+
 // --------------------------------------------------------------- plan --
 
 export interface CampaignPlanInput {
@@ -468,7 +589,7 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
       continue;
     }
 
-    const result: ResolvedCampaign = { creatives: {}, headline: null, tsp: null, builder: null };
+    const result: ResolvedCampaign = { creatives: {}, headline: null, tsp: null, builder: null, history: state.history };
     resolved[c.name] = result;
     const built = state.builder !== null && snapshot.builders.some(b => b.id === state.builder!.id);
     const creativeRefs: CreativeRef[] = [];
@@ -488,11 +609,9 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
           warnings.push(`${at}: обірване завантаження лишило кілька нових \`${file.name}\` — взято новіший (id ${id}), решта лишаються в репозиторії`);
         }
       } else if (known !== undefined && videos.some(v => v.id === known.id)) {
+        // A changed hash is a remade creative: uploaded again whether or not
+        // the campaign is built — after a build, that is the relaunch.
         if (known.hash === file.hash) id = known.id;
-        else if (built) {
-          warnings.push(`${at}: \`${file.name}\` змінено після збірки кампанії — кампанія create-only, перезалив (тікет 12) ще не підтримується; файл не завантажується`);
-          id = known.id;
-        }
       } else if (known !== undefined) {
         warnings.push(`${at}: креативу \`${file.name}\` (id ${known.id}) у топіку немає — буде завантажено знову`);
       } else if (twins.length === 1) {
@@ -607,30 +726,59 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
       }
     }
 
-    // -- builder: found by what it was built from, else made.
+    // -- builder: found by what it was built from, else made. The one the
+    // state names is current only while its creative set is the folder's;
+    // otherwise it is the campaign being replaced.
     const knownBuilder = state.builder === null ? undefined : snapshot.builders.find(b => b.id === state.builder!.id);
+    const current = knownBuilder !== undefined && everyIdKnown && sameSet(knownBuilder.creative_ids, ownIds) ? knownBuilder : undefined;
     const postId = typeof postRef === 'number' ? postRef : null;
     const twins = everyIdKnown && postId !== null
       ? snapshot.builders.filter(b => b.post_id === postId && sameSet(b.creative_ids, ownIds))
       : [];
     const madeBuilder = madeBy(state, 'builder.create', c.name, twins);
-    const found = knownBuilder ?? madeBuilder ?? (twins.length === 1 ? twins[0] : undefined);
+    const found = current ?? madeBuilder ?? (twins.length === 1 ? twins[0] : undefined);
+
+    // -- the campaigns this folder no longer runs: the earlier ones, asked about again while open, and the one retiring now.
+    const pauses: CampaignStep[] = [];
+    let history = state.history;
+    for (const earlier of state.history) {
+      if (earlier.fate !== 'live') continue;
+      const verdict = judgeRetired(snapshot.builders.find(b => b.id === earlier.builder.id), snapshot.campaigns);
+      const record = { ...earlier, fate: verdict.fate };
+      history = withRetired(history, record);
+      if (verdict.pause) pauses.push(pauseStep(c.name, record));
+      else if (verdict.fate === 'live') warnings.push(`${at}: ${verdict.note}`);
+    }
+    let retires: RetiredCampaign | null = null;
+    if (knownBuilder !== undefined && knownBuilder.id !== found?.id) {
+      const verdict = judgeRetired(knownBuilder, snapshot.campaigns);
+      const kept = Object.fromEntries(Object.entries(state.creatives).filter(([, entry]) => knownBuilder.creative_ids.includes(entry.id)));
+      retires = { builder: builderRef(knownBuilder), creatives: kept, fate: verdict.fate };
+      history = withRetired(history, retires);
+      warnings.push(`${at}: перезалив — креативи змінились після збірки кампанії ${knownBuilder.id}; нова кампанія це нове посилання, ключі Google стануть на неї від 30 хвилин до доби. Стара: ${verdict.note}`);
+      if (verdict.pause) pauses.push(pauseStep(c.name, retires));
+    }
+    result.history = history;
+
     if (found !== undefined) {
       const made = found.campaigns[0];
       result.builder = { id: found.id, campaign_id: made?.id ?? null, campaign_name: made?.name ?? null };
-      if (knownBuilder === undefined) warnings.push(`${at}: кампанію з цих креативів і статті вже зібрано (builder ${found.id}) — id буде записано в state.json`);
+      if (current === undefined) warnings.push(`${at}: кампанію з цих креативів і статті вже зібрано (builder ${found.id}) — id буде записано в state.json`);
       else if (state.builder!.campaign_id === null && made !== undefined) warnings.push(`${at}: платформа зробила кампанію ${made.id} «${made.name}» — id буде записано в state.json`);
       if (state.builder !== null && knownBuilder === undefined) warnings.push(`${at}: builder ${state.builder.id} зі state.json на платформі не знайдено — знайдено ${found.id}`);
+      steps.push(...pauses);
       continue;
     }
     if (twins.length > 1) {
       errors.push(`${at}: у топіку кілька builder з цієї статті й цих креативів (id ${twins.map(b => b.id).join(', ')}) — вкажіть id у state.json руками`);
       continue;
     }
-    if (state.builder !== null) warnings.push(`${at}: builder ${state.builder.id} зі state.json на платформі немає — буде зібрано новий`);
+    if (state.builder !== null && knownBuilder === undefined) warnings.push(`${at}: builder ${state.builder.id} зі state.json на платформі немає — буде зібрано новий`);
     steps.push({
       kind: 'builder.create',
-      label: `${c.name}: зібрати кампанію (${countryName}, ${m.termgroup} + ${m.article}, ${c.creatives.length} креативів)`,
+      label: retires === null
+        ? `${c.name}: зібрати кампанію (${countryName}, ${m.termgroup} + ${m.article}, ${c.creatives.length} креативів)`
+        : `${c.name}: перезалив — зібрати нову кампанію замість ${retires.builder.id} (${countryName}, ${m.termgroup} + ${m.article}, ${c.creatives.length} креативів)`,
       campaign: c.name,
       from: { account: `${adAccount!.name} (${adAccount!.id})`, pixel: `${pixel!.name} (${pixel!.id})`, theme: `${theme!.title} (${theme!.id})` },
       body: {
@@ -652,7 +800,10 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
         use_keyword_rotation: m.keyword_rotation ? '1' : '0',
         themes: [String(theme!.id)],
       },
+      retires,
     });
+    // The old campaign is paused after the new one is up, not before.
+    steps.push(...pauses);
   }
 
   return { steps, warnings, errors, resolved };

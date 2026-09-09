@@ -18,7 +18,7 @@ import path from 'node:path';
 import { parseArticle, type ImageReader } from '../core/article.ts';
 import { isFolderName, mimeFor } from '../core/batch-folder.ts';
 import {
-  emptyCampaignState, headlineText, matchUploads, parseCampaignState, sameSet, sameTsp, type CampaignSource,
+  emptyCampaignState, headlineText, matchUploads, parseCampaignState, sameSet, sameTsp, withRetired, type CampaignSource,
   type CampaignState, type CreativeRef, type PostRef, type TspRef,
 } from '../core/campaign-plan.ts';
 import { parseCampaignManifest, parseTopicManifest, type TopicManifest } from '../core/launch.ts';
@@ -35,9 +35,10 @@ import { createJob, settleJob, type Job } from './jobs.ts';
 import { RefusedError } from './launches.ts';
 import {
   createBuilder, createConfiguration, createdId, createHeadline, createPost, createTermGroup, createTopic, createTsp,
-  PlatformClient, platformState, readAdAccounts, readBuilders, readConfigurations, readCountries, readCreatives,
-  readLanguages, readPixels, readPosts, readRsocCounts, readSites, readTermGroups, readThemes, readTopic, readTsps,
-  searchTopics, setTermGroupWeights, updatePost, updateTermGroup, updateTsp, uploadCreative, type Answer,
+  pauseCampaigns, PlatformClient, platformState, readAdAccounts, readBuilders, readCampaigns, readConfigurations,
+  readCountries, readCreatives, readLanguages, readPixels, readPosts, readRsocCounts, readSites, readTermGroups, readThemes,
+  readTopic, readTsps, searchTopics, setTermGroupWeights, updatePost, updateTermGroup, updateTsp, uploadCreative,
+  type Answer,
 } from './platform.ts';
 
 const STATE_FILE = 'state.json';
@@ -238,7 +239,7 @@ export async function readSnapshot(api: PlatformClient, topic: TopicManifest, st
   // The rest is filtered by the topic `plan` will settle on — the same rule, asked once in core.
   const choice = chooseTopic(topics, topic, state);
   if (choice.kind !== 'known' && choice.kind !== 'found') {
-    return { ...directories, topics, configurations: [], termGroups: [], posts: [], creatives: [], tsps: [], builders: [] };
+    return { ...directories, topics, configurations: [], termGroups: [], posts: [], creatives: [], tsps: [], builders: [], campaigns: [] };
   }
   const topicId = choice.id;
   const userId = topics.find(t => t.id === topicId)?.user_id ?? 0;
@@ -246,7 +247,9 @@ export async function readSnapshot(api: PlatformClient, topic: TopicManifest, st
     readConfigurations(api, topicId), readTermGroups(api, topicId), readPosts(api, topicId),
     readCreatives(api, topicId), readTsps(api, topicId, userId), readBuilders(api, topicId),
   ]);
-  return { ...directories, topics, configurations, termGroups, posts, creatives, tsps, builders };
+  // The campaign list is read for the campaigns the builders made, and only those: it is what says whether an old one is live.
+  const campaigns = await readCampaigns(api, builders.flatMap(b => b.campaigns.map(c => c.id)));
+  return { ...directories, topics, configurations, termGroups, posts, creatives, tsps, builders, campaigns };
 }
 
 // --------------------------------------------------------------- plan --
@@ -397,6 +400,7 @@ function adopt(state: LaunchState, plan: Plan): LaunchState {
       headline: found.headline ?? own.headline,
       tsp: found.tsp ?? own.tsp,
       builder: found.builder ?? own.builder,
+      history: found.history,
     };
   }
   return JSON.stringify(next) === JSON.stringify(state) ? state : next;
@@ -687,8 +691,24 @@ async function runStep(run: Run, step: PlanStep): Promise<void> {
       const { answer, id } = await withPolicy(run, step, list, () => createBuilder(api, fields), freshIn(list));
       const builderId = createdId(answer ?? { status: 'timeout' }, 'campaignBuilder') ?? id;
       if (builderId === null) throw new StepError('платформа не повернула id builder, і read-back його не знайшов');
-      // The campaign itself the platform makes later, after review; the next plan picks up its id and name.
-      commitCampaign(run, step.campaign, state => ({ ...state, builder: { id: builderId, campaign_id: null, campaign_name: null }, pending: null }));
+      // The campaign itself the platform makes later, after review; the next
+      // plan picks up its id and name. On a relaunch the one being replaced
+      // goes into the history here, the moment it stops being current.
+      commitCampaign(run, step.campaign, state => ({
+        ...state,
+        builder: { id: builderId, campaign_id: null, campaign_name: null },
+        history: step.retires === null ? state.history : withRetired(state.history, step.retires),
+        pending: null,
+      }));
+      return;
+    }
+    case 'campaign.pause': {
+      await written(run, step, () => pauseCampaigns(api, step.body));
+      commitCampaign(run, step.campaign, state => ({
+        ...state,
+        history: state.history.map(h => (h.builder.campaign_id !== null && step.body.campaign_ids.includes(h.builder.campaign_id) ? { ...h, fate: 'paused' } : h)),
+        pending: null,
+      }));
       return;
     }
   }
