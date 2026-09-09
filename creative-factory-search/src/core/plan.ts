@@ -13,7 +13,7 @@ import YAML from 'yaml';
 import type { Article } from './article.ts';
 import {
   planCampaigns, previewTspBody, type CampaignSnapshot, type CampaignSource, type CampaignState, type CampaignStep,
-  type PostRef, type ResolvedCampaign,
+  emptyCampaignState, type PostRef, type ResolvedCampaign,
 } from './campaign-plan.ts';
 import type { ParseResult, TopicManifest } from './launch.ts';
 import { hashText } from './visual-key.ts';
@@ -363,7 +363,7 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
     topicRef = choice.id;
   } else if (choice.kind === 'found') {
     topicRef = choice.id;
-    warnings.push(`топік \`${topic.internal_name}\` уже є на платформі (id ${topicRef}) — знайдено read-back, id буде записано в state.json`);
+    warnings.push(`топік \`${topic.internal_name}\` уже є на платформі (id ${topicRef}) — знайдено read-back, id записано в state.json`);
   } else if (choice.kind === 'ambiguous') {
     errors.push(`на платформі два топіки з internal_name \`${topic.internal_name}\` (id ${choice.ids.join(', ')}) — вкажіть topic_id у state.json руками`);
     topicRef = choice.ids[0]!;
@@ -386,7 +386,7 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
     if (configuration !== undefined) {
       resolved.configuration_id = configuration.id;
       if (state.configuration_id !== configuration.id) {
-        warnings.push(`конфігурація топіка вже є (id ${configuration.id}) — id буде записано в state.json`);
+        warnings.push(`конфігурація топіка вже є (id ${configuration.id}) — id записано в state.json`);
       }
     } else {
       steps.push(configurationStep(topic, topicRef));
@@ -436,7 +436,7 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
       return;
     }
     resolved.termgroups[group.name] = existing.id;
-    if (stateId !== existing.id) warnings.push(`термгрупа \`${group.name}\` уже є (id ${existing.id}) — id буде записано в state.json`);
+    if (stateId !== existing.id) warnings.push(`термгрупа \`${group.name}\` уже є (id ${existing.id}) — id записано в state.json`);
     if (!sameList(existing.terms, body.terms) || existing.country !== body.country || existing.language !== body.language) {
       steps.push({ kind: 'termgroup.update', label: `оновити термгрупу «${group.name}» (${group.keywords.length} ключів)`, name: group.name, id: existing.id, body });
     }
@@ -495,7 +495,7 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
     }
     resolved.articles[name] = existing.id;
     if (stateEntry?.id !== existing.id) {
-      warnings.push(`стаття «${article.title}» уже є в топіку (id ${existing.id}) — id буде записано в state.json, вміст синхронізовано`);
+      warnings.push(`стаття «${article.title}» уже є в топіку (id ${existing.id}) — id записано в state.json, вміст синхронізовано`);
     }
     if (stateEntry?.id === existing.id && stateEntry.hash === hash) continue;
     steps.push({ kind: 'article.update', label: `оновити статтю «${article.title}» (id ${existing.id})`, name, id: existing.id, hash, body });
@@ -572,6 +572,41 @@ export function narrowPlan(planned: Plan, campaign: string): Plan {
     errors: planned.errors.filter(mine),
     resolved: planned.resolved,
   };
+}
+
+/**
+ * The state with what the plan resolved from the snapshot written in: an
+ * entity found by read-back rather than made here — a topic by its
+ * internal name, a builder's campaign once the platform has made it — gets
+ * its id into the file on the plan that saw it, not on some later apply.
+ * An adopted article carries an empty hash: its id is known, what it says
+ * is not yet, so the next plan still syncs it. Identity is kept when
+ * nothing was new, so a caller can tell whether there is anything to write.
+ */
+export function adoptResolved(state: LaunchState, planned: Plan): LaunchState {
+  const next: LaunchState = {
+    ...state,
+    topic_id: planned.resolved.topic_id ?? state.topic_id,
+    configuration_id: planned.resolved.configuration_id ?? state.configuration_id,
+    termgroups: { ...state.termgroups, ...planned.resolved.termgroups },
+    articles: { ...state.articles },
+    campaigns: { ...state.campaigns },
+  };
+  for (const [name, id] of Object.entries(planned.resolved.articles)) {
+    if (next.articles[name]?.id !== id) next.articles[name] = { id, hash: '' };
+  }
+  for (const [name, found] of Object.entries(planned.resolved.campaigns)) {
+    const own = next.campaigns[name] ?? emptyCampaignState();
+    next.campaigns[name] = {
+      ...own,
+      creatives: { ...own.creatives, ...found.creatives },
+      headline: found.headline ?? own.headline,
+      tsp: found.tsp ?? own.tsp,
+      builder: found.builder ?? own.builder,
+      history: found.history,
+    };
+  }
+  return JSON.stringify(next) === JSON.stringify(state) ? state : next;
 }
 
 export interface CampaignOutline {

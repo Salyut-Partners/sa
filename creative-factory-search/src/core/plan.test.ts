@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { parseArticle } from './article.ts';
+import { emptyCampaignState } from './campaign-plan.ts';
 import { parseTopicManifest, type TopicManifest } from './launch.ts';
 import {
-  articleHash, chooseTopic, emptyState, firstNew, parseKeywords, parseState, parseTermGroupOptions, plan,
+  adoptResolved, articleHash, chooseTopic, emptyState, firstNew, parseKeywords, parseState, parseTermGroupOptions, plan,
   previewPlan, resolveCountry, type LaunchContents, type LaunchState, type Snapshot, type TermGroupSource,
 } from './plan.ts';
 
@@ -304,6 +305,38 @@ describe('state', () => {
     expect(result).toEqual({ ok: true, value: { topic_id: 5, configuration_id: null, termgroups: {}, articles: {}, pending: null, campaigns: {} } });
     expect(parseState('nope').ok).toBe(false);
     expect(parseState('[]').ok).toBe(false);
+  });
+});
+
+describe('adoptResolved', () => {
+  it('writes the ids a plan found by read-back into the state, the article with an empty hash', () => {
+    const adopted = adoptResolved(emptyState(), plan(full(), ON_PLATFORM, emptyState()));
+    expect(adopted).toMatchObject({ topic_id: 106752, configuration_id: 108397, termgroups: { 'tg-main': 211532 } });
+    expect(adopted.articles['article-a']).toEqual({ id: 130892, hash: '' });
+  });
+
+  it('keeps the state itself when the plan found nothing it did not already know', () => {
+    const state = DONE_STATE();
+    expect(adoptResolved(state, plan(full(), ON_PLATFORM, state))).toBe(state);
+  });
+
+  it('takes the campaign the platform made from a builder, leaving the rest of the campaign state alone', () => {
+    const before: LaunchState = {
+      ...DONE_STATE(),
+      campaigns: { 'de-a': { ...emptyCampaignState(), builder: { id: 707000, campaign_id: null, campaign_name: null }, headline: { id: 5, text: 'Learn more' } } },
+    };
+    const planned = plan(full(), ON_PLATFORM, before);
+    planned.resolved.campaigns['de-a'] = {
+      creatives: {}, headline: null, tsp: null,
+      builder: { id: 707000, campaign_id: 1267704, campaign_name: '34-AIVadimSpermIT-tgmain-tk-de-ia-0908-GE01' },
+      history: [],
+    };
+    const adopted = adoptResolved(before, planned);
+    expect(adopted.campaigns['de-a']).toMatchObject({
+      builder: { id: 707000, campaign_id: 1267704, campaign_name: '34-AIVadimSpermIT-tgmain-tk-de-ia-0908-GE01' },
+      headline: { id: 5, text: 'Learn more' },
+      pending: null,
+    });
   });
 });
 

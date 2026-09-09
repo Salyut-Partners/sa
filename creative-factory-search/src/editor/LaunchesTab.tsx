@@ -127,7 +127,11 @@ export function LaunchesTab({ run }: Props) {
                 chosen={chosen?.launchKey === topic.key ? chosen.campaign : null}
                 busy={run.running && run.target?.launchKey === topic.key}
                 onToggle={() => toggle(topic.key)}
-                onReplan={() => planTopic(topic.key)}
+                onReplan={() => {
+                  planTopic(topic.key);
+                  // The side panel is a plan too: read again, or it keeps saying what was true before the button.
+                  if (chosen?.launchKey === topic.key) choose(topic.key, chosen.campaign);
+                }}
                 onChoose={campaign => choose(topic.key, campaign)}
               />
             ))}

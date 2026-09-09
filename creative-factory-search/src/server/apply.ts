@@ -23,7 +23,7 @@ import {
 } from '../core/campaign-plan.ts';
 import { parseCampaignManifest, parseTopicManifest, type TopicManifest } from '../core/launch.ts';
 import {
-  campaignOf, campaignOutline, chooseTopic, emptyState, firstNew, narrowPlan, parseKeywords, parseState, parseTermGroupOptions,
+  adoptResolved, campaignOf, campaignOutline, chooseTopic, emptyState, firstNew, narrowPlan, parseKeywords, parseState, parseTermGroupOptions,
   plan as makePlan, previewPlan, type ArticleSource, type CampaignOutline, type LaunchContents, type LaunchState, type Plan,
   type PlanPreview, type PlanStep, type Snapshot, type TermGroupRef, type TermGroupSource, type TopicRef,
 } from '../core/plan.ts';
@@ -266,15 +266,28 @@ export interface Planned {
 }
 
 /** The plan for the topic, or — with `campaign` — the part of it one campaign needs. */
+/** Launch keys with an apply in flight: one writer of a state file at a time, not merely one process. */
+const applying = new Set<string>();
+
+/**
+ * The plan, and the ids it found on the way written down. Nothing is sent
+ * to the platform; what the snapshot resolved — an entity already there, a
+ * campaign the platform made from a builder — goes into `state.json` now,
+ * because an empty plan is never applied and the tab never offers to, so
+ * this is the only moment those ids would ever land. Not while an apply is
+ * running: that job is the file's writer until it stops.
+ */
 export async function planLaunch(config: SaConfig, launchKey: string, campaign: string | null = null): Promise<Planned> {
   const folder = launchFolder(config, launchKey);
   if (campaign !== null && !campaignFolders(folder).includes(campaign)) {
     throw new RefusedError(`кампанії \`${campaign}\` немає в ${launchKey}/campaigns`);
   }
   const contents = readLaunchContents(folder);
-  const state = readState(folder);
-  const snapshot = await readSnapshot(client(config), contents.topic, state);
-  const whole = makePlan(contents, snapshot, state);
+  const read = readState(folder);
+  const snapshot = await readSnapshot(client(config), contents.topic, read);
+  const whole = makePlan(contents, snapshot, read);
+  const state = applying.has(launchKey) ? read : adoptResolved(read, whole);
+  if (state !== read) writeState(folder, state);
   return {
     folder, contents, state, campaign,
     plan: campaign === null ? whole : narrowPlan(whole, campaign),
@@ -317,9 +330,6 @@ class StepError extends Error {}
 
 /** A cancel between steps, or during a pause: not a failure, and not an error line. */
 class CancelledApply extends Error {}
-
-/** Launch keys with an apply in flight: one writer of a state file at a time, not merely one process. */
-const applying = new Set<string>();
 
 interface Run {
   api: PlatformClient;
@@ -387,8 +397,8 @@ const resolveTsp = (run: Run, ref: TspRef): { id: number; name: string } => {
 /**
  * Start applying. Refused outright when the plan has errors or there is
  * nothing to do; otherwise the job id, to be watched like an export. The ids
- * the snapshot resolved are written to the state before the first step, so a
- * plan that found everything already there still leaves a complete file.
+ * the snapshot resolved are written to the state before the first step — the
+ * plan already did, this is the same write again for the run's own copy.
  */
 export async function startApply(
   config: SaConfig, launchKey: string, confirmed: boolean, campaign: string | null = null,
@@ -397,7 +407,7 @@ export async function startApply(
   if (applying.has(launchKey)) throw new RefusedError(`залив \`${launchKey}\` уже застосовується — дочекайтесь, поки та задача закінчиться`);
   const planned = await planLaunch(config, launchKey, campaign);
   if (planned.plan.errors.length > 0) throw new RefusedError('план має помилки:\n' + planned.plan.errors.join('\n'));
-  const state = adopt(planned.state, planned.plan);
+  const state = adoptResolved(planned.state, planned.plan);
   if (state !== planned.state) writeState(planned.folder, state);
   if (planned.plan.steps.length === 0) return { id: null, steps: 0 };
 
@@ -406,33 +416,6 @@ export async function startApply(
   applying.add(launchKey);
   void runSteps(run, planned.plan.steps).finally(() => applying.delete(launchKey));
   return { id: job.id, steps: planned.plan.steps.length };
-}
-
-/** The state with what the plan resolved from the snapshot written in. Identity kept when nothing was new. */
-function adopt(state: LaunchState, plan: Plan): LaunchState {
-  const next: LaunchState = {
-    ...state,
-    topic_id: plan.resolved.topic_id ?? state.topic_id,
-    configuration_id: plan.resolved.configuration_id ?? state.configuration_id,
-    termgroups: { ...state.termgroups, ...plan.resolved.termgroups },
-    articles: { ...state.articles },
-    campaigns: { ...state.campaigns },
-  };
-  for (const [name, id] of Object.entries(plan.resolved.articles)) {
-    if (next.articles[name]?.id !== id) next.articles[name] = { id, hash: '' };
-  }
-  for (const [name, found] of Object.entries(plan.resolved.campaigns)) {
-    const own = next.campaigns[name] ?? emptyCampaignState();
-    next.campaigns[name] = {
-      ...own,
-      creatives: { ...own.creatives, ...found.creatives },
-      headline: found.headline ?? own.headline,
-      tsp: found.tsp ?? own.tsp,
-      builder: found.builder ?? own.builder,
-      history: found.history,
-    };
-  }
-  return JSON.stringify(next) === JSON.stringify(state) ? state : next;
 }
 
 async function runSteps(run: Run, steps: readonly PlanStep[]): Promise<void> {

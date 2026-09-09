@@ -167,7 +167,10 @@ no ticket, and no platform.
 `language`, or the first `#` heading as the title; pictures from `images/`
 inlined as base64 the way the admin embeds them) — takes a snapshot of the
 platform filtered by the topic, and prints the ordered list of calls with
-their bodies. It creates nothing, however many times it runs. Anything wrong
+their bodies. It creates nothing, however many times it runs — though an id
+it found by read-back (a topic by `internal_name`, the campaign the platform
+made from a builder) is written into `state.json` there and then, since an
+empty plan is never applied and that is the only moment it would land. Anything wrong
 in the folder is refused there, in words: a placeholder site, a key repeated
 in a file, two articles with one title, a country the platform does not know.
 The topic is found by `internal_name` even when `state.json` does not name it,

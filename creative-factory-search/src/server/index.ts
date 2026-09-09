@@ -162,7 +162,7 @@ function campaignIn(body: unknown): string | null {
   return campaign;
 }
 
-/** The plan: reads the folder and the platform, creates nothing, however often it is asked. */
+/** The plan: reads the folder and the platform, creates nothing, however often it is asked; ids it found by read-back are written to state.json. */
 app.post('/api/launches/:key/plan', async (req, res) => {
   try {
     res.json(describePlan(await planLaunch(loadConfig(), req.params.key, campaignIn(req.body))));

@@ -616,7 +616,7 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
         warnings.push(`${at}: креативу \`${file.name}\` (id ${known.id}) у топіку немає — буде завантажено знову`);
       } else if (twins.length === 1) {
         id = twins[0]!.id;
-        warnings.push(`${at}: \`${file.name}\` уже є в репозиторії топіка (id ${id}) — id буде записано в state.json`);
+        warnings.push(`${at}: \`${file.name}\` уже є в репозиторії топіка (id ${id}) — id записано в state.json`);
       } else if (twins.length > 1) {
         errors.push(`${at}: у топіку кілька креативів \`${file.name}\` (id ${twins.map(t => t.id).join(', ')}) — вкажіть id у state.json руками`);
         continue;
@@ -655,7 +655,7 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
       headlineRef = knownHeadline.id;
     } else if (sameText.length > 0) {
       headlineRef = sameText[0]!.id;
-      warnings.push(`${at}: headline «${headline}» уже є в топіку (id ${headlineRef}) — id буде записано в state.json`);
+      warnings.push(`${at}: headline «${headline}» уже є в топіку (id ${headlineRef}) — id записано в state.json`);
     } else if (headlineMakers.has(headline)) {
       headlineRef = { campaign: headlineMakers.get(headline)!, headline };
       everyIdKnown = false;
@@ -766,8 +766,8 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
     if (found !== undefined) {
       const made = found.campaigns[0];
       result.builder = { id: found.id, campaign_id: made?.id ?? null, campaign_name: made?.name ?? null };
-      if (current === undefined) warnings.push(`${at}: кампанію з цих креативів і статті вже зібрано (builder ${found.id}) — id буде записано в state.json`);
-      else if (state.builder!.campaign_id === null && made !== undefined) warnings.push(`${at}: платформа зробила кампанію ${made.id} «${made.name}» — id буде записано в state.json`);
+      if (current === undefined) warnings.push(`${at}: кампанію з цих креативів і статті вже зібрано (builder ${found.id}) — id записано в state.json`);
+      else if (state.builder!.campaign_id === null && made !== undefined) warnings.push(`${at}: платформа зробила кампанію ${made.id} «${made.name}» — id записано в state.json`);
       if (state.builder !== null && knownBuilder === undefined) warnings.push(`${at}: builder ${state.builder.id} зі state.json на платформі не знайдено — знайдено ${found.id}`);
       steps.push(...pauses);
       continue;
