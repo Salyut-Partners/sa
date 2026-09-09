@@ -7,6 +7,7 @@
 // testable without a browser anywhere near it.
 import { releaseLocales } from './locales.ts';
 import { buildSpec } from './spec.ts';
+import { subtitleStyleFor } from './subtitles.ts';
 import type { LocaleId, Project, Spec } from './types.ts';
 import { visualKey } from './visual-key.ts';
 
@@ -29,6 +30,14 @@ export interface BatchItem {
   /** What it is called inside the archive. */
   name: string;
   sound: Sound;
+  /**
+   * The style its words are burned in, or null for a clean file. On the item
+   * and not on the group's Spec, with the sound: subtitles are the script in
+   * the frame, and the script differs per language while the video does not.
+   * Adding it to `visualParts` would split every group into one per language
+   * and undo exactly the saving this file exists for.
+   */
+  subtitles: string | null;
 }
 
 /**
@@ -120,6 +129,7 @@ const itemFor = (
       locale,
       name: archiveName(index, photoName, locale),
       sound: { script, voiceId, modelId },
+      subtitles: subtitleStyleFor(project, locale),
     },
     spec,
   };
@@ -148,6 +158,10 @@ function group(planned: readonly (Planned | null)[]): BatchPlan {
     renders: list.length,
   };
 }
+
+/** How many files of a plan get subtitles — the burn steps it will take. */
+export const burnCount = (plan: BatchPlan): number =>
+  plan.groups.reduce((sum, g) => sum + g.items.filter(i => i.subtitles !== null).length, 0);
 
 /** How big the next export is, by arithmetic. */
 export interface BatchSize {

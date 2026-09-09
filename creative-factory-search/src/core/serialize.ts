@@ -34,6 +34,13 @@ export interface ProjectFile {
   voiceId: string;
   modelId: string;
   fitToVoice: boolean;
+  /**
+   * Absent in every file written before subtitles existed, and ignored by
+   * the editor that wrote them — which is why this is a field and not a new
+   * schema version: a batch saved with a style still opens there, minus the
+   * style, rather than being refused.
+   */
+  subtitles: string | null;
 }
 
 /** Why a file will not open. Each one is something to tell the user, not a bug. */
@@ -54,6 +61,7 @@ export function toFile(project: Project): ProjectFile {
     voiceId: project.voiceId,
     modelId: project.modelId,
     fitToVoice: project.fitToVoice,
+    subtitles: project.subtitles,
   };
 }
 
@@ -104,6 +112,8 @@ const isCanvas = (v: unknown): v is CanvasSize => isBag(v) && isNum(v['width']) 
 const isLocale = (v: unknown): v is Locale =>
   isBag(v) && isLocaleId(v['id']) && isText(v['script']) &&
   (v['voiceId'] === null || isText(v['voiceId'])) && typeof v['include'] === 'boolean' &&
+  // Absent is what every file written before subtitles existed says.
+  (v['subtitles'] === undefined || typeof v['subtitles'] === 'boolean') &&
   isOverrides(v['overrides']);
 
 /**
@@ -153,6 +163,7 @@ export function fromFile(data: unknown): LoadResult {
       voiceId: isText(data['voiceId']) ? data['voiceId'] : '',
       modelId: isText(data['modelId']) ? data['modelId'] : DEFAULT_MODEL_ID,
       fitToVoice: data['fitToVoice'] !== false,
+      subtitles: isText(data['subtitles']) && data['subtitles'] !== '' ? data['subtitles'] : null,
     },
   };
 }
@@ -172,7 +183,10 @@ function readLocales(
   photos: readonly { template: (TemplateLayer & { values?: unknown }) | null }[],
 ): Locale[] {
   if (Array.isArray(stored)) {
-    const locales = stored.filter(isLocale).map(l => ({ ...l, overrides: { ...l.overrides } }));
+    // Normalised on the way in, like a photo's props: a language from before
+    // subtitles existed is one that never opted out.
+    const locales = stored.filter(isLocale)
+      .map(l => ({ ...l, subtitles: l.subtitles !== false, overrides: { ...l.overrides } }));
     // One record per language: two would make "the German script" ambiguous
     // everywhere downstream, and the first is the one the editor was showing.
     const byId = new Map<LocaleId, Locale>();

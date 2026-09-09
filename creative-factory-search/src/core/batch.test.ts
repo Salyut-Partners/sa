@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { archiveName, groupDuration, planBatch, planOne, VOICE_TAIL } from './batch.ts';
+import { archiveName, burnCount, groupDuration, planBatch, planOne, VOICE_TAIL } from './batch.ts';
 import { apply, createProject, defaultButton } from './project.ts';
 import type { LocaleId, Project } from './types.ts';
 
@@ -215,5 +215,33 @@ describe('groupDuration', () => {
 
   it('leaves a group with nothing to say at the set length', () => {
     expect(groupDuration(10, [], true)).toBe(10);
+  });
+});
+
+describe('subtitles in the plan', () => {
+  const styled = (): Project => {
+    let p = withLocales(batchOf('a.jpg', 'b.jpg'), 'de', 'it');
+    p = script(script(script(p, 'en', 'one'), 'de', 'eins'), 'it', 'uno');
+    p = apply(p, { type: 'project/patch', patch: { subtitles: 'yellow' } });
+    return apply(p, { type: 'locale/patch', id: 'de', patch: { subtitles: false } });
+  };
+
+  it('marks every file of a language left on with the style, and a language switched off with none', () => {
+    const items = planBatch(styled()).groups.flatMap(g => g.items);
+    expect(items.filter(i => i.locale !== 'de').every(i => i.subtitles === 'yellow')).toBe(true);
+    expect(items.filter(i => i.locale === 'de').every(i => i.subtitles === null)).toBe(true);
+    expect(burnCount(planBatch(styled()))).toBe(4);
+  });
+
+  it('marks nothing when the batch has no style', () => {
+    const plain = apply(styled(), { type: 'project/patch', patch: { subtitles: null } });
+    expect(planBatch(plain).groups.flatMap(g => g.items).every(i => i.subtitles === null)).toBe(true);
+    expect(burnCount(planBatch(plain))).toBe(0);
+  });
+
+  it('does not cost a single extra frame walk', () => {
+    const plain = apply(styled(), { type: 'project/patch', patch: { subtitles: null } });
+    expect(planBatch(styled()).renders).toBe(planBatch(plain).renders);
+    expect(planBatch(styled()).groups.map(g => g.key)).toEqual(planBatch(plain).groups.map(g => g.key));
   });
 });

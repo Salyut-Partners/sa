@@ -9,6 +9,7 @@
 import YAML from 'yaml';
 import type { BatchPlan } from './batch.ts';
 import { releaseLocales } from './locales.ts';
+import { subtitleStyleFor } from './subtitles.ts';
 import type { LocaleId, Project } from './types.ts';
 
 /** The folder inside a campaign that holds its creatives. */
@@ -185,6 +186,32 @@ export function placementSize(project: Project, layout: ExportLayout): Placement
     }
   }
   return { total, skipped };
+}
+
+/** How many of the files going out get subtitles, of how many go out. */
+export interface SubtitleShare {
+  burned: number;
+  total: number;
+}
+
+/**
+ * What the subtitles line says under a layout, or under none for a download.
+ * Counted like `placementSize`, over the same files, so the two lines agree
+ * with each other and with the plan that follows the press.
+ */
+export function subtitleCount(project: Project, layout: ExportLayout | null): SubtitleShare {
+  const chosen = new Set(project.selection);
+  let burned = 0;
+  let total = 0;
+  for (const photo of project.photos) {
+    if (!chosen.has(photo.id)) continue;
+    for (const locale of releaseLocales(project)) {
+      if (layout !== null && destinationFor(layout, photo.id, locale.id) === null) continue;
+      total++;
+      if (subtitleStyleFor(project, locale.id) !== null) burned++;
+    }
+  }
+  return { burned, total };
 }
 
 export interface PlacedPlan {

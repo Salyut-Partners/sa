@@ -3,6 +3,7 @@
 // A missing key is a state to explain, not a reason to fail starting: the whole
 // editor works without one, it just makes silent videos. Every function here
 // says so in the words the panel shows.
+import type { Alignment } from '../core/subtitles.ts';
 import { VOICE_MODELS } from '../core/voice.ts';
 
 export interface Voice {
@@ -113,8 +114,17 @@ export class NoVoiceKeyError extends Error {
   }
 }
 
+export interface Speech {
+  audio: Buffer;
+  /** When each character was said — asked for only when subtitles need it. */
+  alignment: Alignment | null;
+}
+
 /**
- * Speak `text`, and hand back the mp3.
+ * Speak `text`, and hand back the mp3 — with the timing of every character
+ * when `withTimestamps` is set, which is the same request to a sibling route
+ * and costs the same, so the words of the script can be laid over the video
+ * without a model guessing what was said.
  *
  * The voice may arrive empty — that is the project saying "whichever the account
  * offers first", which is only answerable here, where the list is.
@@ -123,7 +133,8 @@ export async function synthesize(
   text: string,
   voiceId: string,
   modelId: string,
-): Promise<Buffer> {
+  withTimestamps = false,
+): Promise<Speech> {
   if (!hasVoiceKey()) throw new NoVoiceKeyError();
   const spoken = text.trim();
   if (spoken === '') throw new Error('порожній скрипт');
@@ -131,7 +142,8 @@ export async function synthesize(
   const voice = voiceId || (await listVoices()).voices[0]?.voiceId || BUILTIN[0]!.voiceId;
   const model = VOICE_MODELS.some(m => m.id === modelId) ? modelId : VOICE_MODELS[0]!.id;
 
-  const response = await fetch(`${API}/text-to-speech/${voice}?output_format=mp3_44100_128`, {
+  const route = withTimestamps ? `${voice}/with-timestamps` : voice;
+  const response = await fetch(`${API}/text-to-speech/${route}?output_format=mp3_44100_128`, {
     method: 'POST',
     headers: { 'xi-api-key': key(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ text: spoken, model_id: model }),
@@ -139,5 +151,23 @@ export async function synthesize(
   if (!response.ok) {
     throw new Error(`ElevenLabs ${response.status}: ${(await response.text()).slice(0, 300)}`);
   }
-  return Buffer.from(await response.arrayBuffer());
+  if (!withTimestamps) return { audio: Buffer.from(await response.arrayBuffer()), alignment: null };
+
+  const body = await response.json() as { audio_base64?: unknown; alignment?: unknown };
+  if (typeof body.audio_base64 !== 'string') throw new Error('ElevenLabs не повернув аудіо разом із таймкодами');
+  return { audio: Buffer.from(body.audio_base64, 'base64'), alignment: readAlignment(body.alignment) };
+}
+
+/** The `alignment` block as sent, or null when it is not the shape we read. */
+function readAlignment(raw: unknown): Alignment | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const bag = raw as Record<string, unknown>;
+  const characters = bag['characters'];
+  const starts = bag['character_start_times_seconds'];
+  const ends = bag['character_end_times_seconds'];
+  const numbers = (v: unknown): v is number[] => Array.isArray(v) && v.every(n => typeof n === 'number');
+  if (!Array.isArray(characters) || !characters.every(c => typeof c === 'string') || !numbers(starts) || !numbers(ends)) {
+    return null;
+  }
+  return { characters, character_start_times_seconds: starts, character_end_times_seconds: ends };
 }

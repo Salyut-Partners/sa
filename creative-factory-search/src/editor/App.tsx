@@ -84,7 +84,7 @@ export function App() {
     `/${project.activeLocale}/${JSON.stringify(activeLocale(project).overrides)}` +
     // Not on any frame, but they are in the file — and the autosave watches this
     // string, so leaving them out means the model and the voice never reach disk.
-    `/${project.voiceId}/${project.modelId}/${project.fitToVoice}`;
+    `/${project.voiceId}/${project.modelId}/${project.fitToVoice}/${project.subtitles}`;
 
   const clock = useMemo(() => new Clock(project.duration), []);
   const theme = useTheme();

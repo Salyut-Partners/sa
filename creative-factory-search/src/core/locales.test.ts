@@ -60,7 +60,7 @@ describe('which way a language is read', () => {
 describe('a language joining a project', () => {
   it('opens silent, in the release, and saying what the dictionary says', () => {
     expect(newLocale('de')).toEqual({
-      id: 'de', script: '', voiceId: null, include: true, overrides: {},
+      id: 'de', script: '', voiceId: null, include: true, subtitles: true, overrides: {},
     });
   });
 });

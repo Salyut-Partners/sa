@@ -584,7 +584,7 @@ describe('locale commands', () => {
     expect(p.locales.map(l => l.id)).toEqual(['en']);
     expect(p.activeLocale).toBe('en');
     expect(p.locales[0]).toEqual({
-      id: 'en', script: '', voiceId: null, include: true, overrides: {},
+      id: 'en', script: '', voiceId: null, include: true, subtitles: true, overrides: {},
     });
   });
 

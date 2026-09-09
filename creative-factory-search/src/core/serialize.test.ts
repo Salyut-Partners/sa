@@ -183,7 +183,7 @@ describe('a project file carrying languages', () => {
     const project = reopened(toFile(saved()));
     expect(project.locales.map(l => l.id)).toEqual(['en', 'de']);
     expect(project.locales[1]).toEqual({
-      id: 'de', script: 'Hallo.', voiceId: 'lily', include: true, overrides: { cta: 'JETZT' },
+      id: 'de', script: 'Hallo.', voiceId: 'lily', include: true, subtitles: true, overrides: { cta: 'JETZT' },
     });
     expect(project.locales[0]!.include).toBe(false);
   });
@@ -279,5 +279,39 @@ describe('opening a project written before languages existed', () => {
     expect(project.voiceId).toBe('');
     expect(project.modelId).toBe(DEFAULT_MODEL_ID);
     expect(project.fitToVoice).toBe(true);
+  });
+});
+
+describe('a project file carrying subtitles', () => {
+  const styled = (): Project => {
+    let p = apply(sample(), { type: 'locale/add', id: 'de' });
+    p = apply(p, { type: 'project/patch', patch: { subtitles: 'yellow' } });
+    return apply(p, { type: 'locale/patch', id: 'de', patch: { subtitles: false } });
+  };
+
+  it('keeps the style and the language switched off', () => {
+    const back = reopen(styled());
+    expect(back.subtitles).toBe('yellow');
+    expect(back.locales.find(l => l.id === 'en')!.subtitles).toBe(true);
+    expect(back.locales.find(l => l.id === 'de')!.subtitles).toBe(false);
+  });
+
+  it('opens a file written before subtitles existed, with none and every language on', () => {
+    const file = toFile(styled()) as unknown as Record<string, unknown>;
+    const older: Record<string, unknown> = {
+      ...file,
+      locales: (file['locales'] as Record<string, unknown>[]).map(({ subtitles: _, ...rest }) => rest),
+    };
+    delete older['subtitles'];
+    const result = fromFile(older);
+    expect(result.ok).toBe(true);
+    const project = (result as { project: Project }).project;
+    expect(project.subtitles).toBeNull();
+    expect(project.locales.every(l => l.subtitles === true)).toBe(true);
+  });
+
+  it('writes the field under the schema version the older editor still reads', () => {
+    expect(toFile(styled()).version).toBe(SCHEMA_VERSION);
+    expect(toFile(styled()).subtitles).toBe('yellow');
   });
 });

@@ -4,20 +4,25 @@ import { LOCALE_NAMES, releaseLocales } from '../core/locales.ts';
 import { FLAGS } from '../core/phrasebook.ts';
 import {
   defaultLayout, mergeLayout, placementSize, placePlan, rowSummary, selectionTarget, setLocaleTarget,
-  setPhotoTarget, type CampaignInfo, type ExportLayout, type Target,
+  setPhotoTarget, subtitleCount, type CampaignInfo, type ExportLayout, type Target,
 } from '../core/placement.ts';
+import type { Command } from '../core/project.ts';
 import type { LocaleId, Project } from '../core/types.ts';
 import type { ExportRun } from './export.ts';
-import { fetchCampaigns, type BatchOutput } from './server.ts';
+import { fetchCampaigns, fetchSubtitles, type BatchOutput, type SubsState } from './server.ts';
 import type { TopicBatch } from './topic-batch.ts';
 
 interface Props {
   project: Project;
+  dispatch: (command: Command) => void;
   run: ExportRun;
   /** The plan for one creative — the quick check, before committing to a batch. */
   onExportOne: () => BatchPlan | null;
   topic: TopicBatch;
 }
+
+/** The style select's value for "no subtitles" — a select cannot hold null. */
+const NO_STYLE = ' none';
 
 /** The select's value for "not exported" — a select cannot hold null. */
 const NOWHERE = ' none';
@@ -37,7 +42,7 @@ const fromValue = (value: string): Target => (value === NOWHERE ? null : value);
  * Bound to a topic, the files go to campaign folders and the panel shows a row
  * per language saying which. Unbound, the export is a download, as it was.
  */
-export function ExportPanel({ project, run, onExportOne, topic }: Props) {
+export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Props) {
   // Counted, not planned: the plan is built at the press. See `batchSize`.
   const { photos, locales, total } = batchSize(project);
   const { status } = run;
@@ -73,6 +78,16 @@ export function ExportPanel({ project, run, onExportOne, topic }: Props) {
   // Counted, not planned, like `batchSize`: this runs on every keystroke.
   const placed = launchKey === null ? null : placementSize(project, layout);
 
+  // What the machine says about subtitles: the styles to offer, and whether a
+  // file with its words in hand would come out. Asked once; the answer only
+  // changes when someone runs setup.sh, and the export says so again if it did.
+  const [subs, setSubs] = useState<SubsState | null>(null);
+  const [subsNote, setSubsNote] = useState('');
+  useEffect(() => {
+    fetchSubtitles().then(setSubs).catch(e => setSubsNote((e as Error).message));
+  }, []);
+  const burned = subtitleCount(project, launchKey === null ? null : layout);
+
   /** Start a plan: laid into folders when bound, as a download when not. */
   const go = (plan: BatchPlan): void => {
     if (launchKey === null) {
@@ -91,6 +106,65 @@ export function ExportPanel({ project, run, onExportOne, topic }: Props) {
 
   return (
     <>
+      <div className="group">
+        <div className="lab">
+          Субтитри
+          {project.subtitles === null ? null : (
+            <span className="val">{burned.burned} з {burned.total} файлів</span>
+          )}
+        </div>
+        <select
+          value={project.subtitles ?? NO_STYLE}
+          disabled={subs?.styles == null}
+          onChange={e => dispatch({
+            type: 'project/patch',
+            patch: { subtitles: e.target.value === NO_STYLE ? null : e.target.value },
+          })}
+        >
+          <option value={NO_STYLE}>— без субтитрів —</option>
+          {subs?.styles?.styles.map(s => (
+            <option key={s.id} value={s.id}>
+              {s.id} · {s.wordsPerChunk === 1 ? 'по слову' : `${s.wordsPerChunk} слів`}{s.highlight ? '' : ', без підсвітки'}
+            </option>
+          ))}
+          {/* A style the pipeline no longer lists is still shown, so the
+              select does not silently read as "none" for a saved batch. */}
+          {project.subtitles !== null && !subs?.styles?.styles.some(s => s.id === project.subtitles)
+            ? <option value={project.subtitles}>{project.subtitles} · невідомий стиль</option>
+            : null}
+        </select>
+        {subsNote !== '' ? <div className="error">{subsNote}</div> : null}
+        {subs !== null && subs.styles === null ? <div className="error">{subs.notes.join(' · ')}</div> : null}
+        {project.subtitles === null ? (
+          <div className="note">Слова скрипта в кадрі, синхронно з озвучкою — той самий пайплайн, що у вотчера.</div>
+        ) : (
+          <>
+            {release.map(id => {
+              const locale = project.locales.find(l => l.id === id);
+              return (
+                <label className="check" key={id}>
+                  <input
+                    type="checkbox"
+                    checked={locale?.subtitles !== false}
+                    onChange={e => dispatch({ type: 'locale/patch', id, patch: { subtitles: e.target.checked } })}
+                  />
+                  {FLAGS[id]} {LOCALE_NAMES[id]}
+                  {locale !== undefined && locale.script.trim() === '' ? <span className="mixed-note"> · без скрипта — чисто</span> : null}
+                </label>
+              );
+            })}
+            <div className="note">
+              Текст — слово в слово зі скрипта мови, без розпізнавання. Мова без галочки виходить чистою.
+            </div>
+            {subs !== null && !subs.burnReady ? (
+              <div className="warn">
+                Субтитри не вшиються на цій машині: {subs.notes.join('; ') || 'запустіть ./setup.sh у корені ~/sa'}
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+
       {launchKey === null ? null : (
         <div className="group">
           <div className="lab">

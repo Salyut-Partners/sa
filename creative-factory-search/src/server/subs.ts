@@ -31,6 +31,11 @@ const STATE_TTL_MS = 20_000;
 export interface SubsState {
   /** Whether a file dropped now would come out the other end. */
   ready: boolean;
+  /**
+   * Whether a creative whose words are already timed would — everything but
+   * Whisper. What the export asks, since it brings the words itself.
+   */
+  burnReady: boolean;
   styles: StyleCatalogue | null;
   /** What to install or run, one sentence each, when `ready` is false. */
   notes: string[];
@@ -70,7 +75,7 @@ export function subsState(): Promise<SubsState> {
 async function readState(): Promise<SubsState> {
   const notes: string[] = [];
   if (!fs.existsSync(STYLER)) {
-    return { ready: false, styles: null, notes: [`пайплайну субтитрів немає: очікую ${STYLER}`] };
+    return { ready: false, burnReady: false, styles: null, notes: [`пайплайну субтитрів немає: очікую ${STYLER}`] };
   }
   const venv = fs.existsSync(VENV_PYTHON);
   // The style list needs nothing but the standard library, so a machine that
@@ -90,7 +95,38 @@ async function readState(): Promise<SubsState> {
   const check = parseSetupCheck(checked.stdout);
   if (check === null) notes.push('перевірка оточення не запустилась: ' + lastLine(checked.stderr));
   else notes.push(...check.missing.filter(line => venv || !line.startsWith('не встановлено')));
-  return { ready: styles !== null && notes.length === 0, styles, notes };
+  return {
+    ready: styles !== null && notes.length === 0,
+    // The burn needs the venv's fontTools, so no venv is no burn whatever the
+    // system Python's check said.
+    burnReady: styles !== null && venv && check !== null && check.burnOk,
+    styles,
+    notes,
+  };
+}
+
+/**
+ * Lay words the caller already has over a finished video — the export's burn
+ * step. The pipeline is told the words and skips Whisper; the rest of its path
+ * is the one the watcher and the tab take. Rejects with the last thing the
+ * pipeline said on stderr, which is its sentence for the buyer.
+ */
+export function burnWords(input: string, output: string, style: string, wordsFile: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args = [STYLER, input, '-o', output, '--style', style, '--words', wordsFile];
+    const child = spawn(VENV_PYTHON, args, { cwd: TECHNICAL, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('error', e => reject(new Error('не вдалось запустити пайплайн субтитрів: ' + e.message)));
+    child.on('close', code => {
+      if (code === 0 && fs.existsSync(output)) {
+        resolve();
+        return;
+      }
+      const why = stderr.trim().split('\n').filter(l => l.trim() !== '').slice(-3).join(' · ');
+      reject(new Error(why === '' ? `субтитри: пайплайн вийшов із кодом ${code}` : 'субтитри: ' + why));
+    });
+  });
 }
 
 export interface SubtitleRequest {

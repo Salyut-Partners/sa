@@ -3,18 +3,20 @@
 // A batch of a dozen photos across seven languages is hundreds of screenshots
 // and minutes of wall clock, so it runs as a job (see `jobs.ts`): posting one
 // starts it and gets an id back, and the editor watches it while the user
-// keeps working. This file is the work itself — speech, frames, mux — and
-// where the files go.
+// keeps working. This file is the work itself — speech, frames, mux, and the
+// subtitles burned in after — and where the files go.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { groupDuration, type BatchGroup, type BatchItem, type Sound } from '../core/batch.ts';
 import { clamp } from '../core/canvas.ts';
+import { wordsFromAlignment, type Word } from '../core/subtitles.ts';
 import { mux, probeDuration } from './ffmpeg.ts';
 import {
   BadRequestError, createJob, explain, relativeFolder, settleJob, working, type Job,
 } from './jobs.ts';
 import { CancelledError, renderSpecToFile } from './render.ts';
+import { burnWords, subsState } from './subs.ts';
 import { synthesize } from './tts.ts';
 
 /** How many pages walk frames at once. More than three starves the encoders. */
@@ -93,6 +95,7 @@ function validate(request: unknown): BatchRequest {
         || typeof sound?.script !== 'string'
         || typeof sound.voiceId !== 'string'
         || typeof sound.modelId !== 'string'
+        || (item.subtitles !== null && typeof item.subtitles !== 'string')
       ) {
         throw new BadRequestError('пошкоджений план експорту');
       }
@@ -121,6 +124,8 @@ function validate(request: unknown): BatchRequest {
 interface Clip {
   file: string;
   seconds: number;
+  /** The script's words on the voice's clock, or null when nobody asked for them. */
+  words: Word[] | null;
 }
 
 async function run(
@@ -130,6 +135,18 @@ async function run(
   fitToVoice: boolean,
   origin: string,
 ): Promise<void> {
+  // Whether any file wants its words burned in. Decided once for the job: it
+  // is what makes the voice come back with its timings, and what asks the
+  // machine up front whether it can burn at all — before a single frame is
+  // walked, not on the last step of the first file.
+  const wantsWords = groups.some(g => g.items.some(i => i.subtitles !== null));
+  if (wantsWords) {
+    const state = await subsState();
+    if (!state.burnReady) {
+      settleJob(job, new Error('субтитри не готові на цій машині: ' + (state.notes.join('; ') || 'запусти ./setup.sh у корені ~/sa')));
+      return;
+    }
+  }
   // One synthesis per distinct line, however many photos ask for it. This is the
   // cache the PRD asks for, and the reason a batch of twelve costs what one does.
   const voices = new Map<string, Promise<Clip>>();
@@ -138,7 +155,7 @@ async function run(
   const worker = async (): Promise<void> => {
     for (let group = queue.shift(); group !== undefined; group = queue.shift()) {
       if (job.cancelled) return;
-      await renderGroup(job, group, { voices, duration, fitToVoice, origin });
+      await renderGroup(job, group, { voices, duration, fitToVoice, origin, wantsWords });
     }
   };
 
@@ -158,6 +175,8 @@ interface GroupContext {
   duration: number;
   fitToVoice: boolean;
   origin: string;
+  /** Ask the voice for its timings, because some file will burn them. */
+  wantsWords: boolean;
 }
 
 /**
@@ -217,6 +236,16 @@ async function renderGroup(job: Job, group: BatchGroup, ctx: GroupContext): Prom
       await working(job, item.name, async () => {
         if (clip === null) await fs.promises.copyFile(silent, made);
         else await mux(silent, clip.file, made);
+        // The burn is a step after the mux, on this one file: the video was
+        // drawn once for the group, and the words differ per language. A
+        // silent creative has nothing to say and stays clean, without a
+        // complaint — an empty script is a choice the panel already explains.
+        if (item.subtitles !== null && clip !== null) {
+          // No words means the alignment did not spell the script: the file
+          // is refused rather than shipped clean under a ticked box.
+          if (clip.words === null) throw new Error('субтитри не лягли: розмітка ElevenLabs не збіглась зі скриптом — файл не записано');
+          await burn(job, item.name, made, item.subtitles, clip.words);
+        }
         if (out !== made) await fs.promises.rename(made, out);
       });
       job.outputs.push({ name: item.name, file: out });
@@ -234,10 +263,10 @@ async function voiceFor(job: Job, item: BatchItem, ctx: GroupContext): Promise<C
   // charge, no separate mode.
   if (script.trim() === '') return null;
 
-  const key = `${modelId} ${voiceId} ${script}`;
+  const key = `${modelId} ${voiceId} ${script}`;
   let pending = ctx.voices.get(key);
   if (pending === undefined) {
-    pending = speak(job, script, voiceId, modelId);
+    pending = speak(job, script, voiceId, modelId, ctx.wantsWords);
     ctx.voices.set(key, pending);
   }
   return pending;
@@ -248,10 +277,39 @@ async function speak(
   script: string,
   voiceId: string,
   modelId: string,
+  withWords: boolean,
 ): Promise<Clip> {
   const file = path.join(job.dir, `voice-${crypto.randomUUID()}.mp3`);
-  await fs.promises.writeFile(file, await synthesize(script, voiceId, modelId));
+  const speech = await synthesize(script, voiceId, modelId, withWords);
+  await fs.promises.writeFile(file, speech.audio);
   job.scratch.push(file);
-  return { file, seconds: await probeDuration(file) };
+  // Timed off the script the voice was given — the same words, verbatim. An
+  // alignment that does not spell it is dropped here, and the file goes out
+  // clean rather than with words on the wrong beats.
+  const words = speech.alignment === null ? null : wordsFromAlignment(script.trim(), speech.alignment);
+  return { file, seconds: await probeDuration(file), words };
+}
+
+/**
+ * Burn `words` into `video` in place, by way of a scratch file: the pipeline
+ * writes a new file, and only a finished one replaces the muxed original, so
+ * a burn that fails leaves the file exactly as the mux left it — and the
+ * error against the file says why the words are not on it.
+ */
+async function burn(job: Job, name: string, video: string, style: string, words: readonly Word[]): Promise<void> {
+  const id = crypto.randomUUID();
+  const wordsFile = path.join(job.dir, `words-${id}.json`);
+  const burned = path.join(job.dir, `burned-${id}.mp4`);
+  job.scratch.push(wordsFile, burned);
+  await fs.promises.writeFile(wordsFile, JSON.stringify(words));
+  // The file's own entry on the board is renamed for the step rather than
+  // joined by a second one, so the panel reads `субтитри` and not the file twice.
+  job.active.delete(name);
+  try {
+    await working(job, `${name}: субтитри`, () => burnWords(video, burned, style, wordsFile));
+  } finally {
+    job.active.add(name);
+  }
+  await fs.promises.rename(burned, video);
 }
 

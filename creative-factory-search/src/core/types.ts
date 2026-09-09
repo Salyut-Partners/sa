@@ -144,6 +144,13 @@ export interface Locale {
   voiceId: string | null;
   /** Whether it goes out in the next export. */
   include: boolean;
+  /**
+   * Whether this language's files get the batch's subtitles. Only means
+   * anything while the project names a style; a language switched off here
+   * comes out clean, which is a real choice — a geo whose script is read but
+   * not shown — and not the absence of one.
+   */
+  subtitles: boolean;
   /** Hand edits to template fields, over the phrase book. */
   overrides: Readonly<Record<string, FieldValue>>;
 }
@@ -168,6 +175,14 @@ export interface Project {
   modelId: string;
   /** Stretch the video to hold the voice-over rather than cutting it off. */
   fitToVoice: boolean;
+  /**
+   * The subtitle style every exported file is burned with, by id from the
+   * pipeline's own dictionary, or null for no subtitles. On the batch rather
+   * than on a photo or a language: the words are the script's, the script is
+   * the language's, and one look across the whole release is what a buyer
+   * picks — a language opts out, it does not pick another look.
+   */
+  subtitles: string | null;
 }
 
 // ------------------------------------------------------------------- spec --

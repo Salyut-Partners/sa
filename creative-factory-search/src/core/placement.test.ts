@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { planBatch } from './batch.ts';
+import { burnCount, planBatch } from './batch.ts';
 import {
   campaignSummary, CREATIVES_DIR, creativesFolder, defaultLayout, destinationFor, mergeLayout,
-  placementSize, placePlan, rowSummary, selectionTarget, setLocaleTarget, setPhotoTarget,
+  placementSize, placePlan, rowSummary, selectionTarget, setLocaleTarget, setPhotoTarget, subtitleCount,
   type CampaignInfo, type ExportLayout,
 } from './placement.ts';
 import { apply, createProject } from './project.ts';
@@ -185,5 +185,29 @@ describe('campaign folders', () => {
 
   it('names the folder the files land in', () => {
     expect(creativesFolder('it-rome')).toBe(`campaigns/it-rome/${CREATIVES_DIR}`);
+  });
+});
+
+describe('subtitles under a layout', () => {
+  const styled = (): Project => {
+    let p = withLocales(batchOf('a.jpg', 'b.jpg', 'c.jpg'), 'de', 'it');
+    p = apply(p, { type: 'project/patch', patch: { subtitles: 'green' } });
+    return apply(p, { type: 'locale/patch', id: 'it', patch: { subtitles: false } });
+  };
+
+  it('keeps the style on every placed file', () => {
+    const layout: ExportLayout = { locales: { en: 'en-main', de: 'de-main', it: 'it-rome' }, overrides: {} };
+    const placed = placePlan(planBatch(styled()), layout);
+    const items = placed.plan.groups.flatMap(g => g.items);
+    expect(items.filter(i => i.locale === 'en').map(i => i.subtitles)).toEqual(['green', 'green', 'green']);
+    expect(items.filter(i => i.locale === 'it').map(i => i.subtitles)).toEqual([null, null, null]);
+  });
+
+  it('counts the files that will get subtitles the way the plan comes out', () => {
+    const layout: ExportLayout = { locales: { en: 'en-main', de: null, it: 'it-rome' }, overrides: {} };
+    expect(subtitleCount(styled(), layout)).toEqual({ burned: 3, total: 6 });
+    expect(subtitleCount(styled(), null)).toEqual({ burned: 6, total: 9 });
+    const placed = placePlan(planBatch(styled()), layout);
+    expect(burnCount(placed.plan)).toBe(3);
   });
 });

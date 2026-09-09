@@ -68,6 +68,7 @@ export const newLocale = (id: LocaleId): Locale => ({
   script: '',
   voiceId: null,
   include: true,
+  subtitles: true,
   overrides: {},
 });
 

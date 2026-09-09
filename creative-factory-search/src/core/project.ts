@@ -63,9 +63,9 @@ export type PropPatch =
   & { propId?: string; colors?: string[] }
   & { rect?: Partial<Rect>; timing?: Partial<Timing> };
 export type ProjectPatch =
-  Partial<Pick<Project, 'duration' | 'fps' | 'canvas' | 'voiceId' | 'modelId' | 'fitToVoice'>>;
+  Partial<Pick<Project, 'duration' | 'fps' | 'canvas' | 'voiceId' | 'modelId' | 'fitToVoice' | 'subtitles'>>;
 export type TemplatePatch = { timing?: Partial<Timing>; offsetY?: number };
-export type LocalePatch = Partial<Pick<Locale, 'script' | 'voiceId' | 'include'>>;
+export type LocalePatch = Partial<Pick<Locale, 'script' | 'voiceId' | 'include' | 'subtitles'>>;
 
 /**
  * A language's worth of text, as a translator hands it back. One command carries
@@ -133,6 +133,7 @@ export function createProject(): Project {
     voiceId: '',
     modelId: DEFAULT_MODEL_ID,
     fitToVoice: true,
+    subtitles: null,
   };
 }
 
@@ -594,7 +595,7 @@ function mapLocales(
 const shallowSame = (a: Locale, b: Locale): boolean =>
   a === b || (
     a.script === b.script && a.voiceId === b.voiceId && a.include === b.include &&
-    sameBag(a.overrides, b.overrides)
+    a.subtitles === b.subtitles && sameBag(a.overrides, b.overrides)
   );
 
 const sameBag = (

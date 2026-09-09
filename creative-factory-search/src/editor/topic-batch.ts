@@ -61,7 +61,7 @@ const fingerprint = (project: Project): Fingerprint => ({
   locales: project.locales,
   scalars: [
     project.canvas.width, project.canvas.height, project.fps, project.duration,
-    project.voiceId, project.modelId, project.fitToVoice,
+    project.voiceId, project.modelId, project.fitToVoice, project.subtitles,
   ].join('/'),
 });
 

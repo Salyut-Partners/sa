@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Транскрибує відео через mlx-whisper і вшиває стилізовані субтитри."""
+"""Транскрибує відео через mlx-whisper і вшиває стилізовані субтитри.
+
+Або бере готову розмітку слів (`--words`) — так робить редактор для креативів,
+чий скрипт відомий наперед і озвучений ElevenLabs: слова збігаються зі
+скриптом буквально, Whisper не потрібен."""
 
 # Анотації лишаються текстом: `--list-styles` має працювати й із системним
 # Python 3.9, до того як setup.sh поставив venv.
@@ -162,6 +166,25 @@ def transcribe(video: Path, lang: str | None) -> list[dict]:
     if lang is None:
         print(f"  → визначена мова: {result.get('language', '?')}", flush=True)
     return result.get("segments", [])
+
+
+def load_words(path: Path) -> list[dict]:
+    """Розмітка слів із файлу: JSON-список {text, start, end}, як її віддає
+    редактор із таймкодів ElevenLabs. Проходить тим самим шляхом, що й слова
+    від Whisper, тож пробіли й екрани рахуються однаково."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"розмітка слів не читається: {path}: {exc}") from exc
+    if not isinstance(raw, list):
+        raise RuntimeError(f"розмітка слів має бути списком слів: {path}")
+    segment_words = []
+    for item in raw:
+        if not isinstance(item, dict) or "text" not in item or "start" not in item or "end" not in item:
+            raise RuntimeError(f"кожне слово розмітки має мати text, start і end: {path}")
+        segment_words.append({"word": str(item["text"]), "start": float(item["start"]),
+                              "end": float(item["end"])})
+    return collect_words([{"words": segment_words}])
 
 
 def collect_words(segments: list[dict]) -> list[dict]:
@@ -550,19 +573,27 @@ def burn(video: Path, ass_path: Path, output: Path) -> None:
 
 def process(video: Path, output: Path, lang: str | None, style_name: str,
             font: "str | None" = None,
-            keep_ass: bool = False) -> Path:
-    """font=None означає «взяти зі стилю»; явно переданий перекриває стиль."""
+            keep_ass: bool = False,
+            words_file: "Path | None" = None) -> Path:
+    """font=None означає «взяти зі стилю»; явно переданий перекриває стиль.
+    words_file — готова розмітка слів замість розпізнавання."""
     style = STYLES[style_name]
     font = font or style.get("font") or DEFAULT_FONT
 
     if font != DEFAULT_FONT:
         print(f"  → шрифт: {font}", flush=True)
-    print(f"  → транскрибую ({lang or 'автовизначення мови'})…", flush=True)
-    segments = transcribe(video, lang)
-    words = collect_words(segments)
-    if not words:
-        raise RuntimeError("не розпізнано жодного слова — тиша або немає аудіодоріжки")
-    print(f"  → {len(words)} слів", flush=True)
+    if words_file is not None:
+        words = load_words(words_file)
+        if not words:
+            raise RuntimeError(f"розмітка слів порожня: {words_file}")
+        print(f"  → розмітка з файлу: {len(words)} слів", flush=True)
+    else:
+        print(f"  → транскрибую ({lang or 'автовизначення мови'})…", flush=True)
+        segments = transcribe(video, lang)
+        words = collect_words(segments)
+        if not words:
+            raise RuntimeError("не розпізнано жодного слова — тиша або немає аудіодоріжки")
+        print(f"  → {len(words)} слів", flush=True)
 
     width, height = probe_size(video)
     chunks = chunk_words(words, style["words_per_chunk"])
@@ -608,19 +639,26 @@ def style_catalogue() -> dict:
 
 def check_setup() -> dict:
     """Чого бракує на цій машині, реченнями для людини. Без винятків назовні:
-    сервер показує це в панелі замість того, щоб падати на першому файлі."""
+    сервер показує це в панелі замість того, щоб падати на першому файлі.
+
+    `burn_ok` — чи вийде файл із готовою розміткою (`--words`): усе, крім
+    Whisper. Креатив із редактора приносить слова сам, тож і без mlx він
+    отримує субтитри."""
     missing: list[str] = []
     deps = missing_dependencies()
     if deps:
         missing.append("не встановлено " + ", ".join(deps) + " — запусти ./setup.sh")
+    burn_ok = "fonttools" not in deps
     try:
         find_ffmpeg()
     except RuntimeError as exc:
         missing.append(str(exc).replace("\n", " "))
+        burn_ok = False
     font = FONTS_DIR / "MontserratSubs.ttf"
     if not font.exists():
         missing.append(f"немає {font.name} у technical/fonts — запусти ./setup.sh")
-    return {"ok": not missing, "missing": missing}
+        burn_ok = False
+    return {"ok": not missing, "missing": missing, "burn_ok": burn_ok}
 
 
 def main() -> int:
@@ -632,6 +670,8 @@ def main() -> int:
     parser.add_argument("--font", default=None,
                         help="перекрити шрифт стилю (за замовчуванням — той, що в стилі)")
     parser.add_argument("--keep-ass", action="store_true", help="зберегти .ass поруч із відео")
+    parser.add_argument("--words", type=Path, default=None,
+                        help="готова розмітка слів (JSON: [{text, start, end}]) замість розпізнавання")
     parser.add_argument("--list-styles", action="store_true",
                         help="надрукувати стилі як JSON і вийти (працює без venv)")
     parser.add_argument("--check", action="store_true",
@@ -653,7 +693,10 @@ def main() -> int:
         return 1
 
     output = args.output or args.video.with_name(f"{args.video.stem}.{args.style}.mp4")
-    result = process(args.video, output, args.lang, args.style, args.font, args.keep_ass)
+    if args.words is not None and not args.words.exists():
+        print(f"Немає файлу розмітки: {args.words}", file=sys.stderr)
+        return 1
+    result = process(args.video, output, args.lang, args.style, args.font, args.keep_ass, args.words)
     print(f"Готово: {result}")
     return 0
 
