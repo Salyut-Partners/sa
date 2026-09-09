@@ -742,7 +742,10 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
     const pauses: CampaignStep[] = [];
     let history = state.history;
     for (const earlier of state.history) {
-      if (earlier.fate !== 'live') continue;
+      // The current builder can already be in the history: an apply that
+      // wrote what the plan resolved and then stopped before building the new
+      // one. It is judged once, below, as the one retiring.
+      if (earlier.fate !== 'live' || earlier.builder.id === state.builder?.id) continue;
       const verdict = judgeRetired(snapshot.builders.find(b => b.id === earlier.builder.id), snapshot.campaigns);
       const record = { ...earlier, fate: verdict.fate };
       history = withRetired(history, record);

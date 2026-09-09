@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import type { TreeCampaign, TreeTopic } from '../core/launches-tree.ts';
 import type { CampaignOutline } from '../core/plan.ts';
 import type { ApplyRun } from './launches.ts';
 import { fetchLaunchesTree, fetchPlan, type LaunchesTree, type PlanDescription } from './server.ts';
-import type { TreeCampaign, TreeTopic } from '../core/launches-tree.ts';
 
 interface Props {
   run: ApplyRun;
@@ -11,8 +11,14 @@ interface Props {
 /** How often the disk is looked at again while the tab is open: a folder `sa new` made shows up within this. */
 const TREE_POLL_MS = 3000;
 
-/** A topic's whole plan, as fetched when it is opened, or why it could not be. */
-type TopicPlan = { outline: CampaignOutline[]; note: string } | { outline: null; note: string };
+/** A topic's whole plan, as fetched when it is opened: on its way, read, or why it could not be. */
+type TopicPlan =
+  | { kind: 'reading' }
+  | { kind: 'read'; outline: CampaignOutline[]; note: string }
+  | { kind: 'failed'; note: string };
+
+/** The word on the button: what the plan is going to do to the campaign. */
+const verb = (relaunch: boolean, capital = true): string => (relaunch ? (capital ? 'Перезалити' : 'перезалити') : (capital ? 'Залити' : 'залити'));
 
 /** What the side panel is showing: one campaign's plan, waiting for it, or the sentence why there is none. */
 interface Chosen {
@@ -52,25 +58,25 @@ export function LaunchesTab({ run }: Props) {
 
   /** The topic's plan, fetched again from scratch: after an apply, or on request. */
   const planTopic = useCallback((key: string) => {
-    setPlans(p => ({ ...p, [key]: { outline: null, note: 'питаю платформу…' } }));
+    setPlans(p => ({ ...p, [key]: { kind: 'reading' } }));
     fetchPlan(key, null)
       .then(plan => setPlans(p => ({
         ...p,
-        [key]: { outline: plan.outline, note: plan.errors.length > 0 ? `${plan.errors.length} помилок у плані топіка` : '' },
+        [key]: { kind: 'read', outline: plan.outline, note: plan.errors.length > 0 ? `${plan.errors.length} помилок у плані топіка` : '' },
       })))
-      .catch(e => setPlans(p => ({ ...p, [key]: { outline: null, note: (e as Error).message } })));
+      .catch(e => setPlans(p => ({ ...p, [key]: { kind: 'failed', note: (e as Error).message } })));
   }, []);
 
   const toggle = (key: string): void => {
+    const opening = !open.has(key);
     setOpen(set => {
       const next = new Set(set);
       if (next.has(key)) next.delete(key);
-      else {
-        next.add(key);
-        if (plans[key] === undefined) planTopic(key);
-      }
+      else next.add(key);
       return next;
     });
+    // The fetch is outside the updater: React may run an updater twice, and the platform should be asked once.
+    if (opening && plans[key] === undefined) planTopic(key);
   };
 
   const choose = (launchKey: string, campaign: string): void => {
@@ -167,25 +173,24 @@ function TopicRow({ topic, open, plan, chosen, busy, onToggle, onReplan, onChoos
       {topic.problem !== null ? <div className="error">{topic.problem}</div> : null}
       {open ? (
         <div className="campaigns">
-          {plan !== undefined && plan.note !== '' ? (
-            <div className={plan.outline === null && !plan.note.startsWith('питаю') ? 'error' : 'note'}>
-              {plan.note}
-              {plan.outline === null && !plan.note.startsWith('питаю') ? <button className="link" onClick={onReplan}>спробувати ще</button> : null}
-            </div>
+          {plan === undefined || plan.kind === 'reading' ? <div className="note">Питаю платформу…</div> : null}
+          {plan?.kind === 'failed' ? (
+            <div className="error">{plan.note}<button className="link" onClick={onReplan}>спробувати ще</button></div>
           ) : null}
+          {plan?.kind === 'read' && plan.note !== '' ? <div className="note">{plan.note}</div> : null}
           {topic.campaigns.length === 0 ? <div className="note">У campaigns/ ще нічого немає.</div> : null}
           {topic.campaigns.map(c => (
             <CampaignRow
               key={c.name}
               campaign={c}
-              outline={plan?.outline?.find(o => o.name === c.name) ?? null}
-              waiting={plan === undefined || (plan.outline === null && plan.note.startsWith('питаю'))}
+              outline={plan?.kind === 'read' ? plan.outline.find(o => o.name === c.name) ?? null : null}
+              waiting={plan === undefined || plan.kind === 'reading'}
               chosen={chosen === c.name}
               busy={busy}
               onChoose={() => onChoose(c.name)}
             />
           ))}
-          {plan?.outline !== null && plan !== undefined ? <button className="link" onClick={onReplan}>оновити план</button> : null}
+          {plan?.kind === 'read' ? <button className="link" onClick={onReplan}>оновити план</button> : null}
         </div>
       ) : null}
     </div>
@@ -204,7 +209,7 @@ interface CampaignRowProps {
 /** One campaign: what is in its folder, and the one button the plan allows — «Перезалити» only where the plan sees a difference. */
 function CampaignRow({ campaign, outline, waiting, chosen, busy, onChoose }: CampaignRowProps) {
   const files = `${campaign.creatives} крео` + (campaign.rejected > 0 ? ` · ${campaign.rejected} у rejected` : '');
-  const label = outline?.relaunch ? 'Перезалити' : 'Залити';
+  const label = verb(outline?.relaunch === true);
   const disabled = busy || waiting || outline === null || campaign.creatives === 0 || outline.errors > 0 || outline.steps === 0;
   const why = waiting ? 'план ще читається'
     : campaign.creatives === 0 ? 'немає жодного mp4 — нема чого заливати'
@@ -285,13 +290,13 @@ function PlanPanel({ chosen, run, onApply, onBack }: PlanPanelProps) {
           chosen.confirming ? (
             <>
               <button className="primary" onClick={onApply} disabled={run.running}>
-                Підтверджую: {relaunch ? 'перезалити' : 'залити'} — {plan.steps.length} кроків за живі гроші
+                Підтверджую: {verb(relaunch, false)} — {plan.steps.length} кроків за живі гроші
               </button>
               <button className="wide" style={{ marginTop: 8 }} onClick={onBack}>Ні, ще подивлюсь</button>
             </>
           ) : (
             <button className="primary" onClick={onApply} disabled={run.running} title={run.running ? 'іде інший залив' : ''}>
-              {relaunch ? 'Перезалити' : 'Залити'} {chosen.campaign}
+              {verb(relaunch)} {chosen.campaign}
             </button>
           )
         ) : null}

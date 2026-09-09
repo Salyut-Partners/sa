@@ -28,6 +28,14 @@ export function useApplyRun(): ApplyRun {
   const [note, setNote] = useState('');
   const [failed, setFailed] = useState(false);
   const settled = useRef<(() => void) | null>(null);
+  /** Set once the stop has been announced, so a poll still in flight when the run ends does not announce it again. */
+  const announced = useRef(false);
+
+  const finish = (): void => {
+    if (announced.current) return;
+    announced.current = true;
+    settled.current?.();
+  };
 
   const running = status?.state === 'running';
   const id = status?.id ?? '';
@@ -41,13 +49,13 @@ export function useApplyRun(): ApplyRun {
           if (next.state === 'running') return;
           setFailed(next.state === 'failed');
           setNote(summarise(next));
-          settled.current?.();
+          finish();
         })
         .catch(e => {
           setFailed(true);
           setNote((e as Error).message);
           setStatus(s => (s === null ? s : { ...s, state: 'failed' }));
-          settled.current?.();
+          finish();
         });
     }, POLL_MS);
     return () => clearInterval(timer);
@@ -57,13 +65,14 @@ export function useApplyRun(): ApplyRun {
     setTarget({ launchKey, campaign });
     setFailed(false);
     setNote('');
+    announced.current = false;
     setStatus({ id: '', state: 'running', done: 0, total: 0, current: 'запуск…', errors: [], elapsed: 0, remaining: null, ready: false, folders: [] });
     void startApply(launchKey, campaign)
       .then(started => {
         if (started.id === null) {
           setStatus(null);
           setNote('План порожній — на платформі вже все є.');
-          settled.current?.();
+          finish();
           return;
         }
         setStatus(s => (s === null ? s : { ...s, id: started.id!, total: started.steps }));
@@ -72,7 +81,7 @@ export function useApplyRun(): ApplyRun {
         setFailed(true);
         setNote((e as Error).message);
         setStatus(null);
-        settled.current?.();
+        finish();
       });
   }, []);
 
@@ -82,7 +91,7 @@ export function useApplyRun(): ApplyRun {
       .then(next => {
         setStatus(next);
         setNote(summarise(next));
-        settled.current?.();
+        finish();
       })
       .catch(() => setStatus(null));
   }, [id]);

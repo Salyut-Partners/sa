@@ -22,10 +22,10 @@ import { explainRefusal, openProjectFile, saveProjectFile } from './project-file
 import { fetchVoices, type VoiceCatalogue } from './server.ts';
 import { SidePanel } from './SidePanel.tsx';
 import { autosaver, loadAutosave, type SaveState } from './store.ts';
-import { useSubtitleQueue } from './subtitles.ts';
-import { SubtitlesTab } from './SubtitlesTab.tsx';
 import { useApplyRun } from './launches.ts';
 import { LaunchesTab } from './LaunchesTab.tsx';
+import { useSubtitleQueue } from './subtitles.ts';
+import { SubtitlesTab } from './SubtitlesTab.tsx';
 import { Timeline } from './Timeline.tsx';
 import { useTopicBatch } from './topic-batch.ts';
 import { useTranslator } from './translate.ts';

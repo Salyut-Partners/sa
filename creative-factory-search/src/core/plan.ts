@@ -578,7 +578,7 @@ export interface CampaignOutline {
   name: string;
   /** Steps of the campaign's own in the plan. */
   steps: number;
-  /** Whether the plan replaces a campaign already built. */
+  /** Whether the plan replaces a campaign already built — or is still pausing the one it replaced. */
   relaunch: boolean;
   errors: number;
 }
@@ -588,7 +588,7 @@ export function campaignOutline(planned: Plan, names: readonly string[]): Campai
   return names.map(name => ({
     name,
     steps: planned.steps.filter(s => campaignOf(s) === name).length,
-    relaunch: planned.steps.some(s => s.kind === 'builder.create' && s.campaign === name && s.retires !== null),
+    relaunch: planned.steps.some(s => (s.kind === 'builder.create' && s.campaign === name && s.retires !== null) || (s.kind === 'campaign.pause' && s.campaign === name)),
     errors: planned.errors.filter(line => campaignOfLine(line) === name).length,
   }));
 }

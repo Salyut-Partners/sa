@@ -350,6 +350,8 @@ export async function readBuilders(client: PlatformClient, topicId: number): Pro
  * stops the moment every one of them has been seen.
  */
 const CAMPAIGN_PAGE = 100;
+/** How many pages are read before giving up on a campaign the list does not show. */
+const CAMPAIGN_PAGES_MAX = 100;
 /** How far back the list is asked to look. The admin asks for a week; a campaign being relaunched may be older. */
 const CAMPAIGN_WINDOW_DAYS = 90;
 
@@ -368,7 +370,7 @@ export async function readCampaigns(client: PlatformClient, wanted: readonly num
   const to = new Date();
   const from = new Date(to.getTime() - CAMPAIGN_WINDOW_DAYS * 86_400_000);
   const query = { date_type: 'last7days', date_formatted: `${usDate(from)}-${usDate(to)}` };
-  for (let pageId = 0; pageId < 100 && left.size > 0; pageId++) {
+  for (let pageId = 0; pageId < CAMPAIGN_PAGES_MAX && left.size > 0; pageId++) {
     const body = need(await client.get('/v2/campaigns', { ...query, pageId, limit: CAMPAIGN_PAGE }), 'GET /v2/campaigns');
     const page = listOf(body, 'data');
     for (const raw of page) {
@@ -382,8 +384,8 @@ export async function readCampaigns(client: PlatformClient, wanted: readonly num
         status: str(c['status']),
         published: c['campaign_id'] != null && str(c['campaign_id']) !== '',
         revenue: money(c['revenue']) ?? 0,
-        // The list carries no spend today; read if it ever does, under the names such a field tends to get.
-        spend: money(c['spend']) ?? money(c['cost']) ?? money(c['amount_spent']),
+        // The list carries no spend today; null until the platform sends one, and revenue is the sign of the first cent meanwhile.
+        spend: money(c['spend']),
       });
     }
     if (page.length < CAMPAIGN_PAGE) break;

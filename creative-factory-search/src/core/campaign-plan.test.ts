@@ -425,6 +425,16 @@ describe('a relaunch: the campaign was built and a creative in the folder change
     });
   });
 
+  it('judges the retiring campaign once when a stopped apply already wrote it into the history', () => {
+    const state = topicState({ 'de-a': {
+      ...DONE_CAMPAIGN(),
+      history: [{ builder: DONE_CAMPAIGN().builder!, creatives: DONE_CAMPAIGN().creatives, fate: 'live' }],
+    } });
+    const result = plan(contents(remade()), withOld([live()]), state);
+    expect(kinds(result)).toEqual(['creatives.upload', 'builder.create', 'campaign.pause']);
+    expect(result.resolved.campaigns['de-a']?.history).toHaveLength(1);
+  });
+
   it('keeps every earlier campaign of the folder, not only the last', () => {
     const state = topicState({ 'de-a': {
       ...DONE_CAMPAIGN(),
@@ -508,6 +518,24 @@ describe('the plan for one campaign', () => {
       { name: 'de-b', steps: 0, relaunch: false, errors: 1 },
       { name: 'de-c', steps: 0, relaunch: false, errors: 0 },
     ]);
+  });
+
+  it('is still a relaunch in the outline when only the pause of the old campaign is left', () => {
+    const state = topicState({ 'de-a': {
+      ...DONE_CAMPAIGN(),
+      creatives: { '01.mp4': { id: 1005, hash: 'h-remade' }, '02.mp4': { id: 1002, hash: 'h-02.mp4' } },
+      builder: { id: 707001, campaign_id: null, campaign_name: null },
+      history: [{ builder: DONE_CAMPAIGN().builder!, creatives: DONE_CAMPAIGN().creatives, fate: 'live' }],
+    } });
+    const remade = campaign('de-a');
+    remade.creatives[0] = { name: '01.mp4', hash: 'h-remade' };
+    const both = snapshot({
+      ...DONE_SNAPSHOT(),
+      creatives: [...DONE_SNAPSHOT().creatives, video(1005, '01.mp4')],
+      builders: [builderOnPlatform(707000, [1503646, 1001, 1002]), builderOnPlatform(707001, [1503646, 1005, 1002], { campaigns: [] })],
+      campaigns: [{ id: 1267704, name: 'old', status: 'ACTIVE', published: true, revenue: 1, spend: null }],
+    });
+    expect(campaignOutline(plan(contents(remade), both, state), ['de-a'])).toEqual([{ name: 'de-a', steps: 1, relaunch: true, errors: 0 }]);
   });
 });
 

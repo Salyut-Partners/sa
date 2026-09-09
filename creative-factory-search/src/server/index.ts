@@ -150,9 +150,17 @@ function answerFailure(res: express.Response, e: unknown, what: string): void {
 
 // -------------------------------------------------------------- plan/apply --
 
-/** A `campaign` in the body narrows the plan or the apply to one campaign of the topic. */
-const campaignIn = (body: unknown): string | null =>
-  typeof body === 'object' && body !== null && typeof (body as { campaign?: unknown }).campaign === 'string' ? (body as { campaign: string }).campaign : null;
+/**
+ * A `campaign` in the body narrows the plan or the apply to one campaign of
+ * the topic. Anything else under that name is refused rather than widened to
+ * the whole topic — an apply that meant one campaign must not do them all.
+ */
+function campaignIn(body: unknown): string | null {
+  const campaign = typeof body === 'object' && body !== null ? (body as { campaign?: unknown }).campaign : undefined;
+  if (campaign === undefined || campaign === null) return null;
+  if (typeof campaign !== 'string' || campaign === '') throw new RefusedError('campaign має бути назвою теки кампанії');
+  return campaign;
+}
 
 /** The plan: reads the folder and the platform, creates nothing, however often it is asked. */
 app.post('/api/launches/:key/plan', async (req, res) => {

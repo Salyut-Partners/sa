@@ -250,12 +250,16 @@ day — and what happens to the old campaign, which is one of three things.
 Rejected before it was published, or taken down by the provider: nothing to
 pause. Live: paused through the admin's bulk update, by campaign id and
 never builder id, but only once it is in the analytics — the campaign list
-shows no spend, so the first cent is read off its revenue — because the
+shows no spend, so until it does the first cent is read off its revenue,
+and a campaign spending without a conversion yet is left running — because the
 vault's stop rule says a status changed before that point stops the
 platform tracking it. A live campaign that has not spent is left alone and
 named, and asked about again on every later plan until it settles. The
 verdict is `judgeRetired` in `core/campaign-plan.ts`, and the pause is
-planned after the new builder, never before it.
+planned after the new builder, never before it. The campaign list is read
+with the admin's own query and a ninety-day range; whether the platform
+honours the range or its own week is a thing the first live relaunch has to
+show — a campaign the list does not show is named and left alone.
 
 ### A batch in its topic folder
 
