@@ -518,6 +518,81 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
   return { steps, warnings, errors, resolved };
 }
 
+// -------------------------------------------------------- one campaign --
+
+/** Which campaign a step belongs to; the topic-level steps belong to none. */
+export const campaignOf = (step: PlanStep): string | null => ('campaign' in step ? step.campaign : null);
+
+const CAMPAIGN_PREFIX = /^campaigns\/([^/:]+)(?:\/[^:]*)?:/;
+/** The campaign a plan line is about, by the `campaigns/<name>:` prefix every campaign line carries, or null for a topic line. */
+export const campaignOfLine = (line: string): string | null => CAMPAIGN_PREFIX.exec(line)?.[1] ?? null;
+
+/** The campaigns a step's body refers to for things this same plan makes — the ones its own campaign is not. */
+function leansOn(step: PlanStep): { campaign: string; kind: CampaignStep['kind'] }[] {
+  if (step.kind !== 'builder.create') return [];
+  const needs: { campaign: string; kind: CampaignStep['kind'] }[] = [];
+  for (const ref of step.body.traffic_source_profile_ids) {
+    if (typeof ref === 'object') needs.push({ campaign: ref.tsp, kind: 'tsp.create' });
+  }
+  for (const ref of step.body.creative_repo_ids) {
+    if (typeof ref === 'object') needs.push({ campaign: ref.campaign, kind: 'headline' in ref ? 'headline.create' : 'creatives.upload' });
+  }
+  return needs;
+}
+
+/**
+ * The plan for one campaign of the topic: every topic-level step, the
+ * campaign's own, and the steps of other campaigns it leans on — a profile
+ * or a headline another campaign's step makes first. Warnings and errors of
+ * the other campaigns are left out, so a manifest half-written in one folder
+ * does not stop the launch of another; what is resolved stays whole, being
+ * facts about the platform rather than choices.
+ */
+export function narrowPlan(planned: Plan, campaign: string): Plan {
+  const own = planned.steps.filter(s => campaignOf(s) === campaign);
+  const kept = new Set<PlanStep>(planned.steps.filter(s => campaignOf(s) === null));
+  const queue = [...own];
+  while (queue.length > 0) {
+    const step = queue.shift()!;
+    if (kept.has(step)) continue;
+    kept.add(step);
+    for (const need of leansOn(step)) {
+      for (const other of planned.steps) {
+        if (campaignOf(other) === need.campaign && other.kind === need.kind && !kept.has(other)) queue.push(other);
+      }
+    }
+  }
+  const mine = (line: string): boolean => {
+    const about = campaignOfLine(line);
+    return about === null || about === campaign;
+  };
+  return {
+    steps: planned.steps.filter(s => kept.has(s)),
+    warnings: planned.warnings.filter(mine),
+    errors: planned.errors.filter(mine),
+    resolved: planned.resolved,
+  };
+}
+
+export interface CampaignOutline {
+  name: string;
+  /** Steps of the campaign's own in the plan. */
+  steps: number;
+  /** Whether the plan replaces a campaign already built. */
+  relaunch: boolean;
+  errors: number;
+}
+
+/** One line per campaign folder, for a tree that offers «Залити» or «Перезалити» and knows which. */
+export function campaignOutline(planned: Plan, names: readonly string[]): CampaignOutline[] {
+  return names.map(name => ({
+    name,
+    steps: planned.steps.filter(s => campaignOf(s) === name).length,
+    relaunch: planned.steps.some(s => s.kind === 'builder.create' && s.campaign === name && s.retires !== null),
+    errors: planned.errors.filter(line => campaignOfLine(line) === name).length,
+  }));
+}
+
 function configurationStep(topic: TopicManifest, topicRef: TopicRef): PlanStep {
   return {
     kind: 'configuration.create',

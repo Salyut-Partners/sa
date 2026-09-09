@@ -42,6 +42,8 @@ export interface TopicManifest {
   accounts: Record<string, Account>;
   /** Names of autorule presets to put on the topic. */
   rules: string[];
+  /** The niche the topic belongs to — `jobs`, `loans` — which is what the launches tab groups by. Null when not said. */
+  vertical: string | null;
 }
 
 /**
@@ -186,10 +188,16 @@ export function parseTopicManifest(source: string): ParseResult<TopicManifest> {
     else errors.push('поле `rules` має бути списком назв пресетів');
   }
 
+  let vertical: string | null = null;
+  if (bag['vertical'] !== undefined && bag['vertical'] !== null && bag['vertical'] !== '') {
+    if (typeof bag['vertical'] === 'string') vertical = bag['vertical'].trim();
+    else errors.push('поле `vertical` має бути назвою ніші');
+  }
+
   if (errors.length > 0) return { ok: false, errors };
   return {
     ok: true,
-    value: { launch_key: launchKey, name, internal_name: internal, traffic_source: trafficSource, site, accounts, rules },
+    value: { launch_key: launchKey, name, internal_name: internal, traffic_source: trafficSource, site, accounts, rules, vertical },
   };
 }
 
@@ -270,6 +278,8 @@ export interface NewLaunchOptions {
    */
   name?: string;
   trafficSource?: TrafficSource;
+  /** The niche, when the buyer named one; it goes into the manifest as `vertical`. */
+  vertical?: string;
 }
 
 export const NAME_PLACEHOLDER = 'REPLACE_TOPIC_NAME';
@@ -298,6 +308,8 @@ export function newLaunchTree(options: NewLaunchOptions): LaunchTree {
     `name: ${YAML.stringify(name).trim()}`,
     `internal_name: ${internalName(name)}`,
     `traffic_source: ${source}`,
+    '# Ніша (вертикаль): jobs, loans… Таба заливів групує топіки за нею.',
+    `vertical: ${YAML.stringify(options.vertical?.trim() ?? '').trim()}`,
     '# Сайт (домен), на якому публікуються статті. Id з GET /sites.',
     'site: "REPLACE_SITE_ID"',
     '# Кабінети, з яких ллється цей топік, і піксель кожного. Кампанія посилається на alias.',

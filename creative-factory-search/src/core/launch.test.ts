@@ -209,6 +209,16 @@ describe('starting a launch', () => {
     expect(parseCampaignManifest(campaignText, t.value).ok).toBe(true);
   });
 
+  it('writes the vertical into the manifest when one is given, and reads it back', () => {
+    const named = newLaunchTree({ launchKey: 'ai-x-y', vertical: 'jobs' }).files.find(f => f.path === 'topic.yaml')!;
+    const parsed = parseTopicManifest(named.content.replace('REPLACE_SITE_ID', '1'));
+    expect(parsed.ok && parsed.value.vertical).toBe('jobs');
+    const bare = newLaunchTree({ launchKey: 'ai-x-y' }).files.find(f => f.path === 'topic.yaml')!;
+    const none = parseTopicManifest(bare.content.replace('REPLACE_SITE_ID', '1'));
+    expect(none.ok && none.value.vertical).toBe(null);
+    expect(parseTopicManifest(TOPIC + 'vertical: [a]\n').ok).toBe(false);
+  });
+
   it('leaves a placeholder name when none is given, never one derived from the key', () => {
     const tree = newLaunchTree({ launchKey: 'ai-mob-nl-trap' });
     const parsed = parseTopicManifest(tree.files.find(f => f.path === 'topic.yaml')!.content);

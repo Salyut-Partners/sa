@@ -23,9 +23,9 @@ import {
 } from '../core/campaign-plan.ts';
 import { parseCampaignManifest, parseTopicManifest, type TopicManifest } from '../core/launch.ts';
 import {
-  chooseTopic, emptyState, firstNew, parseKeywords, parseState, parseTermGroupOptions, plan as makePlan, previewPlan,
-  type ArticleSource, type LaunchContents, type LaunchState, type Plan, type PlanStep, type Snapshot,
-  type TermGroupRef, type TermGroupSource, type TopicRef,
+  campaignOf, campaignOutline, chooseTopic, emptyState, firstNew, narrowPlan, parseKeywords, parseState, parseTermGroupOptions,
+  plan as makePlan, previewPlan, type ArticleSource, type CampaignOutline, type LaunchContents, type LaunchState, type Plan,
+  type PlanPreview, type PlanStep, type Snapshot, type TermGroupRef, type TermGroupSource, type TopicRef,
 } from '../core/plan.ts';
 import { CREATIVES_DIR } from '../core/placement.ts';
 import { DEFAULT_QUEUE, nextAction, pauseBefore, type Attempt } from '../core/queue.ts';
@@ -258,27 +258,54 @@ export interface Planned {
   folder: string;
   contents: LaunchContents;
   state: LaunchState;
+  /** The whole topic's plan, or one campaign's when asked for one. */
   plan: Plan;
+  campaign: string | null;
+  /** One line per campaign folder, from the whole plan — what the tree offers on each. */
+  outline: CampaignOutline[];
 }
 
-export async function planLaunch(config: SaConfig, launchKey: string): Promise<Planned> {
+/** The plan for the topic, or — with `campaign` — the part of it one campaign needs. */
+export async function planLaunch(config: SaConfig, launchKey: string, campaign: string | null = null): Promise<Planned> {
   const folder = launchFolder(config, launchKey);
+  if (campaign !== null && !campaignFolders(folder).includes(campaign)) {
+    throw new RefusedError(`кампанії \`${campaign}\` немає в ${launchKey}/campaigns`);
+  }
   const contents = readLaunchContents(folder);
   const state = readState(folder);
   const snapshot = await readSnapshot(client(config), contents.topic, state);
-  return { folder, contents, state, plan: makePlan(contents, snapshot, state) };
+  const whole = makePlan(contents, snapshot, state);
+  return {
+    folder, contents, state, campaign,
+    plan: campaign === null ? whole : narrowPlan(whole, campaign),
+    outline: campaignOutline(whole, campaignFolders(folder)),
+  };
 }
 
-/** What `sa plan` prints: the steps with readable bodies, and where the folder stands. */
-export function describePlan(planned: Planned): unknown {
+/** What `sa plan` prints and the launches tab reads: the steps with readable bodies, and where the folder stands. */
+export interface PlanDescription {
+  launchKey: string;
+  topic: string;
+  campaign: string | null;
+  steps: PlanPreview['steps'];
+  warnings: string[];
+  errors: string[];
+  resolved: PlanPreview['resolved'];
+  outline: CampaignOutline[];
+  state: LaunchState;
+}
+
+export function describePlan(planned: Planned): PlanDescription {
   const shown = previewPlan(planned.plan);
   return {
     launchKey: planned.contents.topic.launch_key,
     topic: planned.contents.topic.name,
+    campaign: planned.campaign,
     steps: shown.steps,
     warnings: shown.warnings,
     errors: shown.errors,
     resolved: shown.resolved,
+    outline: planned.outline,
     state: planned.state,
   };
 }
@@ -363,10 +390,12 @@ const resolveTsp = (run: Run, ref: TspRef): { id: number; name: string } => {
  * the snapshot resolved are written to the state before the first step, so a
  * plan that found everything already there still leaves a complete file.
  */
-export async function startApply(config: SaConfig, launchKey: string, confirmed: boolean): Promise<{ id: string | null; steps: number }> {
+export async function startApply(
+  config: SaConfig, launchKey: string, confirmed: boolean, campaign: string | null = null,
+): Promise<{ id: string | null; steps: number }> {
   if (!confirmed) throw new RefusedError('apply без явного підтвердження не виконується: sa apply <key> --confirm');
   if (applying.has(launchKey)) throw new RefusedError(`залив \`${launchKey}\` уже застосовується — дочекайтесь, поки та задача закінчиться`);
-  const planned = await planLaunch(config, launchKey);
+  const planned = await planLaunch(config, launchKey, campaign);
   if (planned.plan.errors.length > 0) throw new RefusedError('план має помилки:\n' + planned.plan.errors.join('\n'));
   const state = adopt(planned.state, planned.plan);
   if (state !== planned.state) writeState(planned.folder, state);
@@ -405,9 +434,6 @@ function adopt(state: LaunchState, plan: Plan): LaunchState {
   }
   return JSON.stringify(next) === JSON.stringify(state) ? state : next;
 }
-
-/** Which campaign a step belongs to, for the pause between campaigns. */
-const campaignOf = (step: PlanStep): string | null => ('campaign' in step ? step.campaign : null);
 
 async function runSteps(run: Run, steps: readonly PlanStep[]): Promise<void> {
   let crashed: Error | null = null;

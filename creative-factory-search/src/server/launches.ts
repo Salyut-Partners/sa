@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   checkNewLaunch, newLaunchTree, resolveTicketFields, type LaunchCreated, type TrafficSource,
 } from '../core/launch.ts';
+import { buildLaunchesTree, type LaunchesTree, type LaunchFolderListing } from '../core/launches-tree.ts';
 import { ClickUpError, clickupState, createTask, listFields, type Ticket } from './clickup.ts';
 import { ensureLaunchesRoot, type SaConfig } from './config.ts';
 
@@ -29,6 +30,33 @@ export function existingLaunchKeys(root: string): string[] {
     .sort();
 }
 
+/** How deep under a launch folder the listing looks: `campaigns/<c>/creatives/rejected/<file>` is four. */
+const LISTING_DEPTH = 4;
+
+/** Paths under a folder, relative with forward slashes, a few levels deep — `batches/` and its photos are not walked. */
+function listPaths(folder: string, prefix = '', depth = LISTING_DEPTH): string[] {
+  if (depth === 0) return [];
+  const paths: string[] = [];
+  for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+    if (entry.name.startsWith('.') || (prefix === '' && entry.name === 'batches')) continue;
+    const own = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+    paths.push(own);
+    if (entry.isDirectory()) paths.push(...listPaths(path.join(folder, entry.name), own, depth - 1));
+  }
+  return paths;
+}
+
+/** Every launch folder as the tree reads it: its manifest text and what is under it. */
+export function listLaunchFolders(root: string): LaunchFolderListing[] {
+  return existingLaunchKeys(root).map(key => {
+    const folder = path.join(root, key);
+    const manifest = path.join(folder, 'topic.yaml');
+    return { key, topicYaml: fs.existsSync(manifest) ? fs.readFileSync(manifest, 'utf8') : null, paths: listPaths(folder) };
+  });
+}
+
+export const launchesTree = (root: string): LaunchesTree => buildLaunchesTree(listLaunchFolders(root));
+
 export async function createLaunch(config: SaConfig, request: NewLaunchRequest): Promise<LaunchCreated> {
   const root = ensureLaunchesRoot(config);
   const refusal = checkNewLaunch(existingLaunchKeys(root), request.launchKey);
@@ -39,6 +67,7 @@ export async function createLaunch(config: SaConfig, request: NewLaunchRequest):
     launchKey: request.launchKey,
     ...(request.name !== undefined ? { name: request.name } : {}),
     ...(request.trafficSource !== undefined ? { trafficSource: request.trafficSource } : {}),
+    ...(request.vertical !== undefined ? { vertical: request.vertical } : {}),
   });
   // Not recursive on purpose: the root exists, and a folder that appeared
   // between the check and here is a refusal, not something to write into.

@@ -6,7 +6,8 @@ import {
 } from './campaign-plan.ts';
 import { parseCampaignManifest, parseTopicManifest, type TopicManifest } from './launch.ts';
 import {
-  articleHash, emptyState, plan, previewPlan, type LaunchContents, type LaunchState, type Snapshot, type TermGroupSource,
+  articleHash, campaignOutline, emptyState, narrowPlan, plan, previewPlan, type LaunchContents, type LaunchState, type Snapshot,
+  type TermGroupSource,
 } from './plan.ts';
 
 const TOPIC = `
@@ -466,6 +467,47 @@ describe('two campaigns in one plan', () => {
   it('refuses the same file name in two campaigns of one plan', () => {
     const result = plan(contents(campaign('de-a'), campaign('de-b')), snapshot(), topicState());
     expect(result.errors.join()).toMatch(/01\.mp4/);
+  });
+});
+
+describe('the plan for one campaign', () => {
+  it('keeps the topic steps, the campaign\'s own, and the steps of another campaign it leans on', () => {
+    const whole = plan(contents(campaign('de-a'), campaign('de-b', { files: ['11.mp4'] })), snapshot({ topics: [], configurations: [], termGroups: [], posts: [] }), emptyState());
+    const b = narrowPlan(whole, 'de-b');
+    expect(kinds(b)).toEqual([
+      'topic.create', 'configuration.create', 'termgroup.create', 'termgroup.weight', 'article.create',
+      'headline.create', 'tsp.create', 'creatives.upload', 'builder.create',
+    ]);
+    // de-a's headline and TSP are there because de-b's builder points at them; de-a's own upload and builder are not.
+    expect(b.steps.filter(s => 'campaign' in s && s.campaign === 'de-a').map(s => s.kind)).toEqual(['headline.create', 'tsp.create']);
+    const a = narrowPlan(whole, 'de-a');
+    expect(a.steps.filter(s => 'campaign' in s).every(s => s.campaign === 'de-a')).toBe(true);
+  });
+
+  it('leaves out the errors and warnings of the other campaigns and keeps the topic\'s', () => {
+    const broken = campaign('de-b', { files: ['11.mp4'] });
+    broken.manifest = { ...broken.manifest, account: 'ghost' };
+    const whole = plan({ ...contents(campaign('de-a'), broken), notes: ['campaigns/de-c: у creatives/ немає mp4 — кампанію пропущено'] }, snapshot(), topicState());
+    expect(whole.errors.join()).toMatch(/ghost/);
+    const a = narrowPlan(whole, 'de-a');
+    expect(a.errors).toEqual([]);
+    expect(a.warnings).toEqual([]);
+    expect(narrowPlan(whole, 'de-b').errors.join()).toMatch(/ghost/);
+    expect(narrowPlan(whole, 'de-c').warnings.join()).toMatch(/de-c/);
+    expect(a.resolved).toBe(whole.resolved);
+  });
+
+  it('is outlined per folder: how many steps, whether it is a relaunch, whether it has errors', () => {
+    const remade = campaign('de-a');
+    remade.creatives[0] = { name: '01.mp4', hash: 'h-remade' };
+    const broken = campaign('de-b', { files: ['11.mp4'] });
+    broken.manifest = { ...broken.manifest, account: 'ghost' };
+    const whole = plan(contents(remade, broken), snapshot({ ...DONE_SNAPSHOT(), campaigns: [] }), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(campaignOutline(whole, ['de-a', 'de-b', 'de-c'])).toEqual([
+      { name: 'de-a', steps: 2, relaunch: true, errors: 0 },
+      { name: 'de-b', steps: 0, relaunch: false, errors: 1 },
+      { name: 'de-c', steps: 0, relaunch: false, errors: 0 },
+    ]);
   });
 });
 

@@ -79,6 +79,28 @@ the export before the first frame rather than on the last file. The style is
 saved in the batch file as an optional field, so a file written with one
 still opens in an editor from before it existed.
 
+### The launches tab
+
+The header's third tab is the buyer's launches as a tree: niche → topic →
+campaigns, with the count of mp4 files in each campaign's folder before
+anything goes up, and the rejected ones counted beside. The niche is the
+`vertical` in `topic.yaml`, which `sa new --vertical` writes; a topic without
+one sits under «без ніші». The tree is the disk and nothing else — it is
+read again every few seconds while the tab is open, so a folder `sa new`
+just made appears on its own, and the state of a campaign on the platform is
+deliberately not drawn on it. Opening a topic asks the server for its plan,
+which is what decides the button on each campaign: «Залити» where there is
+something to create, «Перезалити» where the plan sees a relaunch, and a
+disabled button with the reason where there is nothing to do or the folder
+has errors. Pressing it shows that campaign's plan in the panel — the same
+steps `sa plan <key> --campaign <name>` prints — and only a second press,
+under the words «за живі гроші», starts the apply, which is then a bar, the
+step in flight and a cancel, watched from any tab. The rule for the tree
+is `core/launches-tree.ts`; the plan for one campaign — the topic's steps,
+the campaign's own, and the steps of another campaign it leans on for a
+shared profile or headline, with the other campaigns' errors left out — is
+`narrowPlan` in `core/plan.ts`; both are tested there.
+
 ### Subtitles for a video from elsewhere
 
 The header has a second tab. Drop a video from a designer, a phone or Grok
@@ -118,7 +140,9 @@ bin/sa new ai-vadim-sperm-it --name "AI Vadim Sperm IT" --vertical jobs --geo DE
 bin/sa launches
 bin/sa config
 bin/sa plan ai-vadim-sperm-it
+bin/sa plan ai-vadim-sperm-it --campaign de-a
 bin/sa apply ai-vadim-sperm-it --confirm
+bin/sa apply ai-vadim-sperm-it --confirm --campaign de-a
 ```
 
 `sa` is a thin HTTP client to the server: flags in, one JSON object out, an
@@ -274,7 +298,10 @@ Three build units and one rule.
   nothing about launches beyond the route names; the server does the work and
   `core/launch.ts` decides what a launch is: the manifests, the key, the tree.
   `core/plan.ts` decides what the platform is asked for — the steps, their
-  bodies, create against update — from the folder, a snapshot and the state;
+  bodies, create against update — from the folder, a snapshot and the state,
+  and narrows that to one campaign for the tab and `--campaign`;
+  `core/launches-tree.ts` turns the folder structure into the tree the tab
+  draws;
   `core/campaign-plan.ts` does the same for a campaign — creatives,
   headline, profile, builder — and pairs uploads with read-backs;
   `core/article.ts` turns `article.md` into the HTML that is sent;

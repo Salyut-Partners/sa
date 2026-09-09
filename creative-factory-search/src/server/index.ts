@@ -13,7 +13,7 @@ import { campaignCreativesDir, listBatches, listCampaigns, readBatch, writeBatch
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
 import { clickupState } from './clickup.ts';
 import { configPath, ensureLaunchesRoot, loadConfig } from './config.ts';
-import { createLaunch, existingLaunchKeys, RefusedError } from './launches.ts';
+import { createLaunch, existingLaunchKeys, launchesTree, RefusedError } from './launches.ts';
 import { isTrafficSource } from '../core/launch.ts';
 import { BadRequestError, cancelJob, jobById, outputsOf, statusOf } from './jobs.ts';
 import { PlatformReadError, platformState } from './platform.ts';
@@ -96,6 +96,15 @@ app.get('/api/launches', (_req, res) => {
   res.json({ launches_root: config.launches_root, launches: existingLaunchKeys(config.launches_root) });
 });
 
+/** The launches as a tree — niche, topic, campaigns with their file counts — read off the disk alone. */
+app.get('/api/launches/tree', (_req, res) => {
+  try {
+    res.json(launchesTree(loadConfig().launches_root));
+  } catch (e) {
+    answerFailure(res, e, 'tree');
+  }
+});
+
 /**
  * A new launch: the folder tree, then the ticket. A refusal is a 400 with the
  * sentence for the buyer; a ticket that could not be filed is not a failure of
@@ -141,10 +150,14 @@ function answerFailure(res: express.Response, e: unknown, what: string): void {
 
 // -------------------------------------------------------------- plan/apply --
 
+/** A `campaign` in the body narrows the plan or the apply to one campaign of the topic. */
+const campaignIn = (body: unknown): string | null =>
+  typeof body === 'object' && body !== null && typeof (body as { campaign?: unknown }).campaign === 'string' ? (body as { campaign: string }).campaign : null;
+
 /** The plan: reads the folder and the platform, creates nothing, however often it is asked. */
 app.post('/api/launches/:key/plan', async (req, res) => {
   try {
-    res.json(describePlan(await planLaunch(loadConfig(), req.params.key)));
+    res.json(describePlan(await planLaunch(loadConfig(), req.params.key, campaignIn(req.body))));
   } catch (e) {
     answerFailure(res, e, 'plan');
   }
@@ -158,7 +171,7 @@ app.post('/api/launches/:key/plan', async (req, res) => {
 app.post('/api/launches/:key/apply', async (req, res) => {
   const body = req.body as { confirm?: unknown } | undefined;
   try {
-    res.json(await startApply(loadConfig(), req.params.key, body?.confirm === true));
+    res.json(await startApply(loadConfig(), req.params.key, body?.confirm === true, campaignIn(body)));
   } catch (e) {
     answerFailure(res, e, 'apply');
   }

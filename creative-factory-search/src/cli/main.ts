@@ -27,8 +27,11 @@ const USAGE = `sa — робоче місце байера
                       [--vertical jobs] [--geo DE,IT]
   sa launches         список заливів у launches_root
   sa config           де конфігурація і що в ній
-  sa plan <launch-key>            що станеться на платформі: кроки з тілами, нічого не створює
-  sa apply <launch-key> --confirm виконати план; без --confirm відмовляється
+  sa plan <launch-key> [--campaign <name>]
+                      що станеться на платформі: кроки з тілами, нічого не створює;
+                      з --campaign — лише те, що потрібно одній кампанії
+  sa apply <launch-key> --confirm [--campaign <name>]
+                      виконати план; без --confirm відмовляється
 
 Launch key: малі літери, цифри й дефіси, щонайменше два сегменти — перший це
 скорочення команди. Відповідь завжди JSON в один об'єкт.`;
@@ -138,10 +141,13 @@ interface PlanShown {
 }
 
 async function commandPlan(args: string[]): Promise<number> {
-  const launchKey = args[0];
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { campaign: { type: 'string' } } });
+  const launchKey = positionals[0];
   if (launchKey === undefined) fail(1, 'sa plan потребує launch key: sa plan ai-vadim-sperm-it');
   await ensureServer();
-  const { status, body } = await ask<PlanShown | { error: string }>(`/api/launches/${launchKey}/plan`, asJson({}));
+  const { status, body } = await ask<PlanShown | { error: string }>(
+    `/api/launches/${launchKey}/plan`, asJson(values.campaign === undefined ? {} : { campaign: values.campaign }),
+  );
   out(body);
   if (status === 400) return 2;
   if (status !== 200) return 5;
@@ -157,7 +163,9 @@ const APPLY_POLL_MS = 1000;
  * and waits for it to settle rather than leaving it running blind.
  */
 async function commandApply(args: string[]): Promise<number> {
-  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { confirm: { type: 'boolean' } } });
+  const { values, positionals } = parseArgs({
+    args, allowPositionals: true, options: { confirm: { type: 'boolean' }, campaign: { type: 'string' } },
+  });
   const launchKey = positionals[0];
   if (launchKey === undefined) fail(1, 'sa apply потребує launch key: sa apply ai-vadim-sperm-it --confirm');
   if (values.confirm !== true) {
@@ -165,7 +173,7 @@ async function commandApply(args: string[]): Promise<number> {
   }
   await ensureServer();
   const { status, body } = await ask<{ id: string | null; steps: number } | { error: string }>(
-    `/api/launches/${launchKey}/apply`, asJson({ confirm: true }),
+    `/api/launches/${launchKey}/apply`, asJson({ confirm: true, ...(values.campaign === undefined ? {} : { campaign: values.campaign }) }),
   );
   if (status === 400) { out(body); return 2; }
   if (status !== 200 || !('id' in body)) { out(body); return 5; }

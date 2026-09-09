@@ -24,6 +24,8 @@ import { SidePanel } from './SidePanel.tsx';
 import { autosaver, loadAutosave, type SaveState } from './store.ts';
 import { useSubtitleQueue } from './subtitles.ts';
 import { SubtitlesTab } from './SubtitlesTab.tsx';
+import { useApplyRun } from './launches.ts';
+import { LaunchesTab } from './LaunchesTab.tsx';
 import { Timeline } from './Timeline.tsx';
 import { useTopicBatch } from './topic-batch.ts';
 import { useTranslator } from './translate.ts';
@@ -39,8 +41,8 @@ const NUDGES: Record<string, { x: number; y: number } | undefined> = {
   ArrowDown: { x: 0, y: 1 },
 };
 
-/** The window's tabs. The editor is one; subtitles for a video from elsewhere is another. */
-type Tab = 'creatives' | 'subtitles';
+/** The window's tabs. The editor is one; subtitles for a video from elsewhere is another; the launches tree is the third. */
+type Tab = 'creatives' | 'subtitles' | 'launches';
 
 interface Cell {
   photo: Photo;
@@ -133,6 +135,8 @@ export function App() {
   // Lives here rather than in the tab so a run keeps going while the buyer is
   // back on the creatives, the same way an export does.
   const subtitles = useSubtitleQueue();
+  // An apply, likewise: started from the launches tab, watched from wherever the buyer is.
+  const applyRun = useApplyRun();
   // The keyboard handler is bound once; it reads the binding as it is now.
   const topicRef = useRef(topic);
   topicRef.current = topic;
@@ -308,6 +312,9 @@ export function App() {
           <button className={tab === 'subtitles' ? 'on' : ''} onClick={() => setTab('subtitles')}>
             Субтитри{subtitles.busy ? <span className="busy" title="Іде обробка" /> : null}
           </button>
+          <button className={tab === 'launches' ? 'on' : ''} onClick={() => setTab('launches')}>
+            Заливи{applyRun.running ? <span className="busy" title="Іде залив" /> : null}
+          </button>
         </nav>
         <div className="tools">
           <button
@@ -377,7 +384,9 @@ export function App() {
         </div>
       </header>
 
-      {tab === 'subtitles' ? (
+      {tab === 'launches' ? (
+        <LaunchesTab run={applyRun} />
+      ) : tab === 'subtitles' ? (
         <SubtitlesTab queue={subtitles} launchKey={topic.location?.launchKey ?? null} />
       ) : (
       <main>
