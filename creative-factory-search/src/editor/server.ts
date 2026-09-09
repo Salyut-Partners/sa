@@ -2,12 +2,14 @@
 // hold no knowledge of routes, and so a failed request always arrives as a
 // sentence rather than as a status code.
 import type { BatchPlan } from '../core/batch.ts';
+import type { ProjectFile } from '../core/serialize.ts';
 import type { LocaleId } from '../core/types.ts';
 import type { VoiceModel } from '../core/voice.ts';
 // Type-only, and therefore erased: the editor never bundles a line of server
 // code. Naming the server's own types is what stops the two ends of each of
 // these routes drifting apart without anything noticing.
 import type { JobFailure, JobStatus } from '../server/batch.ts';
+import type { BatchRead, BatchWritten } from '../server/batches.ts';
 import type { Translations, TranslatorId } from '../server/translate.ts';
 import type { Voice, VoiceCatalogue as ServerVoices } from '../server/tts.ts';
 
@@ -84,6 +86,26 @@ export const translate = (
   targets: readonly LocaleId[],
 ): Promise<TranslationResult> =>
   ask<TranslationResult>('/api/translate', asJson({ texts, targets }));
+
+// ---------------------------------------------------------------- launches --
+
+/** The launch keys under `launches_root`, as `sa launches` lists them. */
+export const fetchLaunches = (): Promise<string[]> =>
+  ask<{ launches: string[] }>('/api/launches').then(r => r.launches);
+
+export const fetchBatches = (launchKey: string): Promise<string[]> =>
+  ask<{ batches: string[] }>(`/api/launches/${launchKey}/batches`).then(r => r.batches);
+
+/** The batch as the server read it: pictures back inside, and which files were gone. */
+export const readBatch = (launchKey: string, batch: string): Promise<BatchRead> =>
+  ask<BatchRead>(`/api/launches/${launchKey}/batches/${batch}`);
+
+export const writeBatch = (launchKey: string, batch: string, file: ProjectFile): Promise<BatchWritten> =>
+  ask<BatchWritten>(`/api/launches/${launchKey}/batches/${batch}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(file),
+  });
 
 // ------------------------------------------------------------------ export --
 

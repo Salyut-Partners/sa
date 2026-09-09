@@ -94,6 +94,24 @@ live in `~/.config/sa/config.json`, outside the repository (`SA_CONFIG`
 points elsewhere for tests). Without the file everything defaults to
 `~/sa/launches` and no ticket.
 
+### A batch in its topic folder
+
+The panel's first group binds the project to `launches/<key>/batches/<batch>/`.
+Pick a topic, open a batch or save the one on screen under a new name, and
+from then on ⌘S and the header's Save write there: `project.json` with the
+pictures beside it in `photos/`, referenced by name rather than embedded. The
+split happens on the server, in `core/batch-folder.ts`; the editor sends and
+receives the same file it would download, so a `creatives.json` saved through
+the browser opens from the folder chooser too and comes out as files on the
+next save. A photo whose file has gone is left out on open and named, rather
+than opened blank.
+
+Two stores, one source. The autosave in IndexedDB is the browser's memory of
+the session; the folder is the batch. The header says which it is looking at
+— `key/batch · у теці` or `· не збережено в теку` — and after a reload it
+reads the folder back and compares before saying either. The `.json` button
+beside Save is the old path and stays as the fallback.
+
 ## Shape of the code
 
 Three build units and one rule.

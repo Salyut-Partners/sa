@@ -1,5 +1,7 @@
 // A project as a file. Images travel inside it as data URLs, so one .json is the
-// whole batch — no folder of loose photos to keep next to it.
+// whole batch when it goes through the browser. In a launch folder the same
+// file points at `photos/` instead — see `batch-folder.ts`, which splits and
+// rejoins it on either side of the disk.
 import { isLocaleId, newLocale } from './locales.ts';
 import { DEFAULT_CANVAS, DEFAULT_DURATION, DEFAULT_FPS, MAX_PHOTOS } from './project.ts';
 import { DEFAULT_MODEL_ID } from './voice.ts';

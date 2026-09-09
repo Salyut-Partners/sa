@@ -13,6 +13,7 @@ import {
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
 import { clickupState } from './clickup.ts';
 import { configPath, ensureLaunchesRoot, loadConfig } from './config.ts';
+import { listBatches, readBatch, writeBatch } from './batches.ts';
 import { createLaunch, existingLaunchKeys, RefusedError } from './launches.ts';
 import { isTrafficSource } from '../core/launch.ts';
 import { closeBrowser } from './render.ts';
@@ -119,6 +120,41 @@ app.post('/api/launches', async (req, res) => {
       console.error('launch failed:', (e as Error).message);
       res.status(500).json({ error: (e as Error).message });
     }
+  }
+});
+
+// ----------------------------------------------------------------- batches --
+
+/** A refusal is the buyer's to fix and comes back as a 400; anything else is ours. */
+function answerFailure(res: express.Response, e: unknown, what: string): void {
+  if (e instanceof RefusedError) res.status(400).json({ error: e.message });
+  else {
+    console.error(`${what}:`, (e as Error).message);
+    res.status(500).json({ error: (e as Error).message });
+  }
+}
+
+app.get('/api/launches/:key/batches', (req, res) => {
+  try {
+    res.json({ batches: listBatches(loadConfig(), req.params.key) });
+  } catch (e) {
+    answerFailure(res, e, 'batches');
+  }
+});
+
+app.get('/api/launches/:key/batches/:batch', (req, res) => {
+  try {
+    res.json(readBatch(loadConfig(), req.params.key, req.params.batch));
+  } catch (e) {
+    answerFailure(res, e, 'batch read');
+  }
+});
+
+app.put('/api/launches/:key/batches/:batch', (req, res) => {
+  try {
+    res.json(writeBatch(loadConfig(), req.params.key, req.params.batch, req.body));
+  } catch (e) {
+    answerFailure(res, e, 'batch write');
   }
 });
 

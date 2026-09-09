@@ -13,6 +13,7 @@ import {
 import { templateMoves } from '../core/templates.ts';
 import type { Project } from '../core/types.ts';
 import { BUTTON_STYLES, FONTS } from '../renderer/index.ts';
+import { BatchPanel } from './BatchPanel.tsx';
 import type { ExportRun } from './export.ts';
 import { ExportPanel } from './ExportPanel.tsx';
 import { FilePicker } from './FilePicker.tsx';
@@ -26,6 +27,7 @@ import { StyleLibrary } from './StylePreview.tsx';
 import { TemplateFields } from './TemplateFields.tsx';
 import { TemplateLibrary } from './TemplatePreview.tsx';
 import { TimingFields } from './TimingFields.tsx';
+import type { TopicBatch } from './topic-batch.ts';
 import type { Translator } from './translate.ts';
 import { VoicePanel } from './VoicePanel.tsx';
 
@@ -43,6 +45,7 @@ interface Props {
   translator: Translator;
   run: ExportRun;
   onExportOne: () => BatchPlan | null;
+  topic: TopicBatch;
 }
 
 const FONT_OPTIONS = Object.values(FONTS).map(f => ({ id: f.id, label: f.label }));
@@ -123,6 +126,8 @@ export function SidePanel(props: Props) {
 
   return (
     <aside className="side">
+      <BatchPanel topic={props.topic} hasPhotos={project.photos.length > 0} />
+
       <div className="group">
         <div className="lab">Фото</div>
         {/* Dropping is handled for the whole window, not just this target — so

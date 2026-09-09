@@ -23,6 +23,7 @@ import { fetchVoices, type VoiceCatalogue } from './server.ts';
 import { SidePanel } from './SidePanel.tsx';
 import { autosaver, loadAutosave, type SaveState } from './store.ts';
 import { Timeline } from './Timeline.tsx';
+import { useTopicBatch } from './topic-batch.ts';
 import { useTranslator } from './translate.ts';
 
 /** Width of one grid cell in CSS pixels — four of these fit the work area. */
@@ -119,6 +120,10 @@ export function App() {
 
   const run = useExport();
   const translator = useTranslator(project, dispatch);
+  const topic = useTopicBatch(project, replaceProject);
+  // The keyboard handler is bound once; it reads the binding as it is now.
+  const topicRef = useRef(topic);
+  topicRef.current = topic;
 
   const store = useMemo(() => autosaver(setSaveState), []);
   // Selection is not part of a saved project, so clicking through the batch must
@@ -210,6 +215,15 @@ export function App() {
         walk(e.shiftKey ? redo : undo);
         return;
       }
+      // ⌘S goes to the folder the batch is bound to, and to a download when it
+      // is not bound — the same two places the header button writes to.
+      if (meta && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (latest.current.photos.length === 0) return;
+        if (topicRef.current.location !== null) topicRef.current.save();
+        else saveProjectFile(latest.current);
+        return;
+      }
       if (meta && e.key.toLowerCase() === 'a' && latest.current.photos.length > 0) {
         e.preventDefault();
         dispatch({ type: 'selection/all' });
@@ -295,11 +309,23 @@ export function App() {
           </button>
           <FilePicker accept="application/json,.json" onPick={onOpenFile}>Відкрити</FilePicker>
           <button
-            onClick={() => saveProjectFile(project)}
-            disabled={project.photos.length === 0}
+            onClick={() => (topic.location === null ? saveProjectFile(project) : topic.save())}
+            disabled={project.photos.length === 0 || (topic.location !== null && !topic.dirty)}
+            title={topic.location === null
+              ? 'Завантажити creatives.json (⌘S)'
+              : `Зберегти в ${topic.location.launchKey}/${topic.location.batch} (⌘S)`}
           >
             Зберегти
           </button>
+          {topic.location === null ? null : (
+            <button
+              onClick={() => saveProjectFile(project)}
+              disabled={project.photos.length === 0}
+              title="Резервний шлях: файл через браузер"
+            >
+              .json
+            </button>
+          )}
           <button
             onClick={() => replaceProject(createProject())}
             disabled={project.photos.length === 0}
@@ -314,6 +340,12 @@ export function App() {
             ? 'не зберігається — збережіть у файл'
             : saveState === 'pending' ? 'збереження…' : 'збережено'}
         </div>
+        {topic.location === null ? null : (
+          <div className={'save-state' + (topic.dirty ? ' dirty' : '')}>
+            {topic.location.launchKey}/{topic.location.batch}
+            {topic.dirty ? ' · не збережено в теку' : ' · у теці'}
+          </div>
+        )}
         <div className="hint">
           {project.photos.length}/{MAX_PHOTOS} фото · {project.canvas.width} ×{' '}
           {project.canvas.height} · {project.fps} fps · {project.duration.toFixed(1)} с
@@ -403,6 +435,7 @@ export function App() {
           translator={translator}
           run={run}
           onExportOne={onExportOne}
+          topic={topic}
         />
       </main>
     </div>
