@@ -22,6 +22,8 @@ import { explainRefusal, openProjectFile, saveProjectFile } from './project-file
 import { fetchVoices, type VoiceCatalogue } from './server.ts';
 import { SidePanel } from './SidePanel.tsx';
 import { autosaver, loadAutosave, type SaveState } from './store.ts';
+import { useSubtitleQueue } from './subtitles.ts';
+import { SubtitlesTab } from './SubtitlesTab.tsx';
 import { Timeline } from './Timeline.tsx';
 import { useTopicBatch } from './topic-batch.ts';
 import { useTranslator } from './translate.ts';
@@ -36,6 +38,9 @@ const NUDGES: Record<string, { x: number; y: number } | undefined> = {
   ArrowUp: { x: 0, y: -1 },
   ArrowDown: { x: 0, y: 1 },
 };
+
+/** The window's tabs. The editor is one; subtitles for a video from elsewhere is another. */
+type Tab = 'creatives' | 'subtitles';
 
 interface Cell {
   photo: Photo;
@@ -55,6 +60,7 @@ export function App() {
   const [dropping, setDropping] = useState(false);
   const [catalogue, setCatalogue] = useState<VoiceCatalogue | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
+  const [tab, setTab] = useState<Tab>('creatives');
 
   const project = history.present;
 
@@ -121,6 +127,9 @@ export function App() {
   const run = useExport();
   const translator = useTranslator(project, dispatch);
   const topic = useTopicBatch(project, replaceProject);
+  // Lives here rather than in the tab so a run keeps going while the buyer is
+  // back on the creatives, the same way an export does.
+  const subtitles = useSubtitleQueue();
   // The keyboard handler is bound once; it reads the binding as it is now.
   const topicRef = useRef(topic);
   topicRef.current = topic;
@@ -276,14 +285,27 @@ export function App() {
   return (
     <div
       className={'app' + (dropping ? ' dropping' : '')}
-      // The whole window takes a batch, not just the panel's small target.
-      onDragEnter={e => { e.preventDefault(); setDropping(true); }}
+      // The whole window takes a batch, not just the panel's small target. On
+      // the subtitles tab the drop is the tab's, and it stops the event here.
+      onDragEnter={e => { e.preventDefault(); if (tab === 'creatives') setDropping(true); }}
       onDragOver={e => { e.preventDefault(); }}
       onDragLeave={e => { if (e.currentTarget === e.target) setDropping(false); }}
-      onDrop={e => { e.preventDefault(); setDropping(false); void onFiles(e.dataTransfer.files); }}
+      onDrop={e => {
+        e.preventDefault();
+        setDropping(false);
+        if (tab === 'creatives') void onFiles(e.dataTransfer.files);
+      }}
     >
       <header>
         <div className="brand"><span className="mark" /> Creative Factory Search</div>
+        <nav className="tabs" aria-label="Таби">
+          <button className={tab === 'creatives' ? 'on' : ''} onClick={() => setTab('creatives')}>
+            Креативи
+          </button>
+          <button className={tab === 'subtitles' ? 'on' : ''} onClick={() => setTab('subtitles')}>
+            Субтитри{subtitles.busy ? <span className="busy" title="Іде обробка" /> : null}
+          </button>
+        </nav>
         <div className="tools">
           <button
             className="theme"
@@ -352,6 +374,9 @@ export function App() {
         </div>
       </header>
 
+      {tab === 'subtitles' ? (
+        <SubtitlesTab queue={subtitles} launchKey={topic.location?.launchKey ?? null} />
+      ) : (
       <main>
         <section className="stage-area">
           {cells.length === 0 ? (
@@ -438,6 +463,7 @@ export function App() {
           topic={topic}
         />
       </main>
+      )}
     </div>
   );
 }

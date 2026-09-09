@@ -5,10 +5,17 @@
 
 ```sh
 git clone <repo> ~/sa
-cd ~/sa/creative-factory-search && npm install && npm run dev   # редактор і сервер
-cd ~/sa/subs && ./setup.sh && ./run.sh                            # субтитри
-~/sa/creative-factory-search/bin/sa new <launch-key>               # новий залив
+cd ~/sa && ./setup.sh                                   # усе одразу: Node, ffmpeg, субтитри
+cd creative-factory-search && npm run dev               # редактор на 5181, сервер на 5180
+creative-factory-search/bin/sa new <launch-key>         # новий залив
 ```
 
-Оновлення: `git pull`, потім `npm install` у `creative-factory-search` і
-`./setup.sh` у `subs`. Куди що класти й де що читати — `CLAUDE.md`.
+`setup.sh` ставить Node і ffmpeg, робить `npm ci` в редакторі й викликає
+`subs/setup.sh` — обидва ffmpeg, Python 3.11 з venv, статичний шрифт, теки
+`inbox/`. Його можна ганяти повторно: кожен крок пропускає те, що вже стоїть.
+
+Оновлення: `git pull && ./setup.sh`. Куди що класти й де що читати — `CLAUDE.md`.
+
+Субтитри працюють двома входами до одного пайплайна: таба «Субтитри» в
+редакторі (сервер сам викликає Python) і вотчер `cd subs && ./run.sh` над
+`inbox/<стиль>/` для тих, кому звичніше Finder.

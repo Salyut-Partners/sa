@@ -1,20 +1,24 @@
 // The export queue.
 //
 // A batch of a dozen photos across seven languages is hundreds of screenshots
-// and minutes of wall clock, so it cannot be an HTTP request the browser waits
-// on: posting one starts a job and gets an id back, and the editor watches it
-// while the user keeps working. Jobs live in this process and no further —
-// restarting the server loses whatever was in flight, which is the right trade
-// for a tool one person runs on their own machine.
+// and minutes of wall clock, so it runs as a job (see `jobs.ts`): posting one
+// starts it and gets an id back, and the editor watches it while the user
+// keeps working. This file is the work itself — speech, frames, mux — and
+// where the files go.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { groupDuration, type BatchGroup, type BatchItem, type Sound } from '../core/batch.ts';
 import { clamp } from '../core/canvas.ts';
 import { mux, probeDuration } from './ffmpeg.ts';
+import {
+  BadRequestError, createJob, explain, relativeFolder, settleJob, working, type Job,
+} from './jobs.ts';
 import { CancelledError, renderSpecToFile } from './render.ts';
 import { synthesize } from './tts.ts';
+
+export { BadRequestError, cancelJob, jobById, outputsOf, statusOf } from './jobs.ts';
+export type { JobFailure, JobState, JobStatus } from './jobs.ts';
 
 /** How many pages walk frames at once. More than three starves the encoders. */
 const CONCURRENCY = readConcurrency();
@@ -23,9 +27,6 @@ function readConcurrency(): number {
   const asked = Number(process.env['RENDER_CONCURRENCY'] ?? 2);
   return Number.isFinite(asked) ? clamp(Math.round(asked), 1, 4) : 2;
 }
-
-/** How many finished jobs are kept for their archive before being swept. */
-const KEEP_JOBS = 6;
 
 /**
  * Where the files go when they go to a launch rather than to a download:
@@ -48,74 +49,6 @@ export interface BatchRequest {
 /** Turns a campaign name into the folder its creatives go to, or throws for the buyer. */
 export type FolderResolver = (launchKey: string, campaign: string) => string;
 
-export type JobState = 'running' | 'done' | 'cancelled' | 'failed';
-
-export interface JobFailure {
-  name: string;
-  message: string;
-}
-
-export interface JobStatus {
-  id: string;
-  state: JobState;
-  /** Files finished, of files planned. */
-  done: number;
-  total: number;
-  /** What is being made right now, by name — where a failure would be. */
-  current: string;
-  errors: JobFailure[];
-  /** Seconds since it started, and the guess at how many are left. */
-  elapsed: number;
-  remaining: number | null;
-  /** Whether there is anything to download. Never for a job that wrote to folders. */
-  ready: boolean;
-  /** The campaign folders files were written to, relative to the launch, when they were. */
-  folders: string[];
-}
-
-interface Output {
-  name: string;
-  file: string;
-}
-
-interface Job {
-  id: string;
-  state: JobState;
-  total: number;
-  /**
-   * What is being worked on right now — a set, because several workers are.
-   * One field would name whichever of them wrote to it last, which is the one
-   * question a user watching a stalled export is not asking.
-   */
-  active: Set<string>;
-  errors: JobFailure[];
-  outputs: Output[];
-  startedAt: number;
-  finishedAt: number | null;
-  cancelled: boolean;
-  /**
-   * Whether the workers have actually stopped. Cancelling flips the state at
-   * once so the user sees it, but a render in flight runs on to its next frame
-   * check — and a job whose dir is deleted underneath it would fail loudly on
-   * its way out.
-   */
-  settled: boolean;
-  dir: string;
-  /** Everything on disk this job made, so cancelling can clean up after itself. */
-  scratch: string[];
-  /**
-   * Archive name → the file it is written as, for a job going to a launch.
-   * Null is a download: everything stays in `dir` until it is fetched.
-   */
-  targets: Map<string, string> | null;
-  /** Campaign folders that received at least one file, as `campaigns/<name>/creatives`. */
-  folders: Set<string>;
-}
-
-const jobs = new Map<string, Job>();
-
-export class BadRequestError extends Error {}
-
 /**
  * Start an export. Returns at once with the id to watch it by — the work runs on
  * after this function has answered.
@@ -137,29 +70,9 @@ export function startBatch(request: unknown, origin: string, resolve: FolderReso
       targets.set(name, path.join(folder, name));
     }
   }
-  const id = crypto.randomUUID();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cfs-batch-'));
-  const job: Job = {
-    id,
-    state: 'running',
-    total: groups.reduce((sum, g) => sum + g.items.length, 0),
-    active: new Set(),
-    errors: [],
-    outputs: [],
-    startedAt: Date.now(),
-    finishedAt: null,
-    cancelled: false,
-    settled: false,
-    dir,
-    scratch: [],
-    targets,
-    folders: new Set(),
-  };
-  jobs.set(id, job);
-  sweep();
-
+  const job = createJob(groups.reduce((sum, g) => sum + g.items.length, 0), targets, 'cfs-batch-');
   void run(job, groups, duration, fitToVoice, origin);
-  return id;
+  return job.id;
 }
 
 function validate(request: unknown): BatchRequest {
@@ -206,56 +119,6 @@ function validate(request: unknown): BatchRequest {
   return { groups, duration, fitToVoice: body?.fitToVoice !== false, ...(output !== undefined ? { output } : {}) };
 }
 
-export const jobById = (id: string): Job | undefined => jobs.get(id);
-
-export function statusOf(job: Job): JobStatus {
-  const done = job.outputs.length + job.errors.length;
-  const elapsed = ((job.finishedAt ?? Date.now()) - job.startedAt) / 1000;
-  return {
-    id: job.id,
-    state: job.state,
-    done,
-    total: job.total,
-    current: [...job.active].join(' · '),
-    errors: job.errors,
-    elapsed,
-    // Nothing to extrapolate from until something has finished, and saying
-    // "about a minute" before the first frame is a guess dressed as a number.
-    remaining: done === 0 || job.state !== 'running'
-      ? null
-      : (elapsed / done) * (job.total - done),
-    ready: job.targets === null && job.outputs.length > 0 && job.state !== 'running',
-    folders: [...job.folders].sort(),
-  };
-}
-
-/** What the archive holds, or nothing while the job is still making it. */
-export const outputsOf = (job: Job): Output[] => (job.state === 'running' ? [] : job.outputs);
-
-export function cancelJob(job: Job): void {
-  if (job.state !== 'running') return;
-  job.cancelled = true;
-  job.state = 'cancelled';
-  job.finishedAt = Date.now();
-  job.active.clear();
-}
-
-/** Drop a job and everything it left on disk. */
-export function forgetJob(job: Job): void {
-  jobs.delete(job.id);
-  fs.promises.rm(job.dir, { recursive: true, force: true }).catch(() => {});
-}
-
-/**
- * Keep the last few jobs for their archives; the rest are disk nobody will ask
- * for. Only settled ones: a cancelled job reads as finished the instant it is
- * asked to stop, but its workers are still writing into that directory.
- */
-function sweep(): void {
-  const done = [...jobs.values()].filter(j => j.settled);
-  for (const job of done.slice(0, Math.max(0, done.length - KEEP_JOBS))) forgetJob(job);
-}
-
 // ------------------------------------------------------------------- work --
 
 interface Clip {
@@ -282,41 +145,15 @@ async function run(
     }
   };
 
+  let crashed: Error | null = null;
   try {
     await Promise.all(
       Array.from({ length: Math.min(CONCURRENCY, groups.length) }, () => worker()),
     );
-    if (!job.cancelled) {
-      job.state = job.outputs.length === 0 && job.errors.length > 0 ? 'failed' : 'done';
-    }
   } catch (e) {
-    // Only something outside a single creative reaches here — the browser
-    // failing to launch, ffmpeg missing. A creative's own failure is recorded
-    // against it and the rest of the batch carries on.
-    if (!job.cancelled) {
-      job.state = 'failed';
-      job.errors.push({ name: '—', message: (e as Error).message });
-    }
-  } finally {
-    job.active.clear();
-    job.finishedAt ??= Date.now();
-    job.settled = true;
-    for (const file of job.scratch) fs.promises.unlink(file).catch(() => {});
-    job.scratch = [];
+    crashed = e as Error;
   }
-}
-
-/**
- * Run one step with its name on the board, and take it off again however the
- * step ends. This is what keeps `current` honest across parallel workers.
- */
-async function working<T>(job: Job, name: string, step: () => Promise<T>): Promise<T> {
-  job.active.add(name);
-  try {
-    return await step();
-  } finally {
-    job.active.delete(name);
-  }
+  settleJob(job, crashed);
 }
 
 interface GroupContext {
@@ -415,16 +252,3 @@ async function speak(
   return { file, seconds: await probeDuration(file) };
 }
 
-/** `campaigns/<name>/creatives` out of a full path, for the panel to name. */
-const relativeFolder = (file: string): string =>
-  path.dirname(file).split(path.sep).slice(-3).join('/');
-
-/**
- * A failure in the words the panel will show.
- *
- * Every error this pipeline can raise already carries a sentence written for the
- * user — a missing key, a missing ffmpeg, a spec that will not render — so the
- * message is the whole of it, and a stack trace would only be noise in a list of
- * creatives that did not come out.
- */
-const explain = (e: unknown): string => (e as Error)?.message || String(e);

@@ -11,10 +11,11 @@ import type { VoiceModel } from '../core/voice.ts';
 // these routes drifting apart without anything noticing.
 import type { BatchOutput, JobFailure, JobStatus } from '../server/batch.ts';
 import type { BatchRead, BatchWritten } from '../server/batches.ts';
+import type { SubsState } from '../server/subs.ts';
 import type { Translations, TranslatorId } from '../server/translate.ts';
 import type { Voice, VoiceCatalogue as ServerVoices } from '../server/tts.ts';
 
-export type { BatchOutput, JobFailure, JobStatus, Voice };
+export type { BatchOutput, JobFailure, JobStatus, SubsState, Voice };
 
 /**
  * The sentence behind a failed response.
@@ -129,11 +130,39 @@ export const startBatch = (
     groups: plan.groups, duration, fitToVoice, ...(output === undefined ? {} : { output }),
   }));
 
-export const batchStatus = (id: string): Promise<JobStatus> =>
-  ask<JobStatus>('/api/batch/' + id);
+/** Any job's progress — an export or a subtitle run; they share the registry. */
+export const jobStatus = (id: string): Promise<JobStatus> =>
+  ask<JobStatus>('/api/jobs/' + id);
 
-export const cancelBatch = (id: string): Promise<JobStatus> =>
-  ask<JobStatus>('/api/batch/' + id, { method: 'DELETE' });
+export const cancelJob = (id: string): Promise<JobStatus> =>
+  ask<JobStatus>('/api/jobs/' + id, { method: 'DELETE' });
+
+// --------------------------------------------------------------- subtitles --
+
+/** Whether the machine can burn subtitles, and the styles the pipeline offers. */
+export const fetchSubtitles = (): Promise<SubsState> => ask<SubsState>('/api/subtitles');
+
+export interface SubtitleTarget {
+  style: string;
+  /** A language code, or `auto`. */
+  lang: string;
+  /** A campaign folder to write into, or null for the pipeline's own output folder. */
+  campaign: { launchKey: string; campaign: string } | null;
+}
+
+/** Upload one video and start subtitling it. Answers once the upload is in. */
+export function startSubtitles(file: File, target: SubtitleTarget): Promise<{ id: string }> {
+  const query = new URLSearchParams({ name: file.name, style: target.style, lang: target.lang });
+  if (target.campaign !== null) {
+    query.set('launchKey', target.campaign.launchKey);
+    query.set('campaign', target.campaign.campaign);
+  }
+  return ask<{ id: string }>('/api/subtitles?' + query.toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: file,
+  });
+}
 
 /**
  * Fetch the result and hand it to the browser to save.
@@ -142,7 +171,7 @@ export const cancelBatch = (id: string): Promise<JobStatus> =>
  * which, and the name it sends is the name the file gets.
  */
 export async function downloadBatch(id: string): Promise<number> {
-  const response = await fetch(`/api/batch/${id}/download`);
+  const response = await fetch(`/api/jobs/${id}/download`);
   if (!response.ok) throw await refusal(response);
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);

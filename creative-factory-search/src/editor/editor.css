@@ -69,6 +69,36 @@ header {
 .tools .theme { width: 34px; padding: 8px 0; text-align: center; font-size: 15px; line-height: 1; }
 
 .brand { font-weight: 700; letter-spacing: .2px; display: flex; align-items: center; gap: 9px; }
+
+/* The window's tabs: text, with the active one underlined in the accent. */
+.tabs { display: flex; gap: 2px; margin-left: 14px; align-self: stretch; }
+.tabs button {
+  background: none; border: 0; border-radius: 0; padding: 0 10px;
+  color: var(--muted); border-bottom: 2px solid transparent;
+}
+.tabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
+.tabs button:hover:not(:disabled) { color: var(--ink); }
+.tabs .busy {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); margin-left: 6px; vertical-align: middle;
+}
+
+/* The subtitles tab: a list where the grid would be, and the same panel. */
+.subs { flex: 1; display: flex; min-height: 0; }
+.subs-stage { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; }
+.subs-stage.dropping { outline: 2px dashed var(--accent); outline-offset: -8px; }
+.subs-stage .empty { flex: 1; }
+.subs-list { display: flex; flex-direction: column; gap: 8px; max-width: 720px; }
+.subs-row {
+  display: grid; grid-template-columns: 1fr auto; column-gap: 12px; align-items: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 10px 14px;
+}
+.subs-row .nm { font-weight: 600; grid-column: 1; }
+.subs-row .note, .subs-row .error { grid-column: 1; margin-top: 2px; min-height: 0; }
+.subs-row button { grid-column: 2; grid-row: 1 / span 2; }
+.subs-row.running { border-color: var(--sel); }
+.subs-row.bad { border-color: var(--danger); }
+.subs code, .side code { font-size: 11px; background: var(--well); padding: 1px 4px; border-radius: 4px; }
 .mark { width: 14px; height: 14px; border-radius: 4px; background: var(--accent); }
 .spacer { flex: 1; }
 .tools { display: flex; gap: 6px; margin-left: 10px; }

@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BatchPlan } from '../core/batch.ts';
 import {
-  batchStatus, cancelBatch, downloadBatch, startBatch, type BatchOutput, type JobStatus,
+  cancelJob, downloadBatch, jobStatus, startBatch, type BatchOutput, type JobStatus,
 } from './server.ts';
 
 /** How often to ask. Often enough to feel live, rarely enough to be free. */
@@ -52,7 +52,7 @@ export function useExport(): ExportRun {
   useEffect(() => {
     if (!running || id === '') return;
     const timer = setInterval(() => {
-      void batchStatus(id)
+      void jobStatus(id)
         .then(next => {
           setStatus(next);
           if (next.state === 'running' || delivered.current) return;
@@ -104,7 +104,7 @@ export function useExport(): ExportRun {
   const cancel = useCallback(() => {
     if (id === '') return;
     delivered.current = true;
-    void cancelBatch(id)
+    void cancelJob(id)
       .then(next => {
         setStatus(next);
         setNote(summarise(next));

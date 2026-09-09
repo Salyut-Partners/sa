@@ -62,6 +62,18 @@ walks it saved. One creative that fails leaves the rest of the batch alone and
 lands in a list of what did not come out. What comes back is an mp4 for one
 creative and a zip named by photo and language for a batch.
 
+### Subtitles for a video from elsewhere
+
+The header has a second tab. Drop a video from a designer, a phone or Grok
+into it, pick a style, a language and a folder — a campaign of a topic, or the
+pipeline's own `subs/output/` — and it goes through the same Python pipeline
+the `inbox/<style>/` watcher feeds, one file at a time, as a job on the same
+board as an export: a line per file with the pipeline's own stages, a cancel,
+and the error under the file that failed. The six styles are read off the
+pipeline's `--list-styles`, never listed here, and its `--check` says what the
+machine is missing before the first file rather than on it. The mono-repo's
+`setup.sh` installs the lot.
+
 ## Running it
 
 ```sh
@@ -144,8 +156,13 @@ Three build units and one rule.
 - **`src/server`** — Express, Puppeteer, ffmpeg. Bundles the render target from
   source at startup, so the headless page can never drift from the editor. An
   export is a job in memory: the editor posts a plan, gets an id, and watches it.
-  ElevenLabs and the translators sit behind two thin modules; a missing key is a
-  state each of them explains rather than an error the server starts with.
+  `jobs.ts` is the registry — state, progress, cancel, sweep — and `batch.ts`
+  and `subs.ts` are two kinds of work on it, so a subtitle run and an export
+  are watched through the same routes. `batches.ts` is the launch folder as
+  the editor reads and writes it. ElevenLabs and the translators sit behind
+  two thin modules; a missing key is a state each of them explains rather than
+  an error the server starts with. `subs.ts` runs `../subs` as a subprocess
+  and knows nothing about styles beyond what the pipeline prints.
 
 The rule: **the preview and the export call the same renderer.** There is no
 second drawing path. Anything time-dependent inside the renderer must be derived

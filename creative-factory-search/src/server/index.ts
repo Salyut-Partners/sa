@@ -13,10 +13,12 @@ import {
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
 import { clickupState } from './clickup.ts';
 import { configPath, ensureLaunchesRoot, loadConfig } from './config.ts';
-import { creativesFolder, listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
+import { listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
 import { createLaunch, existingLaunchKeys, RefusedError } from './launches.ts';
 import { isTrafficSource } from '../core/launch.ts';
 import { closeBrowser } from './render.ts';
+import { creativesFolder as campaignFolder } from './batches.ts';
+import { startSubtitles, subsState, SUBS_OUTPUT } from './subs.ts';
 import { listVoices } from './tts.ts';
 import { NoTranslatorError, translateAll, translator } from './translate.ts';
 
@@ -171,7 +173,7 @@ app.put('/api/launches/:key/batches/:batch', (req, res) => {
 app.post('/api/batch', (req, res) => {
   try {
     const config = loadConfig();
-    res.json({ id: startBatch(req.body, ORIGIN, (key, campaign) => creativesFolder(config, key, campaign)) });
+    res.json({ id: startBatch(req.body, ORIGIN, (key, campaign) => campaignFolder(config, key, campaign)) });
   } catch (e) {
     if (e instanceof BadRequestError || e instanceof RefusedError) res.status(400).json({ error: e.message });
     else {
@@ -181,13 +183,44 @@ app.post('/api/batch', (req, res) => {
   }
 });
 
-app.get('/api/batch/:id', (req, res) => {
+// -------------------------------------------------------------- subtitles --
+
+app.get('/api/subtitles', async (_req, res) => {
+  res.json(await subsState());
+});
+
+/**
+ * One video in, one job out. The body is the file itself, streamed to disk;
+ * what to do with it rides in the query, because a multipart parser is a
+ * dependency for the sake of five short strings.
+ */
+app.post('/api/subtitles', async (req, res) => {
+  const q = req.query as Record<string, string | undefined>;
+  const name = q['name'] ?? '';
+  const style = q['style'] ?? '';
+  const lang = q['lang'] && q['lang'] !== 'auto' ? q['lang'] : null;
+  try {
+    if (name === '' || style === '') throw new RefusedError('потрібні name і style');
+    const dest = q['launchKey'] && q['campaign']
+      ? campaignFolder(loadConfig(), q['launchKey'], q['campaign'])
+      : SUBS_OUTPUT;
+    res.json({ id: await startSubtitles(req, { name, style, lang, dest }) });
+  } catch (e) {
+    // The body may still be arriving; it is drained so the client sees the answer.
+    req.resume();
+    answerFailure(res, e, 'subtitles');
+  }
+});
+
+// ------------------------------------------------------------------- jobs --
+
+app.get('/api/jobs/:id', (req, res) => {
   const job = jobById(req.params.id);
   if (job === undefined) res.status(404).json({ error: 'задачі більше немає' });
   else res.json(statusOf(job));
 });
 
-app.delete('/api/batch/:id', (req, res) => {
+app.delete('/api/jobs/:id', (req, res) => {
   const job = jobById(req.params.id);
   if (job === undefined) {
     res.status(404).json({ error: 'задачі більше немає' });
@@ -201,7 +234,7 @@ app.delete('/api/batch/:id', (req, res) => {
  * The result. One file comes back as itself rather than as a zip holding one
  * thing — checking a single creative should end in a video you can play.
  */
-app.get('/api/batch/:id/download', (req, res) => {
+app.get('/api/jobs/:id/download', (req, res) => {
   const job = jobById(req.params.id);
   if (job === undefined) {
     res.status(404).json({ error: 'задачі більше немає' });

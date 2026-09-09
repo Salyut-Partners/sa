@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Транскрибує відео через mlx-whisper і вшиває стилізовані субтитри."""
 
+# Анотації лишаються текстом: `--list-styles` має працювати й із системним
+# Python 3.9, до того як setup.sh поставив venv.
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -584,17 +588,66 @@ def process(video: Path, output: Path, lang: str | None, style_name: str,
     return output
 
 
+def style_catalogue() -> dict:
+    """Стилі так, як їх показує таба й вотчер: один словник для всіх входів.
+
+    Лише те, що потрібно, щоб вибрати стиль: назва, скільки слів на екран,
+    чи є підсвітка. Параметри вигляду лишаються тут, у STYLES."""
+    return {
+        "default": DEFAULT_STYLE,
+        "styles": [
+            {
+                "id": name,
+                "words_per_chunk": style["words_per_chunk"],
+                "highlight": bool(style["highlight"]),
+            }
+            for name, style in STYLES.items()
+        ],
+    }
+
+
+def check_setup() -> dict:
+    """Чого бракує на цій машині, реченнями для людини. Без винятків назовні:
+    сервер показує це в панелі замість того, щоб падати на першому файлі."""
+    missing: list[str] = []
+    deps = missing_dependencies()
+    if deps:
+        missing.append("у venv немає " + ", ".join(deps) + " — запусти ./setup.sh")
+    try:
+        find_ffmpeg()
+    except RuntimeError as exc:
+        missing.append(str(exc).replace("\n", " "))
+    font = FONTS_DIR / "MontserratSubs.ttf"
+    if not font.exists():
+        missing.append(f"немає {font.name} у technical/fonts — запусти ./setup.sh")
+    return {"ok": not missing, "missing": missing}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Субтитри у відео через mlx-whisper + ffmpeg")
-    parser.add_argument("video", type=Path)
+    parser.add_argument("video", type=Path, nargs="?")
     parser.add_argument("-o", "--output", type=Path)
     parser.add_argument("--lang", default=None, help="en, uk, ru… (за замовчуванням — автовизначення)")
-    parser.add_argument("--style", default="karaoke", choices=sorted(STYLES))
+    parser.add_argument("--style", default=DEFAULT_STYLE, choices=sorted(STYLES))
     parser.add_argument("--font", default=None,
                         help="перекрити шрифт стилю (за замовчуванням — той, що в стилі)")
     parser.add_argument("--keep-ass", action="store_true", help="зберегти .ass поруч із відео")
+    parser.add_argument("--list-styles", action="store_true",
+                        help="надрукувати стилі як JSON і вийти (працює без venv)")
+    parser.add_argument("--check", action="store_true",
+                        help="перевірити оточення і надрукувати JSON: чого бракує")
     args = parser.parse_args()
 
+    if args.list_styles:
+        print(json.dumps(style_catalogue(), ensure_ascii=False))
+        return 0
+    if args.check:
+        result = check_setup()
+        print(json.dumps(result, ensure_ascii=False))
+        return 0 if result["ok"] else 2
+
+    if args.video is None:
+        parser.error("потрібен файл відео (або --list-styles / --check)")
     if not args.video.exists():
         print(f"Немає файлу: {args.video}", file=sys.stderr)
         return 1
