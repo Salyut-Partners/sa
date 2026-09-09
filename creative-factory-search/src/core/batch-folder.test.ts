@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  decodeDataUrl, isBatchName, isPhotoRef, joinPhotos, splitPhotos, PHOTOS_DIR,
+  decodeDataUrl, isFolderName, isPhotoRef, joinPhotos, mimeFor, sameProjectFile, splitPhotos, PHOTOS_DIR,
 } from './batch-folder.ts';
 import { apply, createProject } from './project.ts';
 import { fromFile, toFile, type ProjectFile } from './serialize.ts';
@@ -19,20 +19,29 @@ function sample(): Project {
   });
 }
 
-describe('isBatchName', () => {
+describe('isFolderName', () => {
   it('takes a folder name a shell and a URL leave alone', () => {
-    expect(isBatchName('batch-1')).toBe(true);
-    expect(isBatchName('seniors_nl.v2')).toBe(true);
+    expect(isFolderName('batch-1')).toBe(true);
+    expect(isFolderName('seniors_nl.v2')).toBe(true);
   });
 
   it('refuses paths, spaces, capitals and hidden folders', () => {
-    expect(isBatchName('../x')).toBe(false);
-    expect(isBatchName('a/b')).toBe(false);
-    expect(isBatchName('my batch')).toBe(false);
-    expect(isBatchName('Batch')).toBe(false);
-    expect(isBatchName('.hidden')).toBe(false);
-    expect(isBatchName('')).toBe(false);
-    expect(isBatchName(3)).toBe(false);
+    expect(isFolderName('../x')).toBe(false);
+    expect(isFolderName('a/b')).toBe(false);
+    expect(isFolderName('my batch')).toBe(false);
+    expect(isFolderName('Batch')).toBe(false);
+    expect(isFolderName('.hidden')).toBe(false);
+    expect(isFolderName('')).toBe(false);
+    expect(isFolderName(3)).toBe(false);
+  });
+});
+
+describe('mimeFor', () => {
+  it('reads a picture file back as the type it was written for', () => {
+    expect(mimeFor('.jpg')).toBe('image/jpeg');
+    expect(mimeFor('jpeg')).toBe('image/jpeg');
+    expect(mimeFor('.PNG')).toBe('image/png');
+    expect(mimeFor('.txt')).toBe('application/octet-stream');
   });
 });
 
@@ -135,6 +144,23 @@ describe('joinPhotos', () => {
     expect(asked).toBe(0);
     expect(joined.missing).toEqual([]);
     expect(fromFile(joined.file).ok).toBe(true);
+  });
+
+  it('reads as the same batch after a round trip, whatever the picture called its type', () => {
+    // `image/jpg` is not a registered type, but browsers hand it over; it is
+    // written as .jpg and read back as image/jpeg, and that must not count as
+    // an unsaved change.
+    const project = apply(createProject(), {
+      type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:image/jpg;base64,/9j/AAAA' }],
+    });
+    const { file, photos } = splitPhotos(toFile(project));
+    const back = joinPhotos(file, path => {
+      const found = photos.find(p => p.path === path);
+      return found === undefined ? null : `data:${mimeFor(path.split('.').pop()!)};base64,${found.base64}`;
+    });
+    expect(sameProjectFile(toFile(project), back.file)).toBe(true);
+    const edited = apply(project, { type: 'project/patch', patch: { duration: 12 } });
+    expect(sameProjectFile(toFile(edited), back.file)).toBe(false);
   });
 
   it('hands anything that is not a project through untouched, for fromFile to refuse', () => {

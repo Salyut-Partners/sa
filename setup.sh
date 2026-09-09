@@ -41,17 +41,26 @@ fi
 # 3. ffmpeg з PATH: рендер і мукс редактора, читання звуку для Whisper.
 brew_need ffmpeg
 
-# 4. Залежності редактора. `npm ci` тримає lock-файл, тож повторний запуск
-#    нічого не міняє, якщо нічого не мінялось.
-info "npm ci у creative-factory-search…"
-(cd creative-factory-search && npm ci --no-audit --no-fund --loglevel=error) || die "npm ci не вдався"
+# 4. Залежності редактора. `npm install` за lock-файлом: коли все вже стоїть,
+#    він нічого не переставляє — на відміну від `npm ci`, який щоразу зносить
+#    node_modules.
+info "npm install у creative-factory-search…"
+(cd creative-factory-search && npm install --no-audit --no-fund --loglevel=error) || die "npm install не вдався"
 ok "creative-factory-search: залежності на місці"
 
 # 5. Субтитри: свій скрипт знає свої граблі — обидва ffmpeg, python@3.11,
-#    venv, статичний Montserrat, теки inbox/. Він теж ідемпотентний.
+#    venv, статичний Montserrat, теки inbox/. Він теж ідемпотентний. Його
+#    невдача (Intel Mac, скажімо) не валить установку редактора: таба
+#    «Субтитри» сама скаже, чого бракує.
 echo
-[ -x subs/setup.sh ] || die "немає subs/setup.sh — субтитри не встановити"
-subs/setup.sh || die "установка субтитрів не пройшла"
+SUBS_OK=1
+if [ -x subs/setup.sh ]; then
+  subs/setup.sh || SUBS_OK=0
+else
+  printf "  \033[33m!\033[0m %s\n" "немає subs/setup.sh — субтитри не встановлено"
+  SUBS_OK=0
+fi
+[ "$SUBS_OK" = 1 ] || printf "\n  \033[33m!\033[0m %s\n" "субтитри не встановились; редактор і залив працюють без них"
 
 # 6. Конфігурація байера — поза git. Не перезаписується, лише підказка.
 echo

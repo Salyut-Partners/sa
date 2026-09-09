@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LOCALE_IDS, LOCALE_NAMES } from '../core/locales.ts';
 import type { CampaignInfo } from '../core/placement.ts';
 import { FilePicker } from './FilePicker.tsx';
@@ -38,6 +38,8 @@ export function SubtitlesTab({ queue, launchKey }: Props) {
   const [campaigns, setCampaigns] = useState<CampaignInfo[]>([]);
   const [campaign, setCampaign] = useState(NOWHERE);
   const [dropping, setDropping] = useState(false);
+  /** The bound topic's first campaign is offered once; after that the choice is the buyer's. */
+  const defaulted = useRef(false);
 
   useEffect(() => {
     fetchSubtitles()
@@ -56,7 +58,10 @@ export function SubtitlesTab({ queue, launchKey }: Props) {
       .then(list => {
         if (stale) return;
         setCampaigns(list);
-        setCampaign(current => (list.some(c => c.name === current) ? current : NOWHERE));
+        const first = list[0]?.name;
+        const offer = !defaulted.current && launch === launchKey && first !== undefined;
+        defaulted.current = true;
+        setCampaign(current => (list.some(c => c.name === current) ? current : offer ? first : NOWHERE));
       })
       .catch(() => { if (!stale) setCampaigns([]); });
     return () => { stale = true; };

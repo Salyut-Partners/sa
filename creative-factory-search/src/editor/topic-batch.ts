@@ -9,7 +9,7 @@
 // knows which folder the memory belongs to, and the first thing done after one
 // is to read the folder back and compare, so the header never guesses.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isBatchName } from '../core/batch-folder.ts';
+import { isFolderName, sameProjectFile } from '../core/batch-folder.ts';
 import { fromFile, toFile } from '../core/serialize.ts';
 import type { Project } from '../core/types.ts';
 import { explainRefusal } from './project-file.ts';
@@ -27,7 +27,7 @@ function readLocation(): BatchLocation | null {
     const stored: unknown = JSON.parse(localStorage.getItem(KEY) ?? 'null');
     if (typeof stored !== 'object' || stored === null) return null;
     const { launchKey, batch } = stored as Record<string, unknown>;
-    return typeof launchKey === 'string' && isBatchName(batch) ? { launchKey, batch } : null;
+    return typeof launchKey === 'string' && isFolderName(batch) ? { launchKey, batch } : null;
   } catch {
     return null;
   }
@@ -65,8 +65,8 @@ const fingerprint = (project: Project): Fingerprint => ({
   ].join('/'),
 });
 
-const same = (a: Fingerprint | null, b: Fingerprint): boolean =>
-  a !== null && a.photos === b.photos && a.locales === b.locales && a.scalars === b.scalars;
+const same = (a: Fingerprint | 'differs' | null, b: Fingerprint): boolean =>
+  a !== null && a !== 'differs' && a.photos === b.photos && a.locales === b.locales && a.scalars === b.scalars;
 
 export interface TopicBatch {
   location: BatchLocation | null;
@@ -91,9 +91,15 @@ export interface TopicBatch {
   unbind: () => void;
 }
 
+/**
+ * @param restored whether the autosave has been read back, so that the
+ * project on screen is the one to compare the folder against — before that
+ * it is the empty project the editor starts with.
+ */
 export function useTopicBatch(
   project: Project,
   replaceProject: (next: Project) => void,
+  restored: boolean,
 ): TopicBatch {
   const [location, setLocation] = useState<BatchLocation | null>(readLocation);
   const [launches, setLaunches] = useState<string[]>([]);
@@ -103,8 +109,11 @@ export function useTopicBatch(
   const [note, setNote] = useState('');
   const [failed, setFailed] = useState(false);
   const [offline, setOffline] = useState('');
-  /** What the folder holds, as last read or written. Null means not compared yet. */
-  const [saved, setSaved] = useState<Fingerprint | null>(null);
+  /**
+   * What the folder holds, as last read or written; `'differs'` when it was
+   * read back after a reload and did not match; null while not compared yet.
+   */
+  const [saved, setSaved] = useState<Fingerprint | 'differs' | null>(null);
 
   const latest = useRef(project);
   latest.current = project;
@@ -133,23 +142,21 @@ export function useTopicBatch(
   // localStorage; whether they agree with the folder is a question for the
   // folder. Asked once, and only while nothing has been compared yet.
   useEffect(() => {
-    if (location === null || saved !== null) return;
+    if (!restored || location === null || saved !== null) return;
     let stale = false;
     readBatch(location.launchKey, location.batch)
       .then(read => {
         if (stale) return;
         const current = latest.current;
-        const onDisk = JSON.stringify(read.file);
-        const here = JSON.stringify(toFile(current));
-        setSaved(onDisk === here ? fingerprint(current) : { photos: [], locales: [], scalars: '' });
+        setSaved(sameProjectFile(toFile(current), read.file) ? fingerprint(current) : 'differs');
       })
       .catch(e => {
         if (stale) return;
         say(`Пачку ${location.launchKey}/${location.batch} не вдалось перечитати: ${(e as Error).message}`, true);
-        setSaved({ photos: [], locales: [], scalars: '' });
+        setSaved('differs');
       });
     return () => { stale = true; };
-  }, [location, saved, say]);
+  }, [restored, location, saved, say]);
 
   const browse = useCallback((key: string) => {
     setLaunchKey(key);
@@ -157,7 +164,7 @@ export function useTopicBatch(
   }, []);
 
   const open = useCallback((batch: string) => {
-    if (launchKey === '' || !isBatchName(batch)) return;
+    if (launchKey === '' || !isFolderName(batch)) return;
     setBusy(true);
     readBatch(launchKey, batch)
       .then(read => {
@@ -188,7 +195,7 @@ export function useTopicBatch(
       say('Спершу оберіть топік і назву пачки.', true);
       return;
     }
-    if (!isBatchName(target.batch)) {
+    if (!isFolderName(target.batch)) {
       say('Назва пачки: малі літери, цифри, крапки й дефіси — наприклад batch-1.', true);
       return;
     }

@@ -61,6 +61,8 @@ export function App() {
   const [catalogue, setCatalogue] = useState<VoiceCatalogue | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [tab, setTab] = useState<Tab>('creatives');
+  /** Whether the autosave has been read back — what is on screen before that is nobody's work. */
+  const [restored, setRestored] = useState(false);
 
   const project = history.present;
 
@@ -117,6 +119,7 @@ export function App() {
   useEffect(() => {
     void loadAutosave().then(saved => {
       if (saved !== null) setHistory(historyOf(saved));
+      setRestored(true);
     });
     // Asked once. Which voices an account has does not change while the editor
     // is open, and a failure here is not a reason to stop editing — the panel
@@ -126,7 +129,7 @@ export function App() {
 
   const run = useExport();
   const translator = useTranslator(project, dispatch);
-  const topic = useTopicBatch(project, replaceProject);
+  const topic = useTopicBatch(project, replaceProject, restored);
   // Lives here rather than in the tab so a run keeps going while the buyer is
   // back on the creatives, the same way an export does.
   const subtitles = useSubtitleQueue();

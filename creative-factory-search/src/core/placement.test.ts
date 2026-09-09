@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { planBatch } from './batch.ts';
 import {
-  campaignSummary, CREATIVES_DIR, creativesFolder, defaultLayout, destinationFor, placementSize,
-  placePlan, rowSummary, setLocaleTarget, setPhotoTarget, type CampaignInfo, type ExportLayout,
+  campaignSummary, CREATIVES_DIR, creativesFolder, defaultLayout, destinationFor, mergeLayout,
+  placementSize, placePlan, rowSummary, selectionTarget, setLocaleTarget, setPhotoTarget,
+  type CampaignInfo, type ExportLayout,
 } from './placement.ts';
 import { apply, createProject } from './project.ts';
 import type { LocaleId, Project } from './types.ts';
@@ -148,6 +149,23 @@ describe('the layout as the buyer edits it', () => {
       { campaign: 'it-milan', count: 1 },
       { campaign: null, count: 1 },
     ]);
+  });
+
+  it('keeps the rows the buyer set when a language joins or leaves the release', () => {
+    const edited: ExportLayout = { locales: { it: 'it-milan', de: null }, overrides: { p0: { it: null } } };
+    const fresh: ExportLayout = { locales: { it: 'it-rome', de: 'de-main', pl: null }, overrides: {} };
+    expect(mergeLayout(edited, fresh, ['it', 'pl'])).toEqual({
+      locales: { it: 'it-milan', pl: null },
+      overrides: { p0: { it: null } },
+    });
+  });
+
+  it('says what the selection agrees on, for the photo select to show', () => {
+    expect(selectionTarget(base, ['p0'], 'it')).toBe('it-milan');
+    expect(selectionTarget(base, ['p1', 'p2'], 'it')).toBe('inherit');
+    expect(selectionTarget(base, ['p0', 'p1'], 'it')).toBe('mixed');
+    expect(selectionTarget(setPhotoTarget(base, ['p1'], 'it', null), ['p1'], 'it')).toBeNull();
+    expect(selectionTarget(base, [], 'it')).toBe('inherit');
   });
 
   it('only counts the selected photos, which are what the export takes', () => {

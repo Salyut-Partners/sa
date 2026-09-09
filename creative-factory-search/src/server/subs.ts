@@ -54,6 +54,9 @@ function runPython(python: string, args: readonly string[]): Promise<Printed> {
   });
 }
 
+/** The last line something printed — where Python puts the sentence that matters. */
+const lastLine = (text: string): string => text.trim().split('\n').pop() ?? '';
+
 let cached: { at: number; state: Promise<SubsState> } | null = null;
 
 /** What the machine can do about subtitles, as the panel shows it. */
@@ -73,19 +76,20 @@ async function readState(): Promise<SubsState> {
   // The style list needs nothing but the standard library, so a machine that
   // has not run setup.sh yet still sees the six styles — and a note saying why
   // dropping a file would not work.
-  const listed = await runPython(venv ? VENV_PYTHON : 'python3', ['--list-styles']);
+  const python = venv ? VENV_PYTHON : 'python3';
+  const listed = await runPython(python, ['--list-styles']);
   const styles = parseStyleCatalogue(listed.stdout);
   if (styles === null) {
-    notes.push('не вдалось прочитати стилі з subtitle_styler.py: ' + (listed.stderr.trim().split('\n').pop() ?? 'порожня відповідь'));
+    notes.push('не вдалось прочитати стилі з subtitle_styler.py: ' + (lastLine(listed.stderr) || 'порожня відповідь'));
   }
-  if (!venv) {
-    notes.push('немає venv у subs/technical — запусти ./setup.sh у корені ~/sa');
-  } else {
-    const checked = await runPython(VENV_PYTHON, ['--check']);
-    const check = parseSetupCheck(checked.stdout);
-    if (check === null) notes.push('перевірка оточення не запустилась: ' + (checked.stderr.trim().split('\n').pop() ?? ''));
-    else notes.push(...check.missing);
-  }
+  // The check runs even without a venv, on the system Python, so a machine
+  // missing ffmpeg-full and the venv hears about both at once rather than
+  // one per round of setup.
+  if (!venv) notes.push('немає venv у subs/technical — запусти ./setup.sh у корені ~/sa');
+  const checked = await runPython(python, ['--check']);
+  const check = parseSetupCheck(checked.stdout);
+  if (check === null) notes.push('перевірка оточення не запустилась: ' + lastLine(checked.stderr));
+  else notes.push(...check.missing.filter(line => venv || !line.startsWith('не встановлено')));
   return { ready: styles !== null && notes.length === 0, styles, notes };
 }
 
@@ -137,20 +141,25 @@ export async function startSubtitles(body: NodeJS.ReadableStream, request: Subti
     job.active.clear();
   }
 
-  const output = path.join(request.dest, uniqueName(subtitledName(name, request.style), n => fs.existsSync(path.join(request.dest, n))));
-  job.targets!.set(name, output);
   job.active.add(`${name}: у черзі`);
-  lane = lane.then(() => burn(job, name, input, output, request)).catch(() => {});
+  lane = lane.then(() => burn(job, name, input, request)).catch(() => {});
   return job.id;
 }
 
-function burn(job: Job, name: string, input: string, output: string, request: SubtitleRequest): Promise<void> {
+function burn(job: Job, name: string, input: string, request: SubtitleRequest): Promise<void> {
   return new Promise(resolve => {
     if (job.cancelled) {
       settleJob(job, null);
       resolve();
       return;
     }
+    // Named on the lane, not at upload: two drops of `clip.mp4` queued
+    // together would otherwise both be told `clip.yellow.mp4` and the second
+    // would write over the first.
+    const output = path.join(request.dest, uniqueName(
+      subtitledName(name, request.style), n => fs.existsSync(path.join(request.dest, n)),
+    ));
+    job.targets!.set(name, output);
     const args = [STYLER, input, '-o', output, '--style', request.style];
     if (request.lang !== null) args.push('--lang', request.lang);
     const child = spawn(VENV_PYTHON, args, { cwd: TECHNICAL, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -182,7 +191,7 @@ function burn(job: Job, name: string, input: string, output: string, request: Su
         fs.promises.unlink(output).catch(() => {});
       } else if (code === 0 && fs.existsSync(output)) {
         job.outputs.push({ name, file: output });
-        job.folders.add(relativeFolder(output));
+        job.folders.add(request.dest === SUBS_OUTPUT ? 'subs/output' : relativeFolder(output));
       } else {
         const why = stderr.trim().split('\n').filter(l => l.trim() !== '').slice(-3).join(' · ');
         job.errors.push({ name, message: why === '' ? `пайплайн вийшов із кодом ${code}` : why });

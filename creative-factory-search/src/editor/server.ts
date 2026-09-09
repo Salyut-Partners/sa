@@ -9,7 +9,8 @@ import type { VoiceModel } from '../core/voice.ts';
 // Type-only, and therefore erased: the editor never bundles a line of server
 // code. Naming the server's own types is what stops the two ends of each of
 // these routes drifting apart without anything noticing.
-import type { BatchOutput, JobFailure, JobStatus } from '../server/batch.ts';
+import type { BatchOutput } from '../server/batch.ts';
+import type { JobFailure, JobStatus } from '../server/jobs.ts';
 import type { BatchRead, BatchWritten } from '../server/batches.ts';
 import type { SubsState } from '../server/subs.ts';
 import type { Translations, TranslatorId } from '../server/translate.ts';

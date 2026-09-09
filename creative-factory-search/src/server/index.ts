@@ -7,17 +7,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isLocaleId } from '../core/locales.ts';
 import { VOICE_MODELS } from '../core/voice.ts';
-import {
-  BadRequestError, cancelJob, jobById, outputsOf, startBatch, statusOf,
-} from './batch.ts';
+import { startBatch } from './batch.ts';
+import { campaignCreativesDir, listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
 import { clickupState } from './clickup.ts';
 import { configPath, ensureLaunchesRoot, loadConfig } from './config.ts';
-import { listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
 import { createLaunch, existingLaunchKeys, RefusedError } from './launches.ts';
 import { isTrafficSource } from '../core/launch.ts';
+import { BadRequestError, cancelJob, jobById, outputsOf, statusOf } from './jobs.ts';
 import { closeBrowser } from './render.ts';
-import { creativesFolder as campaignFolder } from './batches.ts';
 import { startSubtitles, subsState, SUBS_OUTPUT } from './subs.ts';
 import { listVoices } from './tts.ts';
 import { NoTranslatorError, translateAll, translator } from './translate.ts';
@@ -173,7 +171,7 @@ app.put('/api/launches/:key/batches/:batch', (req, res) => {
 app.post('/api/batch', (req, res) => {
   try {
     const config = loadConfig();
-    res.json({ id: startBatch(req.body, ORIGIN, (key, campaign) => campaignFolder(config, key, campaign)) });
+    res.json({ id: startBatch(req.body, ORIGIN, (key, campaign) => campaignCreativesDir(config, key, campaign)) });
   } catch (e) {
     if (e instanceof BadRequestError || e instanceof RefusedError) res.status(400).json({ error: e.message });
     else {
@@ -202,7 +200,7 @@ app.post('/api/subtitles', async (req, res) => {
   try {
     if (name === '' || style === '') throw new RefusedError('потрібні name і style');
     const dest = q['launchKey'] && q['campaign']
-      ? campaignFolder(loadConfig(), q['launchKey'], q['campaign'])
+      ? campaignCreativesDir(loadConfig(), q['launchKey'], q['campaign'])
       : SUBS_OUTPUT;
     res.json({ id: await startSubtitles(req, { name, style, lang, dest }) });
   } catch (e) {

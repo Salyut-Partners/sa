@@ -53,8 +53,11 @@ language, by default — and a second control when only some photos are
 selected, to send those elsewhere or nowhere; a language can be left out
 entirely. The rule is data in `core/placement.ts`, so the split is shown before
 the button is pressed and the count on it is arithmetic, not a plan. The server
-writes each mp4 straight into `campaigns/<campaign>/creatives/` and the
-finished note names the folders; unbound, the export is a download as before. It
+writes each mp4 into `campaigns/<campaign>/creatives/` — made in scratch and
+moved in whole, so a failed or cancelled file never sits there half-written —
+and the finished note names the folders. A re-export replaces a file of the
+same name: the creative was remade, not added to. Unbound, the export is a
+download as before. It
 runs as a job on the server, so the editor keeps working while it goes: a bar,
 the file being made, an estimate, and a cancel. Videos that differ only in their
 soundtrack are drawn once and muxed twice, and the panel says how many frame
@@ -124,7 +127,8 @@ split happens on the server, in `core/batch-folder.ts`; the editor sends and
 receives the same file it would download, so a `creatives.json` saved through
 the browser opens from the folder chooser too and comes out as files on the
 next save. A photo whose file has gone is left out on open and named, rather
-than opened blank.
+than opened blank. Pictures are only ever written, never removed: a photo
+taken out of the batch leaves its file in `photos/` until the buyer deletes it.
 
 Two stores, one source. The autosave in IndexedDB is the browser's memory of
 the session; the folder is the batch. The header says which it is looking at

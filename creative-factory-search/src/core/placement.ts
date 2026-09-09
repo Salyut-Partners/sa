@@ -69,6 +69,43 @@ export function defaultLayout(project: Project, campaigns: readonly CampaignInfo
   return { locales, overrides: {} };
 }
 
+/**
+ * The layout after the languages or the campaign list changed under it: the
+ * rows the buyer already has are kept as they are, a language new to the
+ * release gets its default, a language taken off it is dropped. Overrides are
+ * left alone — a photo placed by hand stays placed.
+ */
+export function mergeLayout(
+  current: ExportLayout,
+  fresh: ExportLayout,
+  release: readonly LocaleId[],
+): ExportLayout {
+  const locales: ExportLayout['locales'] = {};
+  for (const id of release) {
+    locales[id] = id in current.locales ? current.locales[id] ?? null : fresh.locales[id] ?? null;
+  }
+  return { ...current, locales };
+}
+
+/**
+ * What the selected photos say for one language: a campaign or null they all
+ * name by hand, `'inherit'` when none of them does, `'mixed'` when they
+ * disagree. The photo select shows this and writes onto all of them.
+ */
+export function selectionTarget(
+  layout: ExportLayout,
+  photoIds: readonly string[],
+  locale: LocaleId,
+): Target | 'inherit' | 'mixed' {
+  const said = photoIds.map(id => {
+    const own = layout.overrides[id];
+    return own !== undefined && locale in own ? (own[locale] ?? null) : 'inherit';
+  });
+  const first = said[0];
+  if (first === undefined) return 'inherit';
+  return said.every(t => t === first) ? first : 'mixed';
+}
+
 /** Where one file goes: the photo's own say first, then its language's. */
 export function destinationFor(layout: ExportLayout, photoId: string, locale: LocaleId): Target {
   const own = layout.overrides[photoId];

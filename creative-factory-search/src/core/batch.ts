@@ -194,8 +194,18 @@ export function groupDuration(
  * two files.
  */
 export function archiveName(index: number, photoName: string, locale: LocaleId): string {
-  const base = photoName.replace(/\.[^.]+$/, '');
-  const safe = base.replace(/[^\p{L}\p{N}_-]+/gu, '_').replace(/^_+|_+$/g, '').slice(0, 48);
+  const safe = safeStem(photoName);
   const slot = String(index + 1).padStart(2, '0');
   return `${slot}-${safe === '' ? 'creative' : safe}-${locale}.mp4`;
+}
+
+/**
+ * A file name's stem made safe for a folder and a URL: letters, digits,
+ * underscore and dash, at most 48 of them; empty when nothing survives. The
+ * one rule for everything named after a photo — its videos and its picture in
+ * the batch folder — so they read as one thing in Finder.
+ */
+export function safeStem(fileName: string): string {
+  const base = fileName.replace(/\.[^.]+$/, '');
+  return base.replace(/[^\p{L}\p{N}_-]+/gu, '_').replace(/^_+|_+$/g, '').slice(0, 48);
 }

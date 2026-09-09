@@ -4,7 +4,7 @@
 // and the split into files happens here on the way through.
 import fs from 'node:fs';
 import path from 'node:path';
-import { isBatchName, joinPhotos, splitPhotos } from '../core/batch-folder.ts';
+import { isFolderName, joinPhotos, mimeFor, splitPhotos } from '../core/batch-folder.ts';
 import { isLaunchKey } from '../core/launch.ts';
 import { campaignSummary, CREATIVES_DIR, type CampaignInfo } from '../core/placement.ts';
 import { fromFile, type ProjectFile } from '../core/serialize.ts';
@@ -12,11 +12,6 @@ import type { SaConfig } from './config.ts';
 import { RefusedError } from './launches.ts';
 
 const PROJECT_FILE = 'project.json';
-
-const MIME_BY_EXT: Record<string, string> = {
-  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-  '.webp': 'image/webp', '.gif': 'image/gif', '.avif': 'image/avif',
-};
 
 /** The launch's folder, which has to be there already — `sa new` makes it. */
 export function launchFolder(config: SaConfig, launchKey: string): string {
@@ -29,7 +24,7 @@ export function launchFolder(config: SaConfig, launchKey: string): string {
 }
 
 function batchFolder(config: SaConfig, launchKey: string, batch: string): string {
-  if (!isBatchName(batch)) {
+  if (!isFolderName(batch)) {
     throw new RefusedError(`назва пачки має бути з малих літер, цифр, крапок і дефісів: \`${batch}\``);
   }
   return path.join(launchFolder(config, launchKey), 'batches', batch);
@@ -40,7 +35,7 @@ export function listBatches(config: SaConfig, launchKey: string): string[] {
   const dir = path.join(launchFolder(config, launchKey), 'batches');
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true })
-    .filter(d => d.isDirectory() && isBatchName(d.name))
+    .filter(d => d.isDirectory() && isFolderName(d.name))
     .map(d => d.name)
     .sort();
 }
@@ -64,8 +59,7 @@ export function readBatch(config: SaConfig, launchKey: string, batch: string): B
   return joinPhotos(data, ref => {
     const target = path.join(folder, ref);
     if (!fs.existsSync(target)) return null;
-    const mime = MIME_BY_EXT[path.extname(target).toLowerCase()] ?? 'application/octet-stream';
-    return `data:${mime};base64,${fs.readFileSync(target).toString('base64')}`;
+    return `data:${mimeFor(path.extname(target))};base64,${fs.readFileSync(target).toString('base64')}`;
   });
 }
 
@@ -76,7 +70,7 @@ export function listCampaigns(config: SaConfig, launchKey: string): CampaignInfo
   const dir = path.join(launchFolder(config, launchKey), 'campaigns');
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true })
-    .filter(d => d.isDirectory() && isBatchName(d.name))
+    .filter(d => d.isDirectory() && isFolderName(d.name))
     .map(d => {
       const manifest = path.join(dir, d.name, 'campaign.yaml');
       const summary = fs.existsSync(manifest)
@@ -92,8 +86,8 @@ export function listCampaigns(config: SaConfig, launchKey: string): CampaignInfo
  * The campaign itself has to exist: an export does not invent campaigns, it
  * fills the ones the buyer laid out.
  */
-export function creativesFolder(config: SaConfig, launchKey: string, campaign: string): string {
-  if (!isBatchName(campaign)) throw new RefusedError(`це не назва кампанії: \`${campaign}\``);
+export function campaignCreativesDir(config: SaConfig, launchKey: string, campaign: string): string {
+  if (!isFolderName(campaign)) throw new RefusedError(`це не назва кампанії: \`${campaign}\``);
   const folder = path.join(launchFolder(config, launchKey), 'campaigns', campaign);
   if (!fs.existsSync(folder)) {
     throw new RefusedError(`кампанії \`${campaign}\` немає в ${launchKey}/campaigns — створіть теку з campaign.yaml`);

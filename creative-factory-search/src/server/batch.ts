@@ -17,9 +17,6 @@ import {
 import { CancelledError, renderSpecToFile } from './render.ts';
 import { synthesize } from './tts.ts';
 
-export { BadRequestError, cancelJob, jobById, outputsOf, statusOf } from './jobs.ts';
-export type { JobFailure, JobState, JobStatus } from './jobs.ts';
-
 /** How many pages walk frames at once. More than three starves the encoders. */
 const CONCURRENCY = readConcurrency();
 
@@ -212,10 +209,16 @@ async function renderGroup(job: Job, group: BatchGroup, ctx: GroupContext): Prom
     if (job.cancelled) return;
     if (!clips.has(item.name)) continue;
     const clip = clips.get(item.name)!;
-    const out = job.targets?.get(item.name) ?? path.join(job.dir, item.name);
+    // Made in scratch and moved into place whole: a campaign folder must never
+    // hold a file ffmpeg was half-way through when it failed or was cancelled.
+    const made = path.join(job.dir, item.name);
+    const out = job.targets?.get(item.name) ?? made;
     try {
-      await working(job, item.name, () =>
-        clip === null ? fs.promises.copyFile(silent, out) : mux(silent, clip.file, out));
+      await working(job, item.name, async () => {
+        if (clip === null) await fs.promises.copyFile(silent, made);
+        else await mux(silent, clip.file, made);
+        if (out !== made) await fs.promises.rename(made, out);
+      });
       job.outputs.push({ name: item.name, file: out });
       if (job.targets !== null) job.folders.add(relativeFolder(out));
     } catch (e) {

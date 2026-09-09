@@ -6,19 +6,21 @@
 // the seam between that and the disk: it takes the pictures out before a file
 // is written into a launch folder, and puts them back when one is read, so the
 // rest of the code never learns that a photo can be a path.
+import { safeStem } from './batch.ts';
 import type { ProjectFile } from './serialize.ts';
 
 /** The folder beside `project.json` that holds the pictures. */
 export const PHOTOS_DIR = 'photos';
 
 /**
- * A batch folder's name. Lower-case, no path separators, not hidden: it is a
- * folder the buyer sees in Finder and a segment of a URL the editor asks for.
+ * The name of a folder inside a launch — a batch, a campaign. Lower-case, no
+ * path separators, not hidden: it is a folder the buyer sees in Finder and a
+ * segment of a URL the editor asks for.
  */
-const BATCH_NAME = /^[a-z0-9][a-z0-9._-]*$/;
+const FOLDER_NAME = /^[a-z0-9][a-z0-9._-]*$/;
 
-export const isBatchName = (value: unknown): value is string =>
-  typeof value === 'string' && BATCH_NAME.test(value) && !value.includes('..');
+export const isFolderName = (value: unknown): value is string =>
+  typeof value === 'string' && FOLDER_NAME.test(value) && !value.includes('..');
 
 /** Whether a photo's `image` is a file in the batch folder rather than the picture itself. */
 export const isPhotoRef = (image: string): boolean => image.startsWith(PHOTOS_DIR + '/');
@@ -45,6 +47,7 @@ export function decodeDataUrl(url: string): { mime: string; base64: string } | n
   return match === null ? null : { mime: match[1]!, base64: match[2]! };
 }
 
+/** The one mapping between what a picture is and what its file is called, both ways. */
 const EXTENSIONS: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -54,18 +57,17 @@ const EXTENSIONS: Record<string, string> = {
 };
 
 /** The extension the bytes deserve, whatever the original file was called. */
-const extensionFor = (mime: string): string => EXTENSIONS[mime] ?? mime.split('/')[1] ?? 'bin';
+export const extensionFor = (mime: string): string => EXTENSIONS[mime] ?? mime.split('/')[1] ?? 'bin';
 
-/**
- * The name the picture is written under: the photo's name made safe, with the
- * extension the bytes say. The same rule `archiveName` uses for creatives, so
- * a photo and its videos read as one thing in Finder.
- */
-function safeBase(photoName: string): string {
-  const base = photoName.replace(/\.[^.]+$/, '');
-  const safe = base.replace(/[^\p{L}\p{N}_-]+/gu, '_').replace(/^_+|_+$/g, '').slice(0, 48);
-  return safe === '' ? 'photo' : safe;
+/** The type a picture file is read back as, from its extension (`.jpg`, `jpeg`, `PNG`). */
+export function mimeFor(extension: string): string {
+  const ext = extension.replace(/^\./, '').toLowerCase();
+  const known = Object.entries(EXTENSIONS).find(([, e]) => e === ext || (e === 'jpg' && ext === 'jpeg'));
+  return known?.[0] ?? 'application/octet-stream';
 }
+
+/** The name the picture is written under: the photo's name made safe, never empty. */
+const safeBase = (photoName: string): string => safeStem(photoName) || 'photo';
 
 /**
  * Take the pictures out of a file, ready to be written as a folder.
@@ -103,6 +105,28 @@ export function splitPhotos(file: ProjectFile): SplitBatch {
   });
 
   return { file: { ...file, photos: split }, photos };
+}
+
+/**
+ * Whether a file on screen and a file read back from the folder hold the same
+ * batch. Pictures are compared by their bytes and not by their type: the
+ * folder writes a type as an extension and reads it back from one, so
+ * `image/jpg` on the way in is `image/jpeg` on the way out, and a header that
+ * said "не збережено" over that would be lying.
+ */
+export function sameProjectFile(a: unknown, b: unknown): boolean {
+  const canon = (data: unknown): string => {
+    if (typeof data !== 'object' || data === null || !Array.isArray((data as { photos?: unknown }).photos)) {
+      return JSON.stringify(data);
+    }
+    const photos = (data as { photos: unknown[] }).photos.map(photo => {
+      const image = (photo as { image?: unknown } | null)?.image;
+      if (typeof image !== 'string') return photo;
+      return { ...(photo as object), image: decodeDataUrl(image)?.base64 ?? image };
+    });
+    return JSON.stringify({ ...(data as object), photos });
+  };
+  return canon(a) === canon(b);
 }
 
 export interface JoinedBatch {

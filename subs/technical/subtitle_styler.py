@@ -612,7 +612,7 @@ def check_setup() -> dict:
     missing: list[str] = []
     deps = missing_dependencies()
     if deps:
-        missing.append("у venv немає " + ", ".join(deps) + " — запусти ./setup.sh")
+        missing.append("не встановлено " + ", ".join(deps) + " — запусти ./setup.sh")
     try:
         find_ffmpeg()
     except RuntimeError as exc:

@@ -3,8 +3,8 @@ import { batchSize, planBatch, type BatchPlan } from '../core/batch.ts';
 import { LOCALE_NAMES, releaseLocales } from '../core/locales.ts';
 import { FLAGS } from '../core/phrasebook.ts';
 import {
-  defaultLayout, placementSize, placePlan, rowSummary, setLocaleTarget, setPhotoTarget,
-  type CampaignInfo, type ExportLayout, type Target,
+  defaultLayout, mergeLayout, placementSize, placePlan, rowSummary, selectionTarget, setLocaleTarget,
+  setPhotoTarget, type CampaignInfo, type ExportLayout, type Target,
 } from '../core/placement.ts';
 import type { LocaleId, Project } from '../core/types.ts';
 import type { ExportRun } from './export.ts';
@@ -64,14 +64,7 @@ export function ExportPanel({ project, run, onExportOne, topic }: Props) {
   const [layout, setLayout] = useState<ExportLayout>({ locales: {}, overrides: {} });
   useEffect(() => {
     if (campaigns === null) return;
-    setLayout(current => {
-      const fresh = defaultLayout(project, campaigns);
-      const merged: ExportLayout['locales'] = {};
-      for (const id of release) {
-        merged[id] = id in current.locales ? current.locales[id] ?? null : fresh.locales[id] ?? null;
-      }
-      return { ...current, locales: merged };
-    });
+    setLayout(current => mergeLayout(current, defaultLayout(project, campaigns), release));
     // The release list is read off the project; its key is what changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [campaigns, releaseKey]);
@@ -219,10 +212,8 @@ interface RowProps {
 function LocaleRow({ id, project, layout, options, selectedAll, onRow, onPhotos }: RowProps) {
   const shares = rowSummary(project, layout, id);
   const home = layout.locales[id] ?? null;
-  const overridden = project.selection.map(pid => layout.overrides[pid]?.[id]);
-  const first = overridden[0];
-  const agree = overridden.length > 0 && overridden.every(t => t === first);
-  const photosValue = agree && first !== undefined ? toValue(first) : AS_ROW;
+  const said = selectionTarget(layout, project.selection, id);
+  const photosValue = said === 'inherit' || said === 'mixed' ? AS_ROW : toValue(said);
   const label = (target: Target): string => target ?? 'не експортувати';
 
   return (
