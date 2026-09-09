@@ -11,6 +11,10 @@
 // yet know, for the server to write down.
 import YAML from 'yaml';
 import type { Article } from './article.ts';
+import {
+  planCampaigns, previewTspBody, type CampaignSnapshot, type CampaignSource, type CampaignState, type CampaignStep,
+  type PostRef, type ResolvedCampaign,
+} from './campaign-plan.ts';
 import type { ParseResult, TopicManifest } from './launch.ts';
 import { hashText } from './visual-key.ts';
 
@@ -36,6 +40,9 @@ export interface LaunchContents {
   topic: TopicManifest;
   termgroups: TermGroupSource[];
   articles: ArticleSource[];
+  campaigns: CampaignSource[];
+  /** What the folder reader left out and why — a campaign with no creatives yet, say. Shown as warnings. */
+  notes: string[];
 }
 
 /**
@@ -124,16 +131,18 @@ export interface LaunchState {
   /** Folder name → post id and the hash of what was last sent. */
   articles: Record<string, { id: number; hash: string }>;
   pending: PendingWrite | null;
+  /** Campaign folder → its own `state.json`, read and written beside its manifest. */
+  campaigns: Record<string, CampaignState>;
 }
 
 export const emptyState = (): LaunchState => ({
-  topic_id: null, configuration_id: null, termgroups: {}, articles: {}, pending: null,
+  topic_id: null, configuration_id: null, termgroups: {}, articles: {}, pending: null, campaigns: {},
 });
 
 const isBag = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const asId = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null);
 
-/** `state.json` read back, tolerant of fields a later version added. */
+/** The topic's `state.json` read back, tolerant of fields a later version added. Campaign states are read from their own files. */
 export function parseState(text: string): ParseResult<LaunchState> {
   let data: unknown;
   try {
@@ -170,13 +179,14 @@ export function parseState(text: string): ParseResult<LaunchState> {
       termgroups,
       articles,
       pending,
+      campaigns: {},
     },
   };
 }
 
 // ----------------------------------------------------------- snapshot --
 
-export interface PlatformTopic { id: number; name: string; internal_name: string }
+export interface PlatformTopic { id: number; name: string; internal_name: string; user_id: number }
 export interface PlatformConfiguration { id: number; name: string; topic_id: number; country: string; traffic_source: string }
 export interface PlatformTermGroup { id: number; name: string; terms: string[]; weight: number; country: string; language: string }
 export interface PlatformPost {
@@ -196,12 +206,11 @@ export interface Site { id: number; url: string }
  * read-back list — every topic whose internal_name is the manifest's, or the
  * one the state names — and the rest is filtered by that topic.
  */
-export interface Snapshot {
+export interface Snapshot extends CampaignSnapshot {
   topics: PlatformTopic[];
   configurations: PlatformConfiguration[];
   termGroups: PlatformTermGroup[];
   posts: PlatformPost[];
-  countries: Country[];
   sites: Site[];
 }
 
@@ -242,7 +251,8 @@ export type PlanStep =
   | { kind: 'termgroup.update'; label: string; name: string; id: number; body: TermGroupBody }
   | { kind: 'termgroup.weight'; label: string; topic: TopicRef; body: { id: TermGroupRef; weight: number }[] }
   | { kind: 'article.create'; label: string; name: string; hash: string; body: ArticleBody }
-  | { kind: 'article.update'; label: string; name: string; id: number; hash: string; body: ArticleBody };
+  | { kind: 'article.update'; label: string; name: string; id: number; hash: string; body: ArticleBody }
+  | CampaignStep;
 
 /** Ids the snapshot answered that the state did not hold — to be written down even when there is nothing to send. */
 export interface Resolved {
@@ -250,6 +260,7 @@ export interface Resolved {
   configuration_id: number | null;
   termgroups: Record<string, number>;
   articles: Record<string, number>;
+  campaigns: Record<string, ResolvedCampaign>;
 }
 
 export interface Plan {
@@ -287,12 +298,23 @@ function equalShares(count: number): number[] {
 export const firstNew = (before: readonly number[], after: readonly number[]): number | null =>
   after.find(id => !before.includes(id)) ?? null;
 
-/** Among namesakes, the one the write in flight made: not in its `before` list. Null when that does not single one out. */
+/**
+ * Among namesakes, the one a write in flight made: the one not in the list
+ * taken before the send. `ambiguous` when several are new — the write went
+ * out more than once — and undefined when none is.
+ */
+export function newcomerOf<T extends { id: number }>(twins: readonly T[], before: readonly number[]): T | 'ambiguous' | undefined {
+  const fresh = twins.filter(t => !before.includes(t.id));
+  if (fresh.length === 1) return fresh[0];
+  return fresh.length > 1 ? 'ambiguous' : undefined;
+}
+
+/** The same, keyed on the topic state's pending write. Undefined when it is not this step's, or does not single one out. */
 function newcomer<T extends { id: number }>(twins: readonly T[], state: LaunchState, step: string, key: string): T | undefined {
   const pending = state.pending;
   if (pending === null || pending.step !== step || pending.key !== key) return undefined;
-  const fresh = twins.filter(t => !pending.before.includes(t.id));
-  return fresh.length === 1 ? fresh[0] : undefined;
+  const made = newcomerOf(twins, pending.before);
+  return made === 'ambiguous' ? undefined : made;
 }
 
 export type TopicChoice =
@@ -322,8 +344,9 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
   const steps: PlanStep[] = [];
   const warnings: string[] = [];
   const errors: string[] = [];
-  const resolved: Resolved = { topic_id: null, configuration_id: null, termgroups: {}, articles: {} };
+  const resolved: Resolved = { topic_id: null, configuration_id: null, termgroups: {}, articles: {}, campaigns: {} };
   const { topic } = contents;
+  warnings.push(...contents.notes);
 
   // -- site: every article needs it, and a placeholder is the commonest mistake.
   const siteId = Number(topic.site);
@@ -478,6 +501,20 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
     steps.push({ kind: 'article.update', label: `оновити статтю «${article.title}» (id ${existing.id})`, name, id: existing.id, hash, body });
   }
 
+  // -- campaigns: after everything they point at, with ids where known and refs to this plan's own steps otherwise.
+  const termGroupRefs: Record<string, TermGroupRef> = {};
+  for (const group of contents.termgroups) termGroupRefs[group.name] = resolved.termgroups[group.name] ?? { termgroup: group.name };
+  const postRefs: Record<string, PostRef> = {};
+  for (const { name } of contents.articles) postRefs[name] = resolved.articles[name] ?? { article: name };
+  const campaigns = planCampaigns(
+    { topic, topicRef, campaigns: contents.campaigns, termgroups: contents.termgroups, articles: contents.articles, termGroupRefs, postRefs },
+    snapshot, state.campaigns,
+  );
+  steps.push(...campaigns.steps);
+  warnings.push(...campaigns.warnings);
+  errors.push(...campaigns.errors);
+  resolved.campaigns = campaigns.resolved;
+
   return { steps, warnings, errors, resolved };
 }
 
@@ -490,13 +527,22 @@ function configurationStep(topic: TopicManifest, topicRef: TopicRef): PlanStep {
   };
 }
 
+/** A step as shown: the same fields, with the bodies made readable. */
+export type ShownStep = { kind: PlanStep['kind']; label: string } & Record<string, unknown>;
+
+export interface PlanPreview extends Omit<Plan, 'steps'> {
+  steps: ShownStep[];
+}
+
 /**
  * The plan as a person reads it: the same steps and the whole article, with
- * each inlined picture's base64 replaced by its size. The words are what the
- * buyer approves; a megabyte of base64 is not something to read.
+ * each inlined picture's base64 replaced by its size and the TSP's schedule
+ * grid folded into a line. The words are what the buyer approves; a megabyte
+ * of base64 is not something to read.
  */
-export function previewPlan(planned: Plan): Plan {
-  const steps = planned.steps.map(step => {
+export function previewPlan(planned: Plan): PlanPreview {
+  const steps: ShownStep[] = planned.steps.map(step => {
+    if (step.kind === 'tsp.create' || step.kind === 'tsp.update') return { ...step, body: previewTspBody(step.body) };
     if (step.kind !== 'article.create' && step.kind !== 'article.update') return step;
     const description = step.body.description.replace(
       /src="data:([^;"]+);base64,([^"]*)"/g,

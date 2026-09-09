@@ -8,28 +8,40 @@
 // file the moment it is known — and the "before" list before each send, so a
 // crash between the platform's answer and the file still leaves a way to tell
 // the new entity from its namesakes on the next run.
+//
+// Two kinds of state file: the topic's, at the launch root, and one per
+// campaign beside its manifest. Both are read into one `LaunchState` and
+// written back from it, each to its own file.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArticle, type ImageReader } from '../core/article.ts';
 import { isFolderName, mimeFor } from '../core/batch-folder.ts';
-import { parseTopicManifest, type TopicManifest } from '../core/launch.ts';
+import {
+  emptyCampaignState, headlineText, matchUploads, parseCampaignState, sameSet, sameTsp, type CampaignSource,
+  type CampaignState, type CreativeRef, type PostRef, type TspRef,
+} from '../core/campaign-plan.ts';
+import { parseCampaignManifest, parseTopicManifest, type TopicManifest } from '../core/launch.ts';
 import {
   chooseTopic, emptyState, firstNew, parseKeywords, parseState, parseTermGroupOptions, plan as makePlan, previewPlan,
   type ArticleSource, type LaunchContents, type LaunchState, type Plan, type PlanStep, type Snapshot,
   type TermGroupRef, type TermGroupSource, type TopicRef,
 } from '../core/plan.ts';
+import { CREATIVES_DIR } from '../core/placement.ts';
 import { DEFAULT_QUEUE, nextAction, pauseBefore, type Attempt } from '../core/queue.ts';
 import { launchFolder } from './batches.ts';
 import type { SaConfig } from './config.ts';
 import { createJob, settleJob, type Job } from './jobs.ts';
 import { RefusedError } from './launches.ts';
 import {
-  createConfiguration, createdId, createPost, createTermGroup, createTopic, PlatformClient, platformState,
-  readConfigurations, readCountries, readPosts, readSites, readTermGroups, readTopic, searchTopics,
-  setTermGroupWeights, updatePost, updateTermGroup, type Answer,
+  createBuilder, createConfiguration, createdId, createHeadline, createPost, createTermGroup, createTopic, createTsp,
+  PlatformClient, platformState, readAdAccounts, readBuilders, readConfigurations, readCountries, readCreatives,
+  readLanguages, readPixels, readPosts, readRsocCounts, readSites, readTermGroups, readThemes, readTopic, readTsps,
+  searchTopics, setTermGroupWeights, updatePost, updateTermGroup, updateTsp, uploadCreative, type Answer,
 } from './platform.ts';
 
 const STATE_FILE = 'state.json';
+const CAMPAIGNS_DIR = 'campaigns';
 
 // ------------------------------------------------------------- folder --
 
@@ -79,31 +91,111 @@ function readArticleFolders(folder: string, errors: string[]): ArticleSource[] {
   return articles.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** The campaign folder names a launch has, whatever is in them. */
+function campaignFolders(folder: string): string[] {
+  const dir = path.join(folder, CAMPAIGNS_DIR);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter(d => d.isDirectory() && isFolderName(d.name))
+    .map(d => d.name)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+/** The mp4 files at the top of `creatives/` — `rejected/` and anything else below it are not creatives to send. */
+function creativeFiles(campaignFolder: string): string[] {
+  const dir = path.join(campaignFolder, CREATIVES_DIR);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter(d => d.isFile() && /\.mp4$/i.test(d.name))
+    .map(d => d.name)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+const fileHash = (file: string): string => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+
+/**
+ * A campaign is read once it has creatives; before that its folder is the
+ * buyer's draft — placeholders in the manifest and all — and the plan says
+ * it was left out rather than refusing the whole launch over it.
+ */
+function readCampaignFolders(folder: string, topic: TopicManifest, errors: string[], notes: string[]): CampaignSource[] {
+  const campaigns: CampaignSource[] = [];
+  for (const name of campaignFolders(folder)) {
+    const own = path.join(folder, CAMPAIGNS_DIR, name);
+    const files = creativeFiles(own);
+    if (files.length === 0) {
+      notes.push(`campaigns/${name}: у creatives/ немає mp4 — кампанію пропущено`);
+      continue;
+    }
+    const manifestFile = path.join(own, 'campaign.yaml');
+    if (!fs.existsSync(manifestFile)) {
+      errors.push(`campaigns/${name}: немає campaign.yaml`);
+      continue;
+    }
+    const manifest = parseCampaignManifest(fs.readFileSync(manifestFile, 'utf8'), topic);
+    if (!manifest.ok) {
+      errors.push(...manifest.errors.map(e => `campaigns/${name}/campaign.yaml: ${e}`));
+      continue;
+    }
+    const scriptFile = path.join(own, 'script.md');
+    const script = fs.existsSync(scriptFile) ? fs.readFileSync(scriptFile, 'utf8').trim() : '';
+    campaigns.push({
+      name,
+      manifest: manifest.value,
+      script,
+      creatives: files.map(file => ({ name: file, hash: fileHash(path.join(own, CREATIVES_DIR, file)) })),
+    });
+  }
+  return campaigns;
+}
+
 /** Everything the folder says, or a refusal naming every problem at once. */
 export function readLaunchContents(folder: string): LaunchContents {
   const errors: string[] = [];
+  const notes: string[] = [];
   const manifest = parseTopicManifest(fs.readFileSync(path.join(folder, 'topic.yaml'), 'utf8'));
   if (!manifest.ok) errors.push(...manifest.errors.map(e => `topic.yaml: ${e}`));
   const termgroups = readTermGroupFolders(folder, errors);
   const articles = readArticleFolders(folder, errors);
+  const campaigns = manifest.ok ? readCampaignFolders(folder, manifest.value, errors, notes) : [];
   if (!manifest.ok || errors.length > 0) throw new RefusedError(errors.join('\n'));
-  return { topic: manifest.value, termgroups, articles };
+  return { topic: manifest.value, termgroups, articles, campaigns, notes };
 }
 
 export function readState(folder: string): LaunchState {
   const file = path.join(folder, STATE_FILE);
-  if (!fs.existsSync(file)) return emptyState();
-  const parsed = parseState(fs.readFileSync(file, 'utf8'));
-  if (!parsed.ok) throw new RefusedError(parsed.errors.join('; '));
-  return parsed.value;
+  let state = emptyState();
+  if (fs.existsSync(file)) {
+    const parsed = parseState(fs.readFileSync(file, 'utf8'));
+    if (!parsed.ok) throw new RefusedError(parsed.errors.join('; '));
+    state = parsed.value;
+  }
+  for (const name of campaignFolders(folder)) {
+    const own = path.join(folder, CAMPAIGNS_DIR, name, STATE_FILE);
+    if (!fs.existsSync(own)) continue;
+    const parsed = parseCampaignState(fs.readFileSync(own, 'utf8'));
+    if (!parsed.ok) throw new RefusedError(parsed.errors.map(e => `campaigns/${name}/${e}`).join('; '));
+    state.campaigns[name] = parsed.value;
+  }
+  return state;
 }
 
 /** Written whole and renamed into place: a crash mid-write leaves the old file, not half of a new one. */
-function writeState(folder: string, state: LaunchState): void {
-  const file = path.join(folder, STATE_FILE);
+function writeJson(file: string, value: unknown): void {
   const temp = file + '.tmp';
-  fs.writeFileSync(temp, JSON.stringify(state, null, 2) + '\n');
+  fs.writeFileSync(temp, JSON.stringify(value, null, 2) + '\n');
   fs.renameSync(temp, file);
+}
+
+/** The topic's file without the campaigns, and each campaign's file beside its manifest. */
+function writeState(folder: string, state: LaunchState): void {
+  const { campaigns, ...topic } = state;
+  writeJson(path.join(folder, STATE_FILE), topic);
+  for (const [name, own] of Object.entries(campaigns)) {
+    const dir = path.join(folder, CAMPAIGNS_DIR, name);
+    if (!fs.existsSync(dir)) continue;
+    writeJson(path.join(dir, STATE_FILE), own);
+  }
 }
 
 // ----------------------------------------------------------- snapshot --
@@ -130,15 +222,31 @@ async function findTopics(api: PlatformClient, topic: TopicManifest, state: Laun
 }
 
 export async function readSnapshot(api: PlatformClient, topic: TopicManifest, state: LaunchState): Promise<Snapshot> {
-  const [countries, sites, topics] = await Promise.all([readCountries(api), readSites(api), findTopics(api, topic, state)]);
+  const siteId = Number(topic.site);
+  const [countries, sites, topics, pixels, adAccounts, themes, rsocCounts, languages] = await Promise.all([
+    readCountries(api),
+    readSites(api),
+    findTopics(api, topic, state),
+    readPixels(api, topic.traffic_source),
+    // A placeholder site cannot be asked about; the plan refuses it by name.
+    Number.isInteger(siteId) && siteId > 0 ? readAdAccounts(api, siteId, topic.traffic_source) : Promise.resolve([]),
+    readThemes(api),
+    readRsocCounts(api),
+    readLanguages(api),
+  ]);
+  const directories = { countries, sites, pixels, adAccounts, themes, rsocCounts, languages };
   // The rest is filtered by the topic `plan` will settle on — the same rule, asked once in core.
   const choice = chooseTopic(topics, topic, state);
-  if (choice.kind !== 'known' && choice.kind !== 'found') return { topics, configurations: [], termGroups: [], posts: [], countries, sites };
+  if (choice.kind !== 'known' && choice.kind !== 'found') {
+    return { ...directories, topics, configurations: [], termGroups: [], posts: [], creatives: [], tsps: [], builders: [] };
+  }
   const topicId = choice.id;
-  const [configurations, termGroups, posts] = await Promise.all([
+  const userId = topics.find(t => t.id === topicId)?.user_id ?? 0;
+  const [configurations, termGroups, posts, creatives, tsps, builders] = await Promise.all([
     readConfigurations(api, topicId), readTermGroups(api, topicId), readPosts(api, topicId),
+    readCreatives(api, topicId), readTsps(api, topicId, userId), readBuilders(api, topicId),
   ]);
-  return { topics, configurations, termGroups, posts, countries, sites };
+  return { ...directories, topics, configurations, termGroups, posts, creatives, tsps, builders };
 }
 
 // --------------------------------------------------------------- plan --
@@ -214,6 +322,38 @@ const resolveTermGroup = (run: Run, ref: TermGroupRef): number => {
   return id;
 };
 
+const resolvePost = (run: Run, ref: PostRef): number => {
+  if (typeof ref === 'number') return ref;
+  const id = run.state.articles[ref.article]?.id;
+  if (id === undefined) throw new StepError(`статтю \`${ref.article}\` ще не опубліковано, а крок її потребує`);
+  return id;
+};
+
+const campaignState = (run: Run, campaign: string): CampaignState => run.state.campaigns[campaign] ?? emptyCampaignState();
+
+const resolveCreative = (run: Run, ref: CreativeRef): number => {
+  if (typeof ref === 'number') return ref;
+  const own = campaignState(run, ref.campaign);
+  if ('headline' in ref) {
+    if (own.headline === null || own.headline.text !== ref.headline) throw new StepError(`headline «${ref.headline}» ще не створено, а крок його потребує`);
+    return own.headline.id;
+  }
+  const id = own.creatives[ref.file]?.id;
+  if (id === undefined) throw new StepError(`креатив \`${ref.file}\` кампанії ${ref.campaign} ще не завантажено, а крок його потребує`);
+  return id;
+};
+
+/** A profile by id, with its name where some campaign's state knows it, or the one the named campaign's step made. */
+const resolveTsp = (run: Run, ref: TspRef): { id: number; name: string } => {
+  if (typeof ref === 'number') {
+    const known = Object.values(run.state.campaigns).find(c => c.tsp?.id === ref)?.tsp;
+    return { id: ref, name: known?.name ?? '' };
+  }
+  const tsp = campaignState(run, ref.tsp).tsp;
+  if (tsp === null) throw new StepError(`TSP кампанії ${ref.tsp} ще не створено, а крок його потребує`);
+  return tsp;
+};
+
 /**
  * Start applying. Refused outright when the plan has errors or there is
  * nothing to do; otherwise the job id, to be watched like an export. The ids
@@ -244,19 +384,39 @@ function adopt(state: LaunchState, plan: Plan): LaunchState {
     configuration_id: plan.resolved.configuration_id ?? state.configuration_id,
     termgroups: { ...state.termgroups, ...plan.resolved.termgroups },
     articles: { ...state.articles },
+    campaigns: { ...state.campaigns },
   };
   for (const [name, id] of Object.entries(plan.resolved.articles)) {
     if (next.articles[name]?.id !== id) next.articles[name] = { id, hash: '' };
   }
+  for (const [name, found] of Object.entries(plan.resolved.campaigns)) {
+    const own = next.campaigns[name] ?? emptyCampaignState();
+    next.campaigns[name] = {
+      ...own,
+      creatives: { ...own.creatives, ...found.creatives },
+      headline: found.headline ?? own.headline,
+      tsp: found.tsp ?? own.tsp,
+      builder: found.builder ?? own.builder,
+    };
+  }
   return JSON.stringify(next) === JSON.stringify(state) ? state : next;
 }
+
+/** Which campaign a step belongs to, for the pause between campaigns. */
+const campaignOf = (step: PlanStep): string | null => ('campaign' in step ? step.campaign : null);
 
 async function runSteps(run: Run, steps: readonly PlanStep[]): Promise<void> {
   let crashed: Error | null = null;
   try {
     for (const [index, step] of steps.entries()) {
       if (run.job.cancelled) break;
-      if (index > 0) await pause(run, pauseBefore('step', DEFAULT_QUEUE));
+      if (index > 0) {
+        // Moving from one campaign to the next is where a person takes the longer breath.
+        const previous = campaignOf(steps[index - 1]!);
+        const own = campaignOf(step);
+        const kind = previous !== null && own !== null && previous !== own ? 'campaign' : 'step';
+        await pause(run, pauseBefore(kind, DEFAULT_QUEUE));
+      }
       if (run.job.cancelled) break;
       run.job.active.clear();
       run.job.active.add(step.label);
@@ -282,28 +442,42 @@ function commit(run: Run, change: (state: LaunchState) => LaunchState): void {
   writeState(run.folder, run.state);
 }
 
+/** The same, for one campaign's state. */
+function commitCampaign(run: Run, campaign: string, change: (state: CampaignState) => CampaignState): void {
+  commit(run, state => ({ ...state, campaigns: { ...state.campaigns, [campaign]: change(state.campaigns[campaign] ?? emptyCampaignState()) } }));
+}
+
 /**
- * One step under the queue policy: send, and on an uncertain answer read
- * the list back before sending again. `find` names the entity in a fresh
- * list; `send` performs the write; `before` is the list as it was, written
- * to the state before the first send.
+ * The list as it stood, written to the state before the first send — into
+ * the campaign's file for a campaign step, the topic's otherwise.
  */
-async function withPolicy(
+function notePending(run: Run, step: PlanStep, seen: number[]): void {
+  const campaign = campaignOf(step);
+  if (campaign !== null) {
+    commitCampaign(run, campaign, own => ({ ...own, pending: { step: step.kind, key: campaign, before: seen } }));
+  } else {
+    const key = 'name' in step ? step.name : step.kind;
+    commit(run, state => ({ ...state, pending: { step: step.kind, key, before: seen } }));
+  }
+}
+
+/**
+ * One write under the queue policy: send, and on an uncertain answer read
+ * the list back before sending again. `find` names the entity in a fresh
+ * list; `send` performs the write; `seen` is the list as it was before.
+ */
+async function underPolicy(
   run: Run,
-  step: PlanStep,
-  before: () => Promise<number[]>,
+  seen: readonly number[],
   send: () => Promise<Answer>,
   find: (before: readonly number[]) => Promise<number | null>,
-): Promise<{ answer: Answer | null; id: number | null; seen: number[] }> {
-  const key = 'name' in step ? step.name : step.kind;
-  const seen = await before();
-  commit(run, state => ({ ...state, pending: { step: step.kind, key, before: seen } }));
+): Promise<{ answer: Answer | null; id: number | null }> {
   const history: Attempt[] = [];
   let answer: Answer | null = null;
   let foundId: number | null = null;
   for (;;) {
     const next = nextAction(history);
-    if (next.action === 'done') return { answer, id: foundId, seen };
+    if (next.action === 'done') return { answer, id: foundId };
     if (next.action === 'stop') throw new StepError(next.reason + (answer?.status === 'error' ? ` (${answer.text})` : ''));
     if (next.action === 'send' || next.action === 'retry') {
       // The backoff, then the jitter every write gets; a cancel during either
@@ -323,6 +497,20 @@ async function withPolicy(
       history.push({ kind: 'read', outcome: { status: 'timeout' } });
     }
   }
+}
+
+/** A create: the list before, noted in the state, then the write under the policy. */
+async function withPolicy(
+  run: Run,
+  step: PlanStep,
+  before: () => Promise<number[]>,
+  send: () => Promise<Answer>,
+  find: (before: readonly number[]) => Promise<number | null>,
+): Promise<{ answer: Answer | null; id: number | null; seen: number[] }> {
+  const seen = await before();
+  notePending(run, step, seen);
+  const { answer, id } = await underPolicy(run, seen, send, find);
+  return { answer, id, seen };
 }
 
 const toOutcome = (answer: Answer): Attempt['outcome'] =>
@@ -395,7 +583,121 @@ async function runStep(run: Run, step: PlanStep): Promise<void> {
       commit(run, state => ({ ...state, articles: { ...state.articles, [step.name]: { id: step.id, hash: step.hash } }, pending: null }));
       return;
     }
+    case 'creatives.upload': {
+      // One list before all the files and one after; each file its own
+      // request under the policy, whose read-back looks for that name alone.
+      const topicId = resolveTopic(run, step.body.topic_ids[0]!);
+      const fields = { ...step.body, topic_ids: [String(topicId)] };
+      const dir = path.join(run.folder, CAMPAIGNS_DIR, step.campaign, CREATIVES_DIR);
+      const videos = async () => (await readCreatives(api, topicId)).filter(c => c.media_type === 'Video');
+      const seen = (await videos()).map(c => c.id);
+      notePending(run, step, seen);
+      for (const file of step.files) {
+        if (run.job.cancelled) throw new CancelledApply('скасовано');
+        run.job.active.clear();
+        run.job.active.add(`${step.label} · ${file}`);
+        const bytes = fs.readFileSync(path.join(dir, file));
+        await underPolicy(
+          run, seen,
+          () => uploadCreative(api, fields, { name: file, bytes }),
+          async before => matchUploads(before, await videos(), [file]).ids[file] ?? null,
+        );
+      }
+      const match = matchUploads(seen, await videos(), step.files);
+      const hashes = new Map(run.contents.campaigns.find(c => c.name === step.campaign)?.creatives.map(c => [c.name, c.hash]) ?? []);
+      commitCampaign(run, step.campaign, own => ({
+        ...own,
+        creatives: {
+          ...own.creatives,
+          ...Object.fromEntries(Object.entries(match.ids).map(([name, id]) => [name, { id, hash: hashes.get(name) ?? '' }])),
+        },
+        // A file the read-back did not show keeps the pending list: the next plan tells its twin by it.
+        pending: match.missing.length === 0 ? null : own.pending,
+      }));
+      for (const name of match.ambiguous) {
+        run.job.outputs.push({ name: `${step.campaign}: \`${name}\` є двічі серед нових записів — взято новіший`, file: '' });
+      }
+      if (match.missing.length > 0) {
+        throw new StepError(`після завантаження read-back не бачить у топіку: ${match.missing.join(', ')} — повторний apply дозавантажить їх`);
+      }
+      return;
+    }
+    case 'headline.create': {
+      const topicId = resolveTopic(run, step.body.topic_ids[0]!);
+      const list = async (): Promise<number[]> =>
+        (await readCreatives(api, topicId)).filter(c => c.media_type === 'Headline' && headlineText(c.headline) === step.text).map(c => c.id);
+      const fresh = freshIn(list);
+      const { id, seen } = await withPolicy(run, step, list, () => createHeadline(api, { ...step.body, topic_ids: [String(topicId)] }), fresh);
+      const headlineId = id ?? await fresh(seen);
+      if (headlineId === null) throw new StepError('headline відправлено, але read-back його не бачить у топіку');
+      commitCampaign(run, step.campaign, own => ({ ...own, headline: { id: headlineId, text: step.text }, pending: null }));
+      return;
+    }
+    case 'tsp.create': {
+      const topicId = resolveTopic(run, step.body.topic_id);
+      const userId = await topicUser(run, topicId);
+      const names = new Map<number, string>();
+      const alike = async (): Promise<number[]> => {
+        const own = (await readTsps(api, topicId, userId)).filter(t => sameTsp(t.fields, step.fields));
+        for (const t of own) names.set(t.id, t.name);
+        return own.map(t => t.id);
+      };
+      const fresh = freshIn(alike);
+      const { id, seen } = await withPolicy(run, step, alike, () => createTsp(api, { ...step.body, topic_id: topicId }), fresh);
+      // The answer is a bare `success`: the read-back is where the id and the composed name come from.
+      const tspId = id ?? await fresh(seen);
+      if (tspId === null) throw new StepError('TSP відправлено, але read-back його не бачить серед профілів байера');
+      commitCampaign(run, step.campaign, own => ({ ...own, tsp: { id: tspId, name: names.get(tspId) ?? '' }, pending: null }));
+      return;
+    }
+    case 'tsp.update': {
+      const topicId = resolveTopic(run, step.body.topic_id);
+      await written(run, step, () => updateTsp(api, step.id, step.name, { ...step.body, topic_id: topicId }));
+      commitCampaign(run, step.campaign, own => ({ ...own, tsp: { id: step.id, name: step.name }, pending: null }));
+      return;
+    }
+    case 'builder.create': {
+      const topicId = resolveTopic(run, step.body.topic_id);
+      const postId = resolvePost(run, step.body.post_id);
+      const creativeIds = step.body.creative_repo_ids.map(ref => resolveCreative(run, ref));
+      const tsps = step.body.traffic_source_profile_ids.map(ref => resolveTsp(run, ref));
+      // A profile no campaign's file names yet — one the topic already had — is read for the name the platform gave it.
+      if (tsps.some(t => t.name === '')) {
+        const list = await readTsps(api, topicId, await topicUser(run, topicId));
+        for (const t of tsps) t.name = list.find(p => p.id === t.id)?.name ?? t.name;
+      }
+      const termGroupIds = step.body.term_group_ids.map(ref => resolveTermGroup(run, ref));
+      // What this campaign shares with an earlier one — the headline, the
+      // profile — goes into its own file too, so the file reads whole.
+      const own = campaignState(run, step.campaign);
+      const first = step.body.creative_repo_ids[0];
+      const headline = own.headline ?? (typeof first === 'object' && 'headline' in first ? { id: creativeIds[0]!, text: first.headline } : null);
+      const tsp = own.tsp ?? tsps[0] ?? null;
+      if (headline !== own.headline || tsp !== own.tsp) commitCampaign(run, step.campaign, state => ({ ...state, headline, tsp }));
+      const fields = {
+        ...step.body,
+        topic_id: String(topicId),
+        post_id: String(postId),
+        traffic_source_profile_ids: tsps.map(t => String(t.id)),
+        creative_repo_ids: creativeIds.map(String),
+        term_group_ids: termGroupIds.map(String),
+      };
+      const list = async (): Promise<number[]> =>
+        (await readBuilders(api, topicId)).filter(b => b.post_id === postId && sameSet(b.creative_ids, creativeIds)).map(b => b.id);
+      const { answer, id } = await withPolicy(run, step, list, () => createBuilder(api, fields), freshIn(list));
+      const builderId = createdId(answer ?? { status: 'timeout' }, 'campaignBuilder') ?? id;
+      if (builderId === null) throw new StepError('платформа не повернула id builder, і read-back його не знайшов');
+      // The campaign itself the platform makes later, after review; the next plan picks up its id and name.
+      commitCampaign(run, step.campaign, state => ({ ...state, builder: { id: builderId, campaign_id: null, campaign_name: null }, pending: null }));
+      return;
+    }
   }
+}
+
+/** The buyer the topic belongs to, for the profile list that filters by buyer and not by topic. */
+async function topicUser(run: Run, topicId: number): Promise<number> {
+  const topic = await readTopic(run.api, topicId);
+  return topic?.user_id ?? 0;
 }
 
 /** The read-back for a create: the list again, and the id in it that the `before` list lacked. */

@@ -7,12 +7,17 @@
 // `core/queue.ts` reads outcomes: a timeout is a fact to reason about, not an
 // exception to unwind.
 import type {
+  AdAccount, HeadlineBody, Pixel, PlatformBuilder, PlatformCreative, PlatformTsp, Theme, TspBody, TspFields,
+} from '../core/campaign-plan.ts';
+import type {
   Country, PlatformConfiguration, PlatformPost, PlatformTermGroup, PlatformTopic, Site, TermGroupBody,
 } from '../core/plan.ts';
 import type { SaConfig } from './config.ts';
 
-/** How long one call may take before it is treated as unanswered. Uploads are small here; posts are text. */
+/** How long one call may take before it is treated as unanswered. Posts are text; a video upload gets its own. */
 const TIMEOUT_MS = 30_000;
+/** A creative is a few megabytes over a home connection. */
+const UPLOAD_TIMEOUT_MS = 180_000;
 
 export type PlatformReady = { ready: true; token: string; organizationId: number; baseUrl: string };
 export type PlatformState = PlatformReady | { ready: false; note: string };
@@ -52,13 +57,15 @@ export class PlatformClient {
     };
   }
 
-  async call(method: string, path: string, query: Record<string, string | number>, body?: BodyInit, contentType?: string): Promise<Answer> {
+  async call(
+    method: string, path: string, query: Record<string, string | number>, body?: BodyInit, contentType?: string, timeoutMs = TIMEOUT_MS,
+  ): Promise<Answer> {
     const headers = this.headers();
     if (contentType !== undefined) headers['content-type'] = contentType;
     let response: Response;
     try {
       response = await fetch(this.url(path, query), {
-        method, headers, ...(body === undefined ? {} : { body }), signal: AbortSignal.timeout(TIMEOUT_MS),
+        method, headers, ...(body === undefined ? {} : { body }), signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (e) {
       // A network that dropped mid-request is as uncertain as a timeout: the
@@ -89,13 +96,15 @@ export class PlatformClient {
   }
 
   /** Multipart the way the admin's forms send it: a list field is one part per item under `name[]`. */
-  postForm(path: string, fields: Record<string, string | string[]>): Promise<Answer> {
+  postForm(path: string, fields: Record<string, string | string[]>, file?: { field: string; name: string; bytes: Buffer; mime: string }): Promise<Answer> {
     const form = new FormData();
     for (const [name, value] of Object.entries(fields)) {
-      if (Array.isArray(value)) for (const item of value) form.append(`${name}[]`, item);
+      if (Array.isArray(value)) for (const item of value) form.append(name.endsWith('[]') ? name : `${name}[]`, item);
       else form.append(name, value);
     }
-    return this.call('POST', path, {}, form);
+    if (file === undefined) return this.call('POST', path, {}, form);
+    form.append(file.field, new Blob([new Uint8Array(file.bytes)], { type: file.mime }), file.name);
+    return this.call('POST', path, {}, form, undefined, UPLOAD_TIMEOUT_MS);
   }
 }
 
@@ -118,7 +127,7 @@ function need(answer: Answer, what: string): unknown {
 
 const toTopic = (raw: unknown): PlatformTopic => {
   const t = bag(raw);
-  return { id: num(t['id']), name: str(t['name']), internal_name: str(t['internal_name']) };
+  return { id: num(t['id']), name: str(t['name']), internal_name: str(t['internal_name']), user_id: num(t['user_id'] ?? 0) };
 };
 
 /** Every topic whose name or internal name the platform's search matches. */
@@ -186,6 +195,153 @@ export async function readSites(client: PlatformClient): Promise<Site[]> {
   });
 }
 
+const listOf = (body: unknown, key: string): unknown[] => {
+  const b = bag(body);
+  return Array.isArray(b[key]) ? b[key] : Array.isArray(body) ? body : [];
+};
+
+// -- the directories the builder is filled from
+
+export async function readPixels(client: PlatformClient, trafficSource: string): Promise<Pixel[]> {
+  const body = need(await client.get('/pixels', { traffic_source: trafficSource }), 'GET /pixels');
+  return listOf(body, 'pixels').map(raw => {
+    const p = bag(raw);
+    return { id: num(p['id']), name: str(p['name']), ad_account_id: str(p['ad_account_id']) };
+  });
+}
+
+export async function readAdAccounts(client: PlatformClient, siteId: number, trafficSource: string): Promise<AdAccount[]> {
+  const body = need(await client.get('/facebook/ad-accounts', { site_id: siteId, traffic_source: trafficSource }), 'GET /facebook/ad-accounts');
+  return listOf(body, 'adAccounts').map(raw => {
+    const a = bag(raw);
+    return { id: num(a['id']), name: str(a['account_name'] ?? a['internal_account_name']), account_id: str(a['account_id']) };
+  });
+}
+
+export async function readThemes(client: PlatformClient): Promise<Theme[]> {
+  const body = need(await client.get('/themes', { version: 'v1' }), 'GET /themes');
+  return listOf(body, 'themes').map(raw => {
+    const t = bag(raw);
+    return { id: num(t['id']), key: str(t['key']), title: str(t['title']) };
+  });
+}
+
+export async function readRsocCounts(client: PlatformClient): Promise<number[]> {
+  const body = need(await client.get('/rsoc-counts'), 'GET /rsoc-counts');
+  return listOf(body, 'rsocCounts').map(num).filter(n => Number.isInteger(n));
+}
+
+export async function readLanguages(client: PlatformClient): Promise<string[]> {
+  const body = need(await client.get('/languages'), 'GET /languages');
+  return listOf(body, 'languages').map(raw => str(bag(raw)['name'])).filter(n => n !== '');
+}
+
+// -- what the topic holds for its campaigns
+
+/** Every creative repo entry attached to the topic, videos and headlines alike. */
+export async function readCreatives(client: PlatformClient, topicId: number): Promise<PlatformCreative[]> {
+  const body = need(await client.get('/creative-repo', { topic_id: topicId }), 'GET /creative-repo');
+  return listOf(body, 'creativeRepos').map(raw => {
+    const c = bag(raw);
+    return {
+      id: num(c['id']),
+      media_type: str(c['media_type']),
+      original_filename: c['original_filename'] == null ? null : str(c['original_filename']),
+      headline: c['headline'] == null ? null : str(c['headline']),
+      status: str(c['status']),
+      ad_script: c['ad_script'] == null ? null : str(c['ad_script']),
+    };
+  });
+}
+
+/** A JSON list the platform stores as text (`age_from`), or as a list, or as one word. */
+const listField = (v: unknown): string[] => {
+  if (Array.isArray(v)) return v.map(str);
+  if (typeof v === 'string' && v.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(v);
+      return Array.isArray(parsed) ? parsed.map(str) : [];
+    } catch {
+      return [];
+    }
+  }
+  return v == null || v === '' ? [] : [str(v)];
+};
+
+/** The schedule is a row per day with `checked`; a row of unticked days is what the admin sends for none. */
+const anyDayTicked = (v: unknown): boolean => {
+  let rows: unknown = v;
+  if (typeof v === 'string') {
+    try {
+      rows = JSON.parse(v);
+    } catch {
+      return false;
+    }
+  }
+  return Array.isArray(rows) && rows.some(r => bag(r)['checked'] === true);
+};
+
+const toTspFields = (t: Record<string, unknown>): TspFields => {
+  const endDate = str(t['end_date'] ?? '');
+  return {
+    budget: num(t['budget']),
+    bid: num(t['bid']),
+    location: listField(t['location']),
+    language: str(t['language'] ?? 'All'),
+    gender: str(t['gender'] ?? 'All'),
+    age: listField(t['age_from']).length === 0 ? ['All'] : listField(t['age_from']),
+    devices: listField(t['devices']).length === 0 ? ['All'] : listField(t['devices']),
+    os: listField(t['device_os']),
+    launch_tomorrow: num(t['lunch_tomorrow'] ?? 0) === 1,
+    end_date: endDate === '' || endDate === '0' ? null : endDate,
+    scheduled: anyDayTicked(t['schedule']),
+  };
+};
+
+/**
+ * The topic's profiles. The list does not filter by topic on its own, but by
+ * the buyer it does — and the topic knows its buyer — so the read is the
+ * buyer's profiles, narrowed here.
+ */
+export async function readTsps(client: PlatformClient, topicId: number, userId: number): Promise<PlatformTsp[]> {
+  const query = userId > 0 ? { user_id: userId } : {};
+  const body = need(await client.get('/traffic-source-profiles', query), 'GET /traffic-source-profiles');
+  return listOf(body, 'trafficSourceProfiles').map(raw => {
+    const t = bag(raw);
+    return { id: num(t['id']), name: str(t['name']), topic_id: num(t['topic_id']), fields: toTspFields(t) };
+  }).filter(t => t.topic_id === topicId);
+}
+
+const toBuilder = (raw: unknown): PlatformBuilder => {
+  const b = bag(raw);
+  return {
+    id: num(b['id']),
+    topic_id: num(b['topic_id']),
+    post_id: num(b['post_id']),
+    pixel_id: num(b['pixel_id']),
+    status: str(b['status']),
+    creative_ids: (Array.isArray(b['creative_repos']) ? b['creative_repos'] : []).map(c => num(bag(c)['id'])),
+    campaigns: (Array.isArray(b['campaigns']) ? b['campaigns'] : []).map(c => {
+      const campaign = bag(c);
+      return { id: num(campaign['id']), name: str(campaign['name']), term_group_id: campaign['term_group_id'] == null ? null : num(campaign['term_group_id']) };
+    }),
+  };
+};
+
+/** The list is paged; a topic scaled to hundreds of campaigns is read page by page until one comes back short. */
+const BUILDER_PAGE = 100;
+
+export async function readBuilders(client: PlatformClient, topicId: number): Promise<PlatformBuilder[]> {
+  const builders: PlatformBuilder[] = [];
+  for (let pageId = 0; pageId < 100; pageId++) {
+    const body = need(await client.get('/campaign-builder', { topic_id: topicId, pageId, limit: BUILDER_PAGE }), 'GET /campaign-builder');
+    const page = listOf(body, 'campaignBuilders').map(toBuilder);
+    builders.push(...page.filter(b => b.topic_id === topicId));
+    if (page.length < BUILDER_PAGE) break;
+  }
+  return builders;
+}
+
 // --------------------------------------------------------------- writes --
 
 export const createTopic = (client: PlatformClient, body: { name: string; internal_name: string }): Promise<Answer> =>
@@ -233,9 +389,72 @@ export const createPost = (client: PlatformClient, fields: PostFields): Promise<
 export const updatePost = (client: PlatformClient, id: number, fields: PostFields): Promise<Answer> =>
   client.postForm(`/posts/${id}/update`, { ...postForm(fields), id: String(id) });
 
-/** The id a create answered with, where the platform gives one — topics and term groups do. */
-export function createdId(answer: Answer, key: 'topic' | 'termGroup'): number | null {
+/** The id a create answered with, where the platform gives one — topics, term groups and builders do. */
+export function createdId(answer: Answer, key: 'topic' | 'termGroup' | 'campaignBuilder'): number | null {
   if (answer.status !== 'ok') return null;
   const id = bag(bag(answer.body)[key])['id'];
   return typeof id === 'number' && Number.isInteger(id) ? id : null;
 }
+
+// -- the campaign half of the chain
+
+export interface UploadFields {
+  grade: string;
+  language: string;
+  ad_script: string;
+  media_type: string;
+  traffic_sources: string[];
+  topic_ids: string[];
+  countries: string[];
+}
+
+/** One video into the repository, the admin's form part for part, the file last. */
+export const uploadCreative = (client: PlatformClient, fields: UploadFields, file: { name: string; bytes: Buffer }): Promise<Answer> =>
+  client.postForm('/creative-repo', { ...fields }, { field: 'file', name: file.name, bytes: file.bytes, mime: 'video/mp4' });
+
+/** The admin sends every list twice — once plain, once as `name[]` — and so does this. */
+export const createHeadline = (client: PlatformClient, body: Omit<HeadlineBody, 'topic_ids'> & { topic_ids: string[] }): Promise<Answer> =>
+  client.postForm('/creative-repo/headline', {
+    topic_ids: body.topic_ids[0] ?? '',
+    grade: body.grade,
+    countries: body.countries[0] ?? 'All',
+    headlines: body.headlines[0] ?? '',
+    primary_texts: '',
+    descriptions: '',
+    language: body.language,
+    source: body.source,
+    'topic_ids[]': body.topic_ids,
+    'countries[]': body.countries,
+    'headlines[]': body.headlines,
+    'primary_texts[]': body.primary_texts,
+    'descriptions[]': body.descriptions,
+  });
+
+export const createTsp = (client: PlatformClient, body: Omit<TspBody, 'topic_id'> & { topic_id: number }): Promise<Answer> =>
+  client.postJson('/traffic-source-profiles', body);
+
+export const updateTsp = (client: PlatformClient, id: number, name: string, body: Omit<TspBody, 'topic_id'> & { topic_id: number }): Promise<Answer> =>
+  client.putJson(`/traffic-source-profiles/${id}`, { ...body, id, name });
+
+export interface BuilderFields {
+  topic_id: string;
+  country: string;
+  site_id: string;
+  post_id: string;
+  language: string;
+  monetization_type: string;
+  rsoc_count: string;
+  conversion_event_type: string;
+  pixel_id: string;
+  traffic_source: string;
+  traffic_source_profile_ids: string[];
+  creative_repo_ids: string[];
+  term_group_ids: string[];
+  ad_account_ids: string[];
+  use_ad_title_as_referrer_ad_text: string;
+  use_keyword_rotation: string;
+  themes: string[];
+}
+
+export const createBuilder = (client: PlatformClient, fields: BuilderFields): Promise<Answer> =>
+  client.postForm('/campaign-builder', { ...fields });

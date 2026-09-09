@@ -62,6 +62,8 @@ export interface TspManifest {
   os: string[];
   /** Hours of the week the campaign runs, as the platform's schedule rows; empty means always. */
   schedule: string[];
+  /** The language the profile targets, as the platform names it (`Italian`), or `All`. */
+  language: string;
 }
 
 export interface CampaignManifest {
@@ -212,7 +214,7 @@ export function parseCampaignManifest(source: string, topic: TopicManifest): Par
 
   let tsp: TspManifest = {
     budget: 0, bid: 0, launch_tomorrow: true, end_date: null,
-    age: ['All'], gender: 'All', devices: ['All'], os: ['All'], schedule: [],
+    age: ['All'], gender: 'All', devices: ['All'], os: ['All'], schedule: [], language: 'All',
   };
   if (!isBag(bag['tsp'])) {
     errors.push('поле `tsp` обов\'язкове: бюджет і бід кампанії');
@@ -233,6 +235,7 @@ export function parseCampaignManifest(source: string, topic: TopicManifest): Par
       devices: names(raw, 'devices', own, ['All']),
       os: names(raw, 'os', own, ['All']),
       schedule: names(raw, 'schedule', own, []),
+      language: names(raw, 'language', own, ['All'])[0] ?? 'All',
     };
     for (const e of own) errors.push('tsp: ' + e);
   }
@@ -331,6 +334,8 @@ export function newLaunchTree(options: NewLaunchOptions): LaunchTree {
     '  devices: [All]',
     '  os: [All]',
     '  schedule: []',
+    '  # Мова таргетингу, як її називає платформа (Italian), або All.',
+    '  language: All',
     '',
   ].join('\n');
 

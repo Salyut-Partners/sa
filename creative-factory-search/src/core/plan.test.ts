@@ -30,7 +30,9 @@ const COUNTRIES = [
 const SITES = [{ id: 182, url: 'useconsumer.com' }];
 
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
-  topics: [], configurations: [], termGroups: [], posts: [], countries: COUNTRIES, sites: SITES, ...over,
+  topics: [], configurations: [], termGroups: [], posts: [], countries: COUNTRIES, sites: SITES,
+  creatives: [], tsps: [], builders: [], pixels: [], adAccounts: [], themes: [], rsocCounts: [], languages: [],
+  ...over,
 });
 
 const tg = (name: string, keywords: string[], over: Partial<TermGroupSource> = {}): TermGroupSource => ({
@@ -43,16 +45,18 @@ const article = (name: string, markdown: string) => {
   return { name, article: parsed.value };
 };
 
-const bare = (): LaunchContents => ({ topic: topic(), termgroups: [], articles: [] });
+const bare = (): LaunchContents => ({ topic: topic(), termgroups: [], articles: [], campaigns: [], notes: [] });
 
 const full = (): LaunchContents => ({
   topic: topic(),
   termgroups: [tg('tg-main', ['avia sales', 'avia workers'])],
   articles: [article('article-a', '# Jobs at airports\n\nText.')],
+  campaigns: [],
+  notes: [],
 });
 
 const ON_PLATFORM = snapshot({
-  topics: [{ id: 106752, name: 'AI Vadim Sperm IT', internal_name: 'AIVadimSpermIT' }],
+  topics: [{ id: 106752, name: 'AI Vadim Sperm IT', internal_name: 'AIVadimSpermIT', user_id: 1099 }],
   configurations: [{ id: 108397, name: 'AI Vadim Sperm IT', topic_id: 106752, country: 'All', traffic_source: 'tiktok' }],
   termGroups: [{ id: 211532, name: 'tg-main', terms: ['avia sales', 'avia workers'], weight: 100, country: 'All', language: 'All' }],
   posts: [{ id: 130892, title: 'Jobs at airports', status: 'Publish', site_id: 182, country: ['All'], language: 'All', topic_ids: [106752] }],
@@ -64,6 +68,7 @@ const DONE_STATE = (): LaunchState => ({
   termgroups: { 'tg-main': 211532 },
   articles: { 'article-a': { id: 130892, hash: articleHash(full().articles[0]!.article, topic(), ['All']) } },
   pending: null,
+  campaigns: {},
 });
 
 describe('plan on a folder that has never been applied', () => {
@@ -125,7 +130,7 @@ describe('plan after everything is on the platform', () => {
   });
 
   it('refuses when two topics carry the manifest internal_name — one of them is a duplicate already', () => {
-    const twice = snapshot({ topics: [...ON_PLATFORM.topics, { id: 1, name: 'x', internal_name: 'AIVadimSpermIT' }] });
+    const twice = snapshot({ topics: [...ON_PLATFORM.topics, { id: 1, name: 'x', internal_name: 'AIVadimSpermIT', user_id: 1099 }] });
     const result = plan(bare(), twice, emptyState());
     expect(result.errors.join()).toMatch(/два топіки/);
     // Unless the list written before the interrupted create says which one is ours.
@@ -296,7 +301,7 @@ describe('resolveCountry', () => {
 describe('state', () => {
   it('reads a state file and fills what an older one lacks', () => {
     const result = parseState('{"topic_id": 5}');
-    expect(result).toEqual({ ok: true, value: { topic_id: 5, configuration_id: null, termgroups: {}, articles: {}, pending: null } });
+    expect(result).toEqual({ ok: true, value: { topic_id: 5, configuration_id: null, termgroups: {}, articles: {}, pending: null, campaigns: {} } });
     expect(parseState('nope').ok).toBe(false);
     expect(parseState('[]').ok).toBe(false);
   });
@@ -310,7 +315,7 @@ describe('previewPlan', () => {
     if (!parsed.ok) throw new Error();
     contents.articles = [{ name: 'article-a', article: parsed.value }];
     const shown = previewPlan(plan(contents, snapshot(), emptyState()));
-    const step = shown.steps.find(s => s.kind === 'article.create') as { body: { description: string } };
+    const step = shown.steps.find(s => s.kind === 'article.create') as unknown as { body: { description: string } };
     expect(step.body.description).toBe('<p><img src="data:image/jpeg;base64,… (3 КБ картинки inline)" alt="a"></p><p>Text.</p>');
   });
 });

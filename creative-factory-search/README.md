@@ -168,6 +168,51 @@ The rule of the queue — timeouts, retries, pauses — is `core/queue.ts`; the
 create-or-update decisions are `core/plan.ts`; both are tested there and only
 obeyed in `server/apply.ts`.
 
+### Creatives, headline, TSP and the campaign
+
+A campaign is a folder under `campaigns/` with `campaign.yaml`, `script.md`
+and mp4 files at the top of `creatives/` (`rejected/` below it is not sent).
+A folder with no mp4 yet is the buyer's draft: the plan says it was left out
+and goes on with the rest, placeholders and all. Once there are files, the
+manifest has to be whole, and everything it points at is checked against
+the platform before a single request is shown — the term group and article
+folders, the cabinet alias and its ad account and pixel, the theme (by id,
+key or title), the rsoc count, the country, the profile's language, age
+bands and gender. The manifest's own `language` is the export locale the
+placement rule reads; what the platform gets is `All`, as the admin sends
+it, and targeting by language is the profile's `tsp.language`. The plan
+for one campaign is four steps, in order:
+
+- **Creatives** — one request per file, `ad_script` the campaign's script,
+  in a single step: one list of the topic's videos before all the uploads,
+  one after, and the new entries paired with the files by
+  `original_filename`. A run that fell over after six of twelve leaves six
+  on the platform; the next plan finds them by name and uploads the six
+  that are missing. The same name in two campaigns of one plan is refused
+  before anything goes up — the pairing is by name. Each file's hash goes
+  into the state beside its id, so a creative re-exported under the same
+  name is uploaded again while the campaign is unbuilt, and only warned
+  about after — a relaunch is ticket 12.
+- **Headline** — one per text per topic, wrapped as the admin wraps it,
+  matched by its words; two campaigns with one headline share the entry.
+- **TSP** — the profile as the admin's form sends it. Profiles are shared by
+  every campaign of the topic whose fields agree, so a profile the topic
+  already has is used, and one this plan makes is referenced by the
+  campaigns after it. A changed budget or bid is an update in place while
+  the campaign is unbuilt; after, a warning — the live campaign keeps what
+  it was published with.
+- **Builder** — the campaign, from the post, the term group, the creatives
+  and the profile, with the pixel, ad account and theme filled from the
+  directories read before the plan; the step says what it took from them.
+  Create-only: found again on the platform by its post and creative set,
+  never updated. The campaign the platform makes from it — id and composed
+  name — is picked up by a later plan and written down.
+
+Each campaign has its own `state.json` beside its manifest: file name → id
+and hash, the headline, the profile with the name the platform composed,
+the builder with its campaign. The read-back pairing and the create-or-share
+decisions are `core/campaign-plan.ts` and tested there.
+
 ### A batch in its topic folder
 
 The panel's first group binds the project to `launches/<key>/batches/<batch>/`.
@@ -210,6 +255,8 @@ Three build units and one rule.
   `core/launch.ts` decides what a launch is: the manifests, the key, the tree.
   `core/plan.ts` decides what the platform is asked for — the steps, their
   bodies, create against update — from the folder, a snapshot and the state;
+  `core/campaign-plan.ts` does the same for a campaign — creatives,
+  headline, profile, builder — and pairs uploads with read-backs;
   `core/article.ts` turns `article.md` into the HTML that is sent;
   `core/queue.ts` decides what happens to a call that went wrong.
   `server/platform.ts` is the digifor client, thin, answering outcomes rather
