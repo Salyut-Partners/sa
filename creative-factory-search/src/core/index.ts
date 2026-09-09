@@ -16,3 +16,4 @@ export * from './history.ts';
 export * from './serialize.ts';
 export * from './launch.ts';
 export * from './batch-folder.ts';
+export * from './placement.ts';

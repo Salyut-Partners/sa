@@ -13,7 +13,7 @@ import {
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
 import { clickupState } from './clickup.ts';
 import { configPath, ensureLaunchesRoot, loadConfig } from './config.ts';
-import { listBatches, readBatch, writeBatch } from './batches.ts';
+import { creativesFolder, listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
 import { createLaunch, existingLaunchKeys, RefusedError } from './launches.ts';
 import { isTrafficSource } from '../core/launch.ts';
 import { closeBrowser } from './render.ts';
@@ -134,6 +134,14 @@ function answerFailure(res: express.Response, e: unknown, what: string): void {
   }
 }
 
+app.get('/api/launches/:key/campaigns', (req, res) => {
+  try {
+    res.json({ campaigns: listCampaigns(loadConfig(), req.params.key) });
+  } catch (e) {
+    answerFailure(res, e, 'campaigns');
+  }
+});
+
 app.get('/api/launches/:key/batches', (req, res) => {
   try {
     res.json({ batches: listBatches(loadConfig(), req.params.key) });
@@ -162,9 +170,10 @@ app.put('/api/launches/:key/batches/:batch', (req, res) => {
 
 app.post('/api/batch', (req, res) => {
   try {
-    res.json({ id: startBatch(req.body, ORIGIN) });
+    const config = loadConfig();
+    res.json({ id: startBatch(req.body, ORIGIN, (key, campaign) => creativesFolder(config, key, campaign)) });
   } catch (e) {
-    if (e instanceof BadRequestError) res.status(400).json({ error: e.message });
+    if (e instanceof BadRequestError || e instanceof RefusedError) res.status(400).json({ error: e.message });
     else {
       console.error('batch failed to start:', (e as Error).message);
       res.status(500).json({ error: (e as Error).message });

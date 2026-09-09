@@ -27,12 +27,26 @@ function readConcurrency(): number {
 /** How many finished jobs are kept for their archive before being swept. */
 const KEEP_JOBS = 6;
 
+/**
+ * Where the files go when they go to a launch rather than to a download:
+ * archive name → campaign folder name, inside the launch. The plan has
+ * already been cut down to the files that have a destination.
+ */
+export interface BatchOutput {
+  launchKey: string;
+  destinations: Record<string, string>;
+}
+
 export interface BatchRequest {
   groups: BatchGroup[];
   /** The length the user set. A group only ever grows past it, to hold speech. */
   duration: number;
   fitToVoice: boolean;
+  output?: BatchOutput;
 }
+
+/** Turns a campaign name into the folder its creatives go to, or throws for the buyer. */
+export type FolderResolver = (launchKey: string, campaign: string) => string;
 
 export type JobState = 'running' | 'done' | 'cancelled' | 'failed';
 
@@ -53,8 +67,10 @@ export interface JobStatus {
   /** Seconds since it started, and the guess at how many are left. */
   elapsed: number;
   remaining: number | null;
-  /** Whether there is anything to download. */
+  /** Whether there is anything to download. Never for a job that wrote to folders. */
   ready: boolean;
+  /** The campaign folders files were written to, relative to the launch, when they were. */
+  folders: string[];
 }
 
 interface Output {
@@ -87,6 +103,13 @@ interface Job {
   dir: string;
   /** Everything on disk this job made, so cancelling can clean up after itself. */
   scratch: string[];
+  /**
+   * Archive name → the file it is written as, for a job going to a launch.
+   * Null is a download: everything stays in `dir` until it is fetched.
+   */
+  targets: Map<string, string> | null;
+  /** Campaign folders that received at least one file, as `campaigns/<name>/creatives`. */
+  folders: Set<string>;
 }
 
 const jobs = new Map<string, Job>();
@@ -97,8 +120,23 @@ export class BadRequestError extends Error {}
  * Start an export. Returns at once with the id to watch it by — the work runs on
  * after this function has answered.
  */
-export function startBatch(request: unknown, origin: string): string {
-  const { groups, duration, fitToVoice } = validate(request);
+export function startBatch(request: unknown, origin: string, resolve: FolderResolver): string {
+  const { groups, duration, fitToVoice, output } = validate(request);
+  // Folders are resolved before the job exists: a campaign that is not there
+  // is a refusal the buyer reads now, not an error against every file later.
+  let targets: Map<string, string> | null = null;
+  if (output !== undefined) {
+    const folders = new Map<string, string>();
+    targets = new Map();
+    for (const [name, campaign] of Object.entries(output.destinations)) {
+      let folder = folders.get(campaign);
+      if (folder === undefined) {
+        folder = resolve(output.launchKey, campaign);
+        folders.set(campaign, folder);
+      }
+      targets.set(name, path.join(folder, name));
+    }
+  }
   const id = crypto.randomUUID();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cfs-batch-'));
   const job: Job = {
@@ -114,6 +152,8 @@ export function startBatch(request: unknown, origin: string): string {
     settled: false,
     dir,
     scratch: [],
+    targets,
+    folders: new Set(),
   };
   jobs.set(id, job);
   sweep();
@@ -150,7 +190,20 @@ function validate(request: unknown): BatchRequest {
   }
   const duration = Number(body?.duration);
   if (!(duration > 0)) throw new BadRequestError('некоректна тривалість');
-  return { groups, duration, fitToVoice: body?.fitToVoice !== false };
+  const output = body?.output;
+  if (output !== undefined) {
+    if (typeof output?.launchKey !== 'string' || typeof output.destinations !== 'object' || output.destinations === null) {
+      throw new BadRequestError('пошкоджена розкладка експорту');
+    }
+    for (const group of groups) {
+      for (const item of group.items) {
+        if (typeof output.destinations[item.name] !== 'string') {
+          throw new BadRequestError(`файл ${item.name} не має теки призначення`);
+        }
+      }
+    }
+  }
+  return { groups, duration, fitToVoice: body?.fitToVoice !== false, ...(output !== undefined ? { output } : {}) };
 }
 
 export const jobById = (id: string): Job | undefined => jobs.get(id);
@@ -171,7 +224,8 @@ export function statusOf(job: Job): JobStatus {
     remaining: done === 0 || job.state !== 'running'
       ? null
       : (elapsed / done) * (job.total - done),
-    ready: job.outputs.length > 0 && job.state !== 'running',
+    ready: job.targets === null && job.outputs.length > 0 && job.state !== 'running',
+    folders: [...job.folders].sort(),
   };
 }
 
@@ -321,11 +375,12 @@ async function renderGroup(job: Job, group: BatchGroup, ctx: GroupContext): Prom
     if (job.cancelled) return;
     if (!clips.has(item.name)) continue;
     const clip = clips.get(item.name)!;
-    const out = path.join(job.dir, item.name);
+    const out = job.targets?.get(item.name) ?? path.join(job.dir, item.name);
     try {
       await working(job, item.name, () =>
         clip === null ? fs.promises.copyFile(silent, out) : mux(silent, clip.file, out));
       job.outputs.push({ name: item.name, file: out });
+      if (job.targets !== null) job.folders.add(relativeFolder(out));
     } catch (e) {
       job.errors.push({ name: item.name, message: explain(e) });
     }
@@ -359,6 +414,10 @@ async function speak(
   job.scratch.push(file);
   return { file, seconds: await probeDuration(file) };
 }
+
+/** `campaigns/<name>/creatives` out of a full path, for the panel to name. */
+const relativeFolder = (file: string): string =>
+  path.dirname(file).split(path.sep).slice(-3).join('/');
 
 /**
  * A failure in the words the panel will show.

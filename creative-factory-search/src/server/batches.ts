@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isBatchName, joinPhotos, splitPhotos } from '../core/batch-folder.ts';
 import { isLaunchKey } from '../core/launch.ts';
+import { campaignSummary, CREATIVES_DIR, type CampaignInfo } from '../core/placement.ts';
 import { fromFile, type ProjectFile } from '../core/serialize.ts';
 import type { SaConfig } from './config.ts';
 import { RefusedError } from './launches.ts';
@@ -66,6 +67,40 @@ export function readBatch(config: SaConfig, launchKey: string, batch: string): B
     const mime = MIME_BY_EXT[path.extname(target).toLowerCase()] ?? 'application/octet-stream';
     return `data:${mime};base64,${fs.readFileSync(target).toString('base64')}`;
   });
+}
+
+// --------------------------------------------------------------- campaigns --
+
+/** The campaigns a launch has, with the language each manifest says it is for. */
+export function listCampaigns(config: SaConfig, launchKey: string): CampaignInfo[] {
+  const dir = path.join(launchFolder(config, launchKey), 'campaigns');
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter(d => d.isDirectory() && isBatchName(d.name))
+    .map(d => {
+      const manifest = path.join(dir, d.name, 'campaign.yaml');
+      const summary = fs.existsSync(manifest)
+        ? campaignSummary(fs.readFileSync(manifest, 'utf8'))
+        : { language: null, country: null };
+      return { name: d.name, ...summary };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The folder a campaign's creatives are written to, made if it is not there.
+ * The campaign itself has to exist: an export does not invent campaigns, it
+ * fills the ones the buyer laid out.
+ */
+export function creativesFolder(config: SaConfig, launchKey: string, campaign: string): string {
+  if (!isBatchName(campaign)) throw new RefusedError(`це не назва кампанії: \`${campaign}\``);
+  const folder = path.join(launchFolder(config, launchKey), 'campaigns', campaign);
+  if (!fs.existsSync(folder)) {
+    throw new RefusedError(`кампанії \`${campaign}\` немає в ${launchKey}/campaigns — створіть теку з campaign.yaml`);
+  }
+  const target = path.join(folder, CREATIVES_DIR);
+  fs.mkdirSync(target, { recursive: true });
+  return target;
 }
 
 export interface BatchWritten {

@@ -611,7 +611,7 @@ export function SidePanel(props: Props) {
 
           <hr />
 
-          <ExportPanel project={project} run={props.run} onExportOne={props.onExportOne} />
+          <ExportPanel project={project} run={props.run} onExportOne={props.onExportOne} topic={props.topic} />
         </>
       ) : null}
     </aside>

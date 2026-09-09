@@ -2,18 +2,19 @@
 // hold no knowledge of routes, and so a failed request always arrives as a
 // sentence rather than as a status code.
 import type { BatchPlan } from '../core/batch.ts';
+import type { CampaignInfo } from '../core/placement.ts';
 import type { ProjectFile } from '../core/serialize.ts';
 import type { LocaleId } from '../core/types.ts';
 import type { VoiceModel } from '../core/voice.ts';
 // Type-only, and therefore erased: the editor never bundles a line of server
 // code. Naming the server's own types is what stops the two ends of each of
 // these routes drifting apart without anything noticing.
-import type { JobFailure, JobStatus } from '../server/batch.ts';
+import type { BatchOutput, JobFailure, JobStatus } from '../server/batch.ts';
 import type { BatchRead, BatchWritten } from '../server/batches.ts';
 import type { Translations, TranslatorId } from '../server/translate.ts';
 import type { Voice, VoiceCatalogue as ServerVoices } from '../server/tts.ts';
 
-export type { JobFailure, JobStatus, Voice };
+export type { BatchOutput, JobFailure, JobStatus, Voice };
 
 /**
  * The sentence behind a failed response.
@@ -93,6 +94,10 @@ export const translate = (
 export const fetchLaunches = (): Promise<string[]> =>
   ask<{ launches: string[] }>('/api/launches').then(r => r.launches);
 
+/** The campaign folders of a launch, each with the language its manifest names. */
+export const fetchCampaigns = (launchKey: string): Promise<CampaignInfo[]> =>
+  ask<{ campaigns: CampaignInfo[] }>(`/api/launches/${launchKey}/campaigns`).then(r => r.campaigns);
+
 export const fetchBatches = (launchKey: string): Promise<string[]> =>
   ask<{ batches: string[] }>(`/api/launches/${launchKey}/batches`).then(r => r.batches);
 
@@ -109,12 +114,20 @@ export const writeBatch = (launchKey: string, batch: string, file: ProjectFile):
 
 // ------------------------------------------------------------------ export --
 
+/**
+ * Start an export. With `output` the files are written into the launch's
+ * campaign folders and nothing comes back to download; without it they are
+ * fetched as before.
+ */
 export const startBatch = (
   plan: BatchPlan,
   duration: number,
   fitToVoice: boolean,
+  output?: BatchOutput,
 ): Promise<{ id: string }> =>
-  ask<{ id: string }>('/api/batch', asJson({ groups: plan.groups, duration, fitToVoice }));
+  ask<{ id: string }>('/api/batch', asJson({
+    groups: plan.groups, duration, fitToVoice, ...(output === undefined ? {} : { output }),
+  }));
 
 export const batchStatus = (id: string): Promise<JobStatus> =>
   ask<JobStatus>('/api/batch/' + id);

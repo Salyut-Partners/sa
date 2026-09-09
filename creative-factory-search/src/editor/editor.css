@@ -338,6 +338,14 @@ textarea.mixed::placeholder { color: var(--warn); font-style: italic; }
 .add-locale { width: auto; padding: 6px 8px; font-size: 13px; }
 
 /* Progress: the bar answers "how far", the line under it answers "on what". */
+/* One language's destination: the flag and name hold their width, the select
+   takes the rest; the photo row underneath is the exception, indented. */
+.dest-row { margin-bottom: 8px; }
+.dest-lang { flex: none; width: 118px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dest-photos { margin-top: 4px; }
+.dest-photos .dest-lang { color: var(--muted); padding-left: 10px; }
+.dest-note { margin-top: 3px; min-height: 0; }
+
 .export-progress .bar {
   height: 6px; border-radius: 3px; background: var(--well); overflow: hidden;
   border: 1px solid var(--line);

@@ -46,7 +46,15 @@ language has its script and, if you want, a voice of its own; the panel counts
 the characters and quotes the price before you spend it, once per language
 however many photos are in the batch.
 
-Export takes the selected photos across every language ticked for release. It
+Export takes the selected photos across every language ticked for release.
+With the batch bound to a topic the panel grows a row per language saying
+which campaign folder its files go to — the campaign whose manifest speaks the
+language, by default — and a second control when only some photos are
+selected, to send those elsewhere or nowhere; a language can be left out
+entirely. The rule is data in `core/placement.ts`, so the split is shown before
+the button is pressed and the count on it is arithmetic, not a plan. The server
+writes each mp4 straight into `campaigns/<campaign>/creatives/` and the
+finished note names the folders; unbound, the export is a download as before. It
 runs as a job on the server, so the editor keeps working while it goes: a bar,
 the file being made, an estimate, and a cancel. Videos that differ only in their
 soundtrack are drawn once and muxed twice, and the panel says how many frame
