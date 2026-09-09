@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isLocaleId } from '../core/locales.ts';
 import { VOICE_MODELS } from '../core/voice.ts';
+import { describePlan, planLaunch, startApply } from './apply.ts';
 import { startBatch } from './batch.ts';
 import { campaignCreativesDir, listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
@@ -15,6 +16,7 @@ import { configPath, ensureLaunchesRoot, loadConfig } from './config.ts';
 import { createLaunch, existingLaunchKeys, RefusedError } from './launches.ts';
 import { isTrafficSource } from '../core/launch.ts';
 import { BadRequestError, cancelJob, jobById, outputsOf, statusOf } from './jobs.ts';
+import { PlatformReadError, platformState } from './platform.ts';
 import { closeBrowser } from './render.ts';
 import { startSubtitles, subsState, SUBS_OUTPUT } from './subs.ts';
 import { listVoices } from './tts.ts';
@@ -78,10 +80,14 @@ app.post('/api/translate', async (req, res) => {
 app.get('/api/config', (_req, res) => {
   const config = loadConfig();
   const clickup = clickupState(config);
+  const platform = platformState(config);
   res.json({
     path: configPath(),
     launches_root: config.launches_root,
     clickup: clickup.ready ? { ready: true, list_id: clickup.listId } : { ready: false, note: clickup.note },
+    platform: platform.ready
+      ? { ready: true, organization_id: platform.organizationId, base_url: platform.baseUrl }
+      : { ready: false, note: platform.note },
   });
 });
 
@@ -123,16 +129,42 @@ app.post('/api/launches', async (req, res) => {
   }
 });
 
-// ----------------------------------------------------------------- batches --
-
 /** A refusal is the buyer's to fix and comes back as a 400; anything else is ours. */
 function answerFailure(res: express.Response, e: unknown, what: string): void {
   if (e instanceof RefusedError) res.status(400).json({ error: e.message });
+  else if (e instanceof PlatformReadError) res.status(502).json({ error: e.message });
   else {
     console.error(`${what}:`, (e as Error).message);
     res.status(500).json({ error: (e as Error).message });
   }
 }
+
+// -------------------------------------------------------------- plan/apply --
+
+/** The plan: reads the folder and the platform, creates nothing, however often it is asked. */
+app.post('/api/launches/:key/plan', async (req, res) => {
+  try {
+    res.json(describePlan(await planLaunch(loadConfig(), req.params.key)));
+  } catch (e) {
+    answerFailure(res, e, 'plan');
+  }
+});
+
+/**
+ * The gate. Only a body that says `confirm: true` starts anything; the CLI
+ * sends it only under `--confirm`, and the mono-repo denies that command to
+ * Claude. A plan with errors is refused; an empty one answers with no job.
+ */
+app.post('/api/launches/:key/apply', async (req, res) => {
+  const body = req.body as { confirm?: unknown } | undefined;
+  try {
+    res.json(await startApply(loadConfig(), req.params.key, body?.confirm === true));
+  } catch (e) {
+    answerFailure(res, e, 'apply');
+  }
+});
+
+// ----------------------------------------------------------------- batches --
 
 app.get('/api/launches/:key/campaigns', (req, res) => {
   try {

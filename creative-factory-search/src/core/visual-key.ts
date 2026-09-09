@@ -67,7 +67,7 @@ const flatten = (value: FieldValue): string =>
  * were live. Sixty-four costs one more multiply per character of a string we are
  * walking anyway.
  */
-function hash(text: string): string {
+export function hashText(text: string): string {
   let a = 0x811c9dc5;
   let b = 0xcbf29ce4;
   for (let i = 0; i < text.length; i++) {
@@ -79,4 +79,4 @@ function hash(text: string): string {
 }
 
 /** The visual identity of a Spec. Equal keys mean one video will do for both. */
-export const visualKey = (spec: Spec): string => hash(JSON.stringify(visualParts(spec)));
+export const visualKey = (spec: Spec): string => hashText(JSON.stringify(visualParts(spec)));

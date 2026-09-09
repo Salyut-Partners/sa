@@ -65,6 +65,20 @@ walks it saved. One creative that fails leaves the rest of the batch alone and
 lands in a list of what did not come out. What comes back is an mp4 for one
 creative and a zip named by photo and language for a batch.
 
+A batch can carry a subtitle style. The export panel's first group picks one
+of the pipeline's styles, or none; under it, each release language has a box
+to leave that language clean, and the line counts how many of the files
+going out will be burned. The words are the script's, verbatim: the voice
+comes back from ElevenLabs with the time of every character, `core` turns
+those into timed words, and the server hands them to the `subs` pipeline as
+a file, so Whisper never runs and the text on screen matches what the buyer
+wrote. It is a step after the mux, on each file — the video is still drawn
+once per group, whatever the language says over it — and a machine that
+cannot burn (no `ffmpeg-full`, no venv) is told so in the panel and refuses
+the export before the first frame rather than on the last file. The style is
+saved in the batch file as an optional field, so a file written with one
+still opens in an editor from before it existed.
+
 ### Subtitles for a video from elsewhere
 
 The header has a second tab. Drop a video from a designer, a phone or Grok
@@ -103,6 +117,8 @@ silent creatives, and the panel says which key is missing rather than failing.
 bin/sa new ai-vadim-sperm-it --name "AI Vadim Sperm IT" --vertical jobs --geo DE,IT
 bin/sa launches
 bin/sa config
+bin/sa plan ai-vadim-sperm-it
+bin/sa apply ai-vadim-sperm-it --confirm
 ```
 
 `sa` is a thin HTTP client to the server: flags in, one JSON object out, an
@@ -112,10 +128,45 @@ lays out the launch folder under `launches_root` and files a ticket in
 ClickUp; the folder always comes first, so a missing token leaves the buyer
 with somewhere to work and a sentence saying why there is no ticket.
 
-The buyer's own settings — `launches_root` and the ClickUp token and list —
-live in `~/.config/sa/config.json`, outside the repository (`SA_CONFIG`
-points elsewhere for tests). Without the file everything defaults to
-`~/sa/launches` and no ticket.
+The buyer's own settings — `launches_root`, the ClickUp token and list, and
+the platform's Bearer with the organisation id — live in
+`~/.config/sa/config.json`, outside the repository (`SA_CONFIG` points
+elsewhere for tests). Without the file everything defaults to `~/sa/launches`,
+no ticket, and no platform.
+
+### `sa plan` and `sa apply`
+
+`sa plan <key>` reads the launch folder — `topic.yaml`, every
+`termgroups/<tg>/keywords.txt` (one key per line, an optional
+`termgroup.yaml` beside it with `weight`, `country`, `language`), every
+`articles/<a>/article.md` (a front matter with `title`, `country`,
+`language`, or the first `#` heading as the title; pictures from `images/`
+inlined as base64 the way the admin embeds them) — takes a snapshot of the
+platform filtered by the topic, and prints the ordered list of calls with
+their bodies. It creates nothing, however many times it runs. Anything wrong
+in the folder is refused there, in words: a placeholder site, a key repeated
+in a file, two articles with one title, a country the platform does not know.
+The topic is found by `internal_name` even when `state.json` does not name it,
+a term group by its folder name, a post by its title in the topic — so a run
+that fell over between the platform's answer and the state file finds its own
+entity on the next plan rather than making a twin. What exists is updated in
+place (`PUT` for a term group, `POST /posts/{id}/update` for an article) and
+only when its content changed; the article's hash of what was last sent is in
+`state.json` next to the id.
+
+`sa apply <key> --confirm` runs those steps as a job on the server, one after
+another, with the pauses the admin's own traffic suggests and the read-back
+the PRD insists on: an answer that never came, or a 5xx, is followed by a
+read of the topic's list before anything is sent again, and only a list that
+still lacks the entity earns a retry with backoff. Before every create the
+list as it stood is written to `state.json` as `pending`, and every id goes
+into the file the moment it is known — the server is the only writer. Ctrl-C
+cancels after the step in flight. Without `--confirm` the command refuses
+before reaching the server, and `~/sa/.claude/settings.json` denies it to
+Claude outright: the gate is the flag and the deny, not a permission prompt.
+The rule of the queue — timeouts, retries, pauses — is `core/queue.ts`; the
+create-or-update decisions are `core/plan.ts`; both are tested there and only
+obeyed in `server/apply.ts`.
 
 ### A batch in its topic folder
 
@@ -157,6 +208,13 @@ Three build units and one rule.
 - **`src/cli`** — `sa`. Parses flags, calls the server, prints JSON. Knows
   nothing about launches beyond the route names; the server does the work and
   `core/launch.ts` decides what a launch is: the manifests, the key, the tree.
+  `core/plan.ts` decides what the platform is asked for — the steps, their
+  bodies, create against update — from the folder, a snapshot and the state;
+  `core/article.ts` turns `article.md` into the HTML that is sent;
+  `core/queue.ts` decides what happens to a call that went wrong.
+  `server/platform.ts` is the digifor client, thin, answering outcomes rather
+  than throwing; `server/apply.ts` runs a plan as a job and is the one writer
+  of `state.json`.
 - **`src/server`** — Express, Puppeteer, ffmpeg. Bundles the render target from
   source at startup, so the headless page can never drift from the editor. An
   export is a job in memory: the editor posts a plan, gets an id, and watches it.
@@ -166,7 +224,10 @@ Three build units and one rule.
   the editor reads and writes it. ElevenLabs and the translators sit behind
   two thin modules; a missing key is a state each of them explains rather than
   an error the server starts with. `subs.ts` runs `../subs` as a subprocess
-  and knows nothing about styles beyond what the pipeline prints.
+  and knows nothing about styles beyond what the pipeline prints — for a
+  dropped video with Whisper, for an exported creative with the words the
+  export already has (`--words`), the burn being `render → mux → burn` on
+  each file in `batch.ts`.
 
 The rule: **the preview and the export call the same renderer.** There is no
 second drawing path. Anything time-dependent inside the renderer must be derived
@@ -182,7 +243,10 @@ That grouping is also what keeps the export request small: the `Spec` — and so
 the photo, as a data URL — is written once per group, and each `BatchItem` in it
 carries only the sound that separates it from its neighbours. Which is the same
 obligation read from the other end: adding a *sound* field to `Spec` means adding
-it to `Sound` in `core/batch.ts`, or it never reaches the server at all.
+it to `Sound` in `core/batch.ts`, or it never reaches the server at all. The
+subtitle style sits on the item for the same reason — it is the script in the
+frame, and the script is per language — and must never enter `visualParts`, or
+every group would split into one per language.
 
 ## Checks
 

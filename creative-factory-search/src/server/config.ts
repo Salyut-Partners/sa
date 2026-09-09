@@ -15,7 +15,17 @@ export interface SaConfig {
     /** The list «Заливи» of the buyer's team, where `sa new` files its ticket. */
     list_id: string | null;
   };
+  platform: {
+    /** The buyer's own Bearer for admin-api.digifor.io — every call goes out as them, from their machine. */
+    token: string | null;
+    /** The organisation every call carries in its query. */
+    organization_id: number | null;
+    /** Where the admin API lives; overridable for a staging host. */
+    base_url: string;
+  };
 }
+
+export const DEFAULT_PLATFORM_URL = 'https://admin-api.digifor.io/api/admin';
 
 /** Where the file lives. Overridable so tests and a second profile stay apart. */
 export const configPath = (): string =>
@@ -47,11 +57,19 @@ export function loadConfig(): SaConfig {
       throw new Error(`конфігурація ${file} не читається: ${(e as Error).message}`);
     }
   }
-  const clickup = (typeof raw['clickup'] === 'object' && raw['clickup'] !== null
-    ? raw['clickup'] : {}) as Record<string, unknown>;
+  const section = (name: string): Record<string, unknown> =>
+    (typeof raw[name] === 'object' && raw[name] !== null ? raw[name] : {}) as Record<string, unknown>;
+  const clickup = section('clickup');
+  const platform = section('platform');
+  const organization = Number(platform['organization_id']);
   return {
     launches_root: expandHome(asText(raw['launches_root']) ?? DEFAULT_LAUNCHES_ROOT),
     clickup: { token: asText(clickup['token']), list_id: asText(clickup['list_id']) },
+    platform: {
+      token: asText(platform['token']),
+      organization_id: Number.isInteger(organization) && organization > 0 ? organization : null,
+      base_url: (asText(platform['base_url']) ?? DEFAULT_PLATFORM_URL).replace(/\/+$/, ''),
+    },
   };
 }
 

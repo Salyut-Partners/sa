@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(sa apply:*)",
+      "Bash(*/sa apply:*)",
+      "Bash(bin/sa apply:*)",
+      "Bash(npm run sa -- apply:*)",
+      "Bash(npm run sa apply:*)",
+      "Bash(tsx src/cli/main.ts apply:*)",
+      "Bash(npx tsx src/cli/main.ts apply:*)"
+    ]
+  }
+}
