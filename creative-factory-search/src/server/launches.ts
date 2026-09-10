@@ -99,6 +99,7 @@ async function fileTicket(config: SaConfig, request: NewLaunchRequest): Promise<
     const defs = await listFields(state);
     const fields = resolveTicketFields(defs, {
       launchKey: request.launchKey,
+      ...(request.name !== undefined ? { name: request.name } : {}),
       ...(request.vertical !== undefined ? { vertical: request.vertical } : {}),
       ...(request.geo !== undefined ? { geo: request.geo } : {}),
     });

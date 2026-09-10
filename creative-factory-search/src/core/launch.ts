@@ -382,7 +382,10 @@ export interface TicketFieldDef {
 }
 
 export interface TicketValues {
+  /** The task's name: the key is what the ticket and the folder share. */
   launchKey: string;
+  /** The topic's name, for the `topic` field when the list has one. */
+  name?: string;
   vertical?: string;
   geo?: string[];
 }
@@ -392,8 +395,8 @@ export interface TicketField {
   value: string | string[];
 }
 
-/** The names the fields carry in ClickUp, as ticket 01 creates them. */
-export const TICKET_FIELD_NAMES = { launchKey: 'launch_key', vertical: 'вертикаль', geo: 'гео' } as const;
+/** The names the fields carry in ClickUp, as the board has them: a text `topic`, a dropdown `vertical`, labels `geo`. */
+export const TICKET_FIELD_NAMES = { topic: 'topic', vertical: 'vertical', geo: 'geo' } as const;
 
 const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 
@@ -401,16 +404,19 @@ const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b
  * Turn the values a buyer typed into what the ClickUp API wants: field ids, and
  * for a dropdown or labels the option ids rather than the words. A word the list
  * does not offer is refused by name, so the buyer fixes the list or the word,
- * not a 400 from the API.
+ * not a 400 from the API. The launch key is the task's name, not a field; the
+ * topic name goes into `topic` when the list carries it and is dropped without
+ * complaint when it does not — the key already says which launch this is.
  */
 export function resolveTicketFields(defs: readonly TicketFieldDef[], values: TicketValues): ParseResult<TicketField[]> {
   const errors: string[] = [];
   const fields: TicketField[] = [];
   const find = (name: string): TicketFieldDef | undefined => defs.find(d => sameName(d.name, name));
 
-  const keyField = find(TICKET_FIELD_NAMES.launchKey);
-  if (keyField === undefined) errors.push(`у списку немає поля \`${TICKET_FIELD_NAMES.launchKey}\``);
-  else fields.push({ id: keyField.id, value: values.launchKey });
+  const topicField = find(TICKET_FIELD_NAMES.topic);
+  if (topicField !== undefined && values.name !== undefined && values.name !== '') {
+    fields.push({ id: topicField.id, value: values.name });
+  }
 
   if (values.vertical !== undefined) {
     const def = find(TICKET_FIELD_NAMES.vertical);

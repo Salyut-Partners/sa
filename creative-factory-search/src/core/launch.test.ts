@@ -229,39 +229,44 @@ describe('starting a launch', () => {
 
 describe('ticket custom fields', () => {
   const defs = [
-    { id: 'f1', name: 'launch_key', type: 'short_text' },
+    { id: 'f1', name: 'topic', type: 'short_text' },
     {
-      id: 'f2', name: 'вертикаль', type: 'drop_down',
-      type_config: { options: [{ id: 'o1', name: 'jobs', orderindex: 0 }, { id: 'o2', name: 'avia', orderindex: 1 }] },
+      id: 'f2', name: 'Vertical', type: 'drop_down',
+      type_config: { options: [{ id: 'o1', name: 'Jobs', orderindex: 0 }, { id: 'o2', name: 'Avia', orderindex: 1 }] },
     },
     {
-      id: 'f3', name: 'гео', type: 'labels',
+      id: 'f3', name: 'geo', type: 'labels',
       type_config: { options: [{ id: 'l1', label: 'DE' }, { id: 'l2', label: 'IT' }] },
     },
   ];
 
   it('maps values onto field ids, matching option names without regard to case', () => {
-    const result = resolveTicketFields(defs, { launchKey: 'ai-a-b', vertical: 'Avia', geo: ['it', 'DE'] });
+    const result = resolveTicketFields(defs, { launchKey: 'ai-a-b', name: 'AI A B', vertical: 'avia', geo: ['it', 'DE'] });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value).toEqual([
-      { id: 'f1', value: 'ai-a-b' },
+      { id: 'f1', value: 'AI A B' },
       { id: 'f2', value: 'o2' },
       { id: 'f3', value: ['l2', 'l1'] },
     ]);
   });
 
-  it('sends only the launch key when vertical and geo are not given', () => {
+  it('sends no field at all when only the key is given — the key is the task name', () => {
     const result = resolveTicketFields(defs, { launchKey: 'ai-a-b' });
-    expect(result.ok && result.value).toEqual([{ id: 'f1', value: 'ai-a-b' }]);
+    expect(result.ok && result.value).toEqual([]);
+  });
+
+  it('drops the topic name without complaint when the list has no topic field', () => {
+    const result = resolveTicketFields(defs.slice(1), { launchKey: 'ai-a-b', name: 'AI A B', vertical: 'jobs' });
+    expect(result.ok && result.value).toEqual([{ id: 'f2', value: 'o1' }]);
   });
 
   it('names a value the list does not offer, and a field the list does not have', () => {
     const missing = resolveTicketFields(defs, { launchKey: 'ai-a-b', vertical: 'dental' });
     expect(missing.ok).toBe(false);
     expect(!missing.ok && missing.errors.join()).toMatch(/dental/);
-    const noField = resolveTicketFields(defs.slice(1), { launchKey: 'ai-a-b' });
+    const noField = resolveTicketFields(defs.slice(0, 1), { launchKey: 'ai-a-b', geo: ['DE'] });
     expect(noField.ok).toBe(false);
-    expect(!noField.ok && noField.errors.join()).toMatch(/launch_key/);
+    expect(!noField.ok && noField.errors.join()).toMatch(/geo/);
   });
 });
