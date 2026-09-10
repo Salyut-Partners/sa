@@ -44,6 +44,8 @@ export interface TopicManifest {
   rules: string[];
   /** The niche the topic belongs to — `jobs`, `loans` — which is what the launches tab groups by. Null when not said. */
   vertical: string | null;
+  /** Country codes the launch is for, as the ticket's `geo` labels name them; empty when not said. */
+  geo: string[];
 }
 
 /**
@@ -194,10 +196,17 @@ export function parseTopicManifest(source: string): ParseResult<TopicManifest> {
     else errors.push('поле `vertical` має бути назвою ніші');
   }
 
+  let geo: string[] = [];
+  if (bag['geo'] !== undefined && bag['geo'] !== null && bag['geo'] !== '') {
+    if (typeof bag['geo'] === 'string') geo = bag['geo'].split(',').map(s => s.trim()).filter(Boolean);
+    else if (Array.isArray(bag['geo']) && bag['geo'].every(g => typeof g === 'string')) geo = bag['geo'].map(g => g.trim()).filter(Boolean);
+    else errors.push('поле `geo` має бути списком кодів країн: [DE, IT]');
+  }
+
   if (errors.length > 0) return { ok: false, errors };
   return {
     ok: true,
-    value: { launch_key: launchKey, name, internal_name: internal, traffic_source: trafficSource, site, accounts, rules, vertical },
+    value: { launch_key: launchKey, name, internal_name: internal, traffic_source: trafficSource, site, accounts, rules, vertical, geo },
   };
 }
 
@@ -280,6 +289,8 @@ export interface NewLaunchOptions {
   trafficSource?: TrafficSource;
   /** The niche, when the buyer named one; it goes into the manifest as `vertical`. */
   vertical?: string;
+  /** Country codes, when the buyer named them; they go into the manifest as `geo`, where the ticket reads them. */
+  geo?: string[];
 }
 
 export const NAME_PLACEHOLDER = 'REPLACE_TOPIC_NAME';
@@ -310,6 +321,8 @@ export function newLaunchTree(options: NewLaunchOptions): LaunchTree {
     `traffic_source: ${source}`,
     '# Ніша (вертикаль): jobs, loans… Таба заливів групує топіки за нею.',
     `vertical: ${YAML.stringify(options.vertical?.trim() ?? '').trim()}`,
+    '# Гео заливу кодами країн — мітки `geo` на тікеті. Не гео кампаній: те живе в campaign.yaml.',
+    `geo: [${(options.geo ?? []).map(g => g.trim()).filter(Boolean).join(', ')}]`,
     '# Сайт (домен), на якому публікуються статті. Id з GET /sites.',
     'site: "REPLACE_SITE_ID"',
     '# Кабінети, з яких ллється цей топік, і піксель кожного. Кампанія посилається на alias.',

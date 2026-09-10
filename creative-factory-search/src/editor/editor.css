@@ -117,6 +117,9 @@ header {
 .topic-head .key { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topic-head .cnt { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .topic > .error { padding: 0 14px 10px; margin-top: 0; }
+.topic > .ticket-line { padding: 0 14px 10px 36px; font-size: 12px; }
+.topic > .ticket-line a { color: var(--accent); text-decoration: none; }
+.topic > .ticket-line .why { color: var(--muted); }
 .campaigns { border-top: 1px solid var(--line); padding: 8px 14px 10px 36px; display: flex; flex-direction: column; gap: 6px; }
 .campaigns > .note, .campaigns > .error { margin-top: 0; display: flex; gap: 10px; align-items: center; }
 .campaigns > .link { margin-left: 0; align-self: flex-start; margin-top: 4px; }

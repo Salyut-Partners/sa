@@ -227,6 +227,29 @@ describe('starting a launch', () => {
   });
 });
 
+describe('geo in the manifest', () => {
+  it('reads a list of codes, a comma string, or nothing', () => {
+    const base = 'launch_key: ai-a-b\nname: AI A B\ntraffic_source: tiktok\nsite: 182\naccounts:\n  main: {ad_account: "1", pixel: "2"}\n';
+    const list = parseTopicManifest(base + 'geo: [DE, IT]');
+    expect(list.ok && list.value.geo).toEqual(['DE', 'IT']);
+    const text = parseTopicManifest(base + 'geo: "DE, IT"');
+    expect(text.ok && text.value.geo).toEqual(['DE', 'IT']);
+    const none = parseTopicManifest(base);
+    expect(none.ok && none.value.geo).toEqual([]);
+    const bad = parseTopicManifest(base + 'geo: {a: 1}');
+    expect(bad.ok).toBe(false);
+  });
+
+  it('is written by sa new so a ticket filed from the folder carries the same labels', () => {
+    const tree = newLaunchTree({ launchKey: 'ai-a-b', name: 'AI A B', geo: ['DE', 'IT'] });
+    const manifest = tree.files.find(f => f.path === 'topic.yaml')!.content;
+    const parsed = parseTopicManifest(manifest);
+    expect(parsed.ok && parsed.value.geo).toEqual(['DE', 'IT']);
+    const bare = parseTopicManifest(newLaunchTree({ launchKey: 'ai-a-b', name: 'AI A B' }).files.find(f => f.path === 'topic.yaml')!.content);
+    expect(bare.ok && bare.value.geo).toEqual([]);
+  });
+});
+
 describe('ticket custom fields', () => {
   const defs = [
     { id: 'f1', name: 'topic', type: 'short_text' },

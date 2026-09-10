@@ -1,13 +1,11 @@
 // A launch on disk. The folder is the thing; the ticket points at it. Folders
-// are made first and the ticket second, so a missing token still leaves the
-// buyer with somewhere to work — and the answer says which half happened.
+// are made here and the ticket by the sync in `tickets.ts`, which the route
+// calls right after — so a missing token still leaves the buyer with
+// somewhere to work, and the answer says which half happened.
 import fs from 'node:fs';
 import path from 'node:path';
-import {
-  checkNewLaunch, newLaunchTree, resolveTicketFields, type LaunchCreated, type TrafficSource,
-} from '../core/launch.ts';
+import { checkNewLaunch, newLaunchTree, type LaunchCreated, type TrafficSource } from '../core/launch.ts';
 import { buildLaunchesTree, type LaunchesTree, type LaunchFolderListing } from '../core/launches-tree.ts';
-import { ClickUpError, clickupState, createTask, listFields, type Ticket } from './clickup.ts';
 import { ensureLaunchesRoot, type SaConfig } from './config.ts';
 
 /** A request the buyer got wrong: the message is for them, and nothing was made. */
@@ -57,7 +55,10 @@ export function listLaunchFolders(root: string): LaunchFolderListing[] {
 
 export const launchesTree = (root: string): LaunchesTree => buildLaunchesTree(listLaunchFolders(root));
 
-export async function createLaunch(config: SaConfig, request: NewLaunchRequest): Promise<LaunchCreated> {
+/** The folder made: what `LaunchCreated` is before the ticket sync has had its say. */
+export type FolderMade = Omit<LaunchCreated, 'ticket'>;
+
+export function createLaunch(config: SaConfig, request: NewLaunchRequest): FolderMade {
   const root = ensureLaunchesRoot(config);
   const refusal = checkNewLaunch(existingLaunchKeys(root), request.launchKey);
   if (refusal !== null) throw new RefusedError(refusal);
@@ -68,6 +69,7 @@ export async function createLaunch(config: SaConfig, request: NewLaunchRequest):
     ...(request.name !== undefined ? { name: request.name } : {}),
     ...(request.trafficSource !== undefined ? { trafficSource: request.trafficSource } : {}),
     ...(request.vertical !== undefined ? { vertical: request.vertical } : {}),
+    ...(request.geo !== undefined ? { geo: request.geo } : {}),
   });
   // Not recursive on purpose: the root exists, and a folder that appeared
   // between the check and here is a refusal, not something to write into.
@@ -84,30 +86,6 @@ export async function createLaunch(config: SaConfig, request: NewLaunchRequest):
     fs.writeFileSync(target, file.content, { flag: 'wx' });
   }
 
-  return {
-    launchKey: request.launchKey,
-    folder,
-    files: tree.files.map(f => f.path),
-    ticket: await fileTicket(config, request),
-  };
+  return { launchKey: request.launchKey, folder, files: tree.files.map(f => f.path) };
 }
 
-async function fileTicket(config: SaConfig, request: NewLaunchRequest): Promise<LaunchCreated['ticket']> {
-  const state = clickupState(config);
-  if (!state.ready) return { ok: false, note: state.note };
-  try {
-    const defs = await listFields(state);
-    const fields = resolveTicketFields(defs, {
-      launchKey: request.launchKey,
-      ...(request.name !== undefined ? { name: request.name } : {}),
-      ...(request.vertical !== undefined ? { vertical: request.vertical } : {}),
-      ...(request.geo !== undefined ? { geo: request.geo } : {}),
-    });
-    if (!fields.ok) return { ok: false, note: fields.errors.join('; ') + ' — тікет не створено' };
-    const ticket: Ticket = await createTask(state, request.launchKey, fields.value);
-    return { ok: true, ...ticket };
-  } catch (e) {
-    const why = e instanceof ClickUpError ? e.message : `ClickUp недоступний: ${(e as Error).message}`;
-    return { ok: false, note: why + ' — тікет не створено' };
-  }
-}

@@ -175,6 +175,13 @@ function TopicRow({ topic, open, plan, chosen, busy, onToggle, onReplan, onChoos
         <span className="cnt">{topic.campaigns.length} камп. · {total} крео</span>
       </button>
       {topic.problem !== null ? <div className="error">{topic.problem}</div> : null}
+      {topic.ticket !== undefined ? (
+        <div className="ticket-line">
+          {topic.ticket.url !== null
+            ? <a href={topic.ticket.url} target="_blank" rel="noreferrer">тікет у ClickUp ↗</a>
+            : <span className="why">тікет: {topic.ticket.note}</span>}
+        </div>
+      ) : null}
       {open ? (
         <div className="campaigns">
           {plan === undefined || plan.kind === 'reading' ? <div className="note">Питаю платформу…</div> : null}

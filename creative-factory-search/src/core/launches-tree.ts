@@ -33,6 +33,8 @@ export interface TreeTopic {
   vertical: string | null;
   /** Why the manifest could not be read, or null. */
   problem: string | null;
+  /** The ticket, as the server's last sync knew it: a link, or the sentence why there is none. Absent until a sync ran. */
+  ticket?: { url: string | null; note: string | null };
   campaigns: TreeCampaign[];
 }
 

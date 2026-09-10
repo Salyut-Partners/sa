@@ -26,6 +26,8 @@ const USAGE = `sa — робоче місце байера
   sa new <launch-key> [--name "AI Vadim Sperm IT"] [--source tiktok|facebook]
                       [--vertical jobs] [--geo DE,IT]
   sa launches         список заливів у launches_root
+  sa tickets          звірити теки з листом ClickUp зараз: тікет на кожну теку,
+                      «in progress» там, де є зібрана кампанія
   sa config           де конфігурація і що в ній
   sa plan <launch-key> [--campaign <name>]
                       що станеться на платформі: кроки з тілами, нічого не створює;
@@ -119,6 +121,14 @@ async function commandNew(args: string[]): Promise<number> {
   if (status === 400) return 2;
   if (status !== 200) return 5;
   return 'ticket' in body && body.ticket.ok ? 0 : 3;
+}
+
+async function commandTickets(): Promise<number> {
+  await ensureServer();
+  const { status, body } = await ask<{ tickets?: Record<string, { ok: boolean }> }>('/api/tickets/sync', { method: 'POST' });
+  out(body);
+  if (status !== 200) return 5;
+  return Object.values(body.tickets ?? {}).every(t => t.ok) ? 0 : 3;
 }
 
 async function commandLaunches(): Promise<number> {
@@ -215,6 +225,7 @@ async function main(): Promise<number> {
   switch (command) {
     case 'new': return commandNew(rest);
     case 'launches': return commandLaunches();
+    case 'tickets': return commandTickets();
     case 'config': return commandConfig();
     case 'plan': return commandPlan(rest);
     case 'apply': return commandApply(rest);

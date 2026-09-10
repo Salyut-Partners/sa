@@ -69,6 +69,7 @@ const DONE_STATE = (): LaunchState => ({
   termgroups: { 'tg-main': 211532 },
   articles: { 'article-a': { id: 130892, hash: articleHash(full().articles[0]!.article, topic(), ['All']) } },
   pending: null,
+  ticket: null,
   campaigns: {},
 });
 
@@ -302,7 +303,9 @@ describe('resolveCountry', () => {
 describe('state', () => {
   it('reads a state file and fills what an older one lacks', () => {
     const result = parseState('{"topic_id": 5}');
-    expect(result).toEqual({ ok: true, value: { topic_id: 5, configuration_id: null, termgroups: {}, articles: {}, pending: null, campaigns: {} } });
+    expect(result).toEqual({ ok: true, value: { topic_id: 5, configuration_id: null, termgroups: {}, articles: {}, pending: null, ticket: null, campaigns: {} } });
+    const withTicket = parseState('{"ticket": {"id": "869ez", "url": "https://app.clickup.com/t/869ez"}}');
+    expect(withTicket.ok && withTicket.value.ticket).toEqual({ id: '869ez', url: 'https://app.clickup.com/t/869ez' });
     expect(parseState('nope').ok).toBe(false);
     expect(parseState('[]').ok).toBe(false);
   });

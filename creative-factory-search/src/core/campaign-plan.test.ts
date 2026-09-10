@@ -106,6 +106,7 @@ const topicState = (campaigns: Record<string, CampaignState> = {}): LaunchState 
   termgroups: { 'tg-main': 211532 },
   articles: { 'article-a': { id: 130892, hash: articleHash(contents().articles[0]!.article, topic(), ['All']) } },
   pending: null,
+  ticket: null,
   campaigns,
 });
 

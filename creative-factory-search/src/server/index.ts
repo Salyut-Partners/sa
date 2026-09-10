@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isLocaleId } from '../core/locales.ts';
 import { VOICE_MODELS } from '../core/voice.ts';
-import { describePlan, planLaunch, startApply } from './apply.ts';
+import { describePlan, onApplySettled, planLaunch, startApply } from './apply.ts';
 import { startBatch } from './batch.ts';
 import { campaignCreativesDir, listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
@@ -19,6 +19,7 @@ import { BadRequestError, cancelJob, jobById, outputsOf, statusOf } from './jobs
 import { PlatformReadError, platformState } from './platform.ts';
 import { closeBrowser } from './render.ts';
 import { startSubtitles, subsState, SUBS_OUTPUT } from './subs.ts';
+import { startTicketSync, syncTickets, ticketReport } from './tickets.ts';
 import { listVoices } from './tts.ts';
 import { NoTranslatorError, translateAll, translator } from './translate.ts';
 
@@ -96,12 +97,28 @@ app.get('/api/launches', (_req, res) => {
   res.json({ launches_root: config.launches_root, launches: existingLaunchKeys(config.launches_root) });
 });
 
-/** The launches as a tree — niche, topic, campaigns with their file counts — read off the disk alone. */
+/** The launches as a tree — niche, topic, campaigns with their file counts — read off the disk, with what the last ticket sync said of each topic. */
 app.get('/api/launches/tree', (_req, res) => {
   try {
-    res.json(launchesTree(loadConfig().launches_root));
+    const tree = launchesTree(loadConfig().launches_root);
+    for (const niche of tree.niches) {
+      for (const topic of niche.topics) {
+        const report = ticketReport(topic.key);
+        if (report !== null) topic.ticket = report.ok ? { url: report.url, note: null } : { url: null, note: report.note };
+      }
+    }
+    res.json(tree);
   } catch (e) {
     answerFailure(res, e, 'tree');
+  }
+});
+
+/** A pass of the ticket sync now, for every folder: what `sa tickets` asks for. */
+app.post('/api/tickets/sync', async (_req, res) => {
+  try {
+    res.json({ tickets: await syncTickets(loadConfig()) });
+  } catch (e) {
+    answerFailure(res, e, 'tickets');
   }
 });
 
@@ -122,13 +139,16 @@ app.post('/api/launches', async (req, res) => {
     return;
   }
   try {
-    res.json(await createLaunch(loadConfig(), {
+    const config = loadConfig();
+    const made = createLaunch(config, {
       launchKey: body.launchKey,
       ...(typeof body.name === 'string' ? { name: body.name } : {}),
       ...(source !== undefined ? { trafficSource: source } : {}),
       ...(typeof body.vertical === 'string' ? { vertical: body.vertical } : {}),
       ...(Array.isArray(body.geo) ? { geo: body.geo.map(String) } : {}),
-    }));
+    });
+    const ticket = (await syncTickets(config, made.launchKey))[made.launchKey] ?? { ok: false as const, note: 'звірка тікетів нічого не сказала про цю теку' };
+    res.json({ ...made, ticket });
   } catch (e) {
     if (e instanceof RefusedError) res.status(400).json({ error: e.message });
     else {
@@ -328,6 +348,9 @@ const server = app.listen(PORT, () => {
   } catch (e) {
     console.error((e as Error).message);
   }
+  // The tickets: a pass now, every ten minutes, and after every apply.
+  onApplySettled(launchKey => { syncTickets(loadConfig(), launchKey).catch(e => console.error('тікети:', (e as Error).message)); });
+  startTicketSync(loadConfig);
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

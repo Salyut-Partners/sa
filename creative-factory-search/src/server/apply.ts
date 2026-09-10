@@ -189,7 +189,7 @@ function writeJson(file: string, value: unknown): void {
 }
 
 /** The topic's file without the campaigns, and each campaign's file beside its manifest. */
-function writeState(folder: string, state: LaunchState): void {
+export function writeState(folder: string, state: LaunchState): void {
   const { campaigns, ...topic } = state;
   writeJson(path.join(folder, STATE_FILE), topic);
   for (const [name, own] of Object.entries(campaigns)) {
@@ -268,6 +268,13 @@ export interface Planned {
 /** The plan for the topic, or — with `campaign` — the part of it one campaign needs. */
 /** Launch keys with an apply in flight: one writer of a state file at a time, not merely one process. */
 const applying = new Set<string>();
+export const isApplying = (launchKey: string): boolean => applying.has(launchKey);
+
+/** Something to do once a run has stopped, whatever way — the ticket sync, so «in progress» does not wait for the timer. */
+let settled: ((launchKey: string) => void) | null = null;
+export function onApplySettled(fn: ((launchKey: string) => void) | null): void {
+  settled = fn;
+}
 
 /**
  * The plan, and the ids it found on the way written down. Nothing is sent
@@ -333,6 +340,7 @@ class CancelledApply extends Error {}
 
 interface Run {
   api: PlatformClient;
+  launchKey: string;
   folder: string;
   job: Job;
   state: LaunchState;
@@ -412,9 +420,12 @@ export async function startApply(
   if (planned.plan.steps.length === 0) return { id: null, steps: 0 };
 
   const job = createJob(planned.plan.steps.length, new Map(), 'sa-apply-');
-  const run: Run = { api: client(config), folder: planned.folder, job, state, contents: planned.contents, termgroups: {} };
+  const run: Run = { api: client(config), launchKey, folder: planned.folder, job, state, contents: planned.contents, termgroups: {} };
   applying.add(launchKey);
-  void runSteps(run, planned.plan.steps).finally(() => applying.delete(launchKey));
+  void runSteps(run, planned.plan.steps).finally(() => {
+    applying.delete(launchKey);
+    settled?.(launchKey);
+  });
   return { id: job.id, steps: planned.plan.steps.length };
 }
 

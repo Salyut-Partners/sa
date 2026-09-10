@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_TICKET_STATUSES, type TicketStatuses } from '../core/ticket-sync.ts';
 
 export interface SaConfig {
   /** The folder that holds one sub-folder per launch key. */
@@ -14,6 +15,8 @@ export interface SaConfig {
     token: string | null;
     /** The list «Заливи» of the buyer's team, where `sa new` files its ticket. */
     list_id: string | null;
+    /** What the list calls its three statuses, when not `to do` / `in progress` / `complete`. */
+    statuses: TicketStatuses;
   };
   platform: {
     /** The buyer's own Bearer for admin-api.digifor.io — every call goes out as them, from their machine. */
@@ -64,12 +67,21 @@ export function loadConfig(): SaConfig {
   const organization = Number(platform['organization_id']);
   return {
     launches_root: expandHome(asText(raw['launches_root']) ?? DEFAULT_LAUNCHES_ROOT),
-    clickup: { token: asText(clickup['token']), list_id: asText(clickup['list_id']) },
+    clickup: { token: asText(clickup['token']), list_id: asText(clickup['list_id']), statuses: statusesIn(clickup['statuses']) },
     platform: {
       token: asText(platform['token']),
       organization_id: Number.isInteger(organization) && organization > 0 ? organization : null,
       base_url: (asText(platform['base_url']) ?? DEFAULT_PLATFORM_URL).replace(/\/+$/, ''),
     },
+  };
+}
+
+function statusesIn(raw: unknown): TicketStatuses {
+  const bag = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  return {
+    todo: asText(bag['todo']) ?? DEFAULT_TICKET_STATUSES.todo,
+    inProgress: asText(bag['in_progress']) ?? DEFAULT_TICKET_STATUSES.inProgress,
+    complete: asText(bag['complete']) ?? DEFAULT_TICKET_STATUSES.complete,
   };
 }
 

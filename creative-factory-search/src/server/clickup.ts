@@ -1,8 +1,9 @@
-// The ticket side of a launch. Thin: two calls to ClickUp, and a state that
+// The ticket side of a launch. Thin: a handful of calls to ClickUp, and a state that
 // says in words why they cannot be made — the same shape as the voice and
 // translation modules, so a missing token is something the panel explains
 // rather than an error the server starts with.
 import type { TicketField, TicketFieldDef } from '../core/launch.ts';
+import type { ListTicket } from '../core/ticket-sync.ts';
 import type { SaConfig } from './config.ts';
 
 const API = 'https://api.clickup.com/api/v2';
@@ -43,6 +44,29 @@ export async function listFields(state: ClickUpReady): Promise<TicketFieldDef[]>
 export interface Ticket {
   id: string;
   url: string;
+}
+
+/** Every task of the list, closed ones included: the sync finds a folder's ticket by name among them. */
+export async function listTasks(state: ClickUpReady): Promise<ListTicket[]> {
+  const tickets: ListTicket[] = [];
+  for (let page = 0; page < 50; page++) {
+    const body = await call<{ tasks?: { id: string; name: string; url: string; status?: { status?: string } }[]; last_page?: boolean }>(
+      state.token, `${API}/list/${state.listId}/task?include_closed=true&page=${page}`,
+    );
+    for (const t of body.tasks ?? []) tickets.push({ id: t.id, name: t.name, url: t.url, status: t.status?.status ?? '' });
+    if (body.last_page !== false || (body.tasks ?? []).length === 0) break;
+  }
+  return tickets;
+}
+
+/** The names of the list's statuses, as the buyer typed them. */
+export async function listStatuses(state: ClickUpReady): Promise<string[]> {
+  const body = await call<{ statuses?: { status: string }[] }>(state.token, `${API}/list/${state.listId}`);
+  return (body.statuses ?? []).map(s => s.status);
+}
+
+export async function setTaskStatus(state: ClickUpReady, taskId: string, status: string): Promise<void> {
+  await call(state.token, `${API}/task/${taskId}`, { method: 'PUT', body: JSON.stringify({ status }) });
 }
 
 export async function createTask(

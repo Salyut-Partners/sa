@@ -131,12 +131,14 @@ export interface LaunchState {
   /** Folder name → post id and the hash of what was last sent. */
   articles: Record<string, { id: number; hash: string }>;
   pending: PendingWrite | null;
+  /** The ClickUp ticket of this launch, once filed or found by name. */
+  ticket: { id: string; url: string } | null;
   /** Campaign folder → its own `state.json`, read and written beside its manifest. */
   campaigns: Record<string, CampaignState>;
 }
 
 export const emptyState = (): LaunchState => ({
-  topic_id: null, configuration_id: null, termgroups: {}, articles: {}, pending: null, campaigns: {},
+  topic_id: null, configuration_id: null, termgroups: {}, articles: {}, pending: null, ticket: null, campaigns: {},
 });
 
 const isBag = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -171,6 +173,11 @@ export function parseState(text: string): ParseResult<LaunchState> {
   if (isBag(raw) && typeof raw['step'] === 'string' && typeof raw['key'] === 'string' && Array.isArray(raw['before'])) {
     pending = { step: raw['step'], key: raw['key'], before: raw['before'].map(asId).filter((v): v is number => v !== null) };
   }
+  let ticket: LaunchState['ticket'] = null;
+  const rawTicket = data['ticket'];
+  if (isBag(rawTicket) && typeof rawTicket['id'] === 'string' && rawTicket['id'] !== '') {
+    ticket = { id: rawTicket['id'], url: typeof rawTicket['url'] === 'string' ? rawTicket['url'] : '' };
+  }
   return {
     ok: true,
     value: {
@@ -179,6 +186,7 @@ export function parseState(text: string): ParseResult<LaunchState> {
       termgroups,
       articles,
       pending,
+      ticket,
       campaigns: {},
     },
   };

@@ -138,12 +138,15 @@ silent creatives, and the panel says which key is missing rather than failing.
 ```sh
 bin/sa new ai-vadim-sperm-it --name "AI Vadim Sperm IT" --vertical jobs --geo DE,IT
 bin/sa launches
+bin/sa tickets
 bin/sa config
 bin/sa plan ai-vadim-sperm-it
 bin/sa plan ai-vadim-sperm-it --campaign de-a
 bin/sa apply ai-vadim-sperm-it --confirm
 bin/sa apply ai-vadim-sperm-it --confirm --campaign de-a
 ```
+
+`sa tickets` runs the ticket sync now and prints a line per folder.
 
 `sa` is a thin HTTP client to the server: flags in, one JSON object out, an
 exit code that means something (0 done · 1 usage · 2 refused · 3 folder made
@@ -157,6 +160,23 @@ the platform's Bearer with the organisation id — live in
 `~/.config/sa/config.json`, outside the repository (`SA_CONFIG` points
 elsewhere for tests). Without the file everything defaults to `~/sa/launches`,
 no ticket, and no platform.
+
+### Tickets
+
+A folder is a ticket. The server looks at `launches_root` when it starts,
+every ten minutes after, right after every apply, and for the folder `sa new`
+just made, and holds each folder against the ClickUp list: a folder with a
+`topic.yaml` and no ticket gets one — found by name first, the launch key
+being the task's name, so a lost `state.json` finds its own ticket rather than
+making a twin — with `topic`, `vertical` and `geo` filled from the manifest;
+a folder with a built campaign has its ticket raised to «in progress». The
+rule, in `core/ticket-sync.ts`, only ever raises: a ticket the buyer moved
+forward by hand stands, and «complete» is theirs alone. The ticket's id and
+url go into the folder's `state.json`; the tab shows the link under the
+topic, or the one sentence why there is none — no token, a vertical the list
+does not offer, two tickets by one name. The list's status names are
+`to do` / `in progress` / `complete` unless `clickup.statuses` in the config
+says otherwise.
 
 ### `sa plan` and `sa apply`
 
