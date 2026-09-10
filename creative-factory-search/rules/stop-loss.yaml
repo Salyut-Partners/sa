@@ -1,0 +1,27 @@
+# Базовий стоп-лос, зі слів партнера: sa-knowledge/knowledge/autorules.md.
+# Спенд від $2, кампанія активна, ROI нижче 10% → пауза. Команда називає це
+# стоп-лосом за аналогією з трейдингом; take profit не роблять.
+#
+# Увімкнути на топіку — один рядок у topic.yaml:
+#   rules: [stop-loss]
+#
+# `sa` завжди заповнює байера (поле платформи `ad_account_id`) з user_id
+# топіка; без нього правило спрацьовувало б на всіх байерів платформи.
+title: Стоп-лос
+conditions:
+  - type: spend
+    operator: ">="
+    value: "2"
+  - type: campaign_status
+    operator: "="
+    value: ACTIVE
+  - type: roi
+    operator: "<"
+    value: "10"
+actions:
+  - type: campaign_status
+    operator: "="
+    value: PAUSED
+priority: 1
+interval_value: 60
+schedule: []

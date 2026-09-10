@@ -6,6 +6,7 @@ import {
   adoptResolved, articleHash, chooseTopic, emptyState, firstNew, parseKeywords, parseState, parseTermGroupOptions, plan,
   previewPlan, resolveCountry, type LaunchContents, type LaunchState, type Snapshot, type TermGroupSource,
 } from './plan.ts';
+import { parseRulePreset, type PlatformRule, type RulePreset } from './rules.ts';
 
 const TOPIC = `
 launch_key: ai-vadim-sperm-it
@@ -32,7 +33,7 @@ const SITES = [{ id: 182, url: 'useconsumer.com' }];
 
 const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   topics: [], configurations: [], termGroups: [], posts: [], countries: COUNTRIES, sites: SITES,
-  creatives: [], tsps: [], builders: [], campaigns: [], pixels: [], adAccounts: [], themes: [], rsocCounts: [], languages: [],
+  creatives: [], tsps: [], builders: [], campaigns: [], pixels: [], adAccounts: [], themes: [], rsocCounts: [], languages: [], rules: [],
   ...over,
 });
 
@@ -46,13 +47,34 @@ const article = (name: string, markdown: string) => {
   return { name, article: parsed.value };
 };
 
-const bare = (): LaunchContents => ({ topic: topic(), termgroups: [], articles: [], campaigns: [], notes: [] });
+const STOP_LOSS_YAML = `
+title: Стоп-лос
+conditions:
+  - type: spend
+    operator: ">="
+    value: "2"
+actions:
+  - type: campaign_status
+    operator: "="
+    value: PAUSED
+priority: 1
+interval_value: 60
+`;
+
+const stopLoss = (): RulePreset => {
+  const result = parseRulePreset('stop-loss', STOP_LOSS_YAML);
+  if (!result.ok) throw new Error(result.errors.join('; '));
+  return result.value;
+};
+
+const bare = (): LaunchContents => ({ topic: topic(), termgroups: [], articles: [], campaigns: [], presets: {}, notes: [] });
 
 const full = (): LaunchContents => ({
   topic: topic(),
   termgroups: [tg('tg-main', ['avia sales', 'avia workers'])],
   articles: [article('article-a', '# Jobs at airports\n\nText.')],
   campaigns: [],
+  presets: {},
   notes: [],
 });
 
@@ -71,6 +93,7 @@ const DONE_STATE = (): LaunchState => ({
   pending: null,
   ticket: null,
   campaigns: {},
+  rules: {},
 });
 
 describe('plan on a folder that has never been applied', () => {
@@ -303,7 +326,10 @@ describe('resolveCountry', () => {
 describe('state', () => {
   it('reads a state file and fills what an older one lacks', () => {
     const result = parseState('{"topic_id": 5}');
-    expect(result).toEqual({ ok: true, value: { topic_id: 5, configuration_id: null, termgroups: {}, articles: {}, pending: null, ticket: null, campaigns: {} } });
+    expect(result).toEqual({
+      ok: true,
+      value: { topic_id: 5, configuration_id: null, termgroups: {}, articles: {}, pending: null, ticket: null, campaigns: {}, rules: {} },
+    });
     const withTicket = parseState('{"ticket": {"id": "869ez", "url": "https://app.clickup.com/t/869ez"}}');
     expect(withTicket.ok && withTicket.value.ticket).toEqual({ id: '869ez', url: 'https://app.clickup.com/t/869ez' });
     expect(parseState('nope').ok).toBe(false);
@@ -340,6 +366,67 @@ describe('adoptResolved', () => {
       headline: { id: 5, text: 'Learn more' },
       pending: null,
     });
+  });
+});
+
+describe('autorules', () => {
+  const withRule = (): LaunchContents => ({ ...full(), topic: { ...topic(), rules: ['stop-loss'] }, presets: { 'stop-loss': stopLoss() } });
+
+  it('waits for the topic to exist before planning any rule, and says so', () => {
+    const result = plan(withRule(), snapshot(), emptyState());
+    expect(result.steps.some(s => s.kind.startsWith('rule.'))).toBe(false);
+    expect(result.warnings).toContain('автоправила чекають створення топіка — буде видно на наступному plan');
+  });
+
+  it('creates the rule once the topic is known, with the buyer filled from the topic and the conditions and actions as JSON', () => {
+    const result = plan(withRule(), ON_PLATFORM, DONE_STATE());
+    const step = result.steps.find(s => s.kind === 'rule.create');
+    expect(step).toMatchObject({
+      kind: 'rule.create',
+      preset: 'stop-loss',
+      topic: 106752,
+      userId: 1099,
+      body: { topic_id: 106752, ad_account_id: '1099', conditions: JSON.stringify(stopLoss().conditions), results: JSON.stringify(stopLoss().actions) },
+    });
+  });
+
+  it('refuses a rule named in topic.yaml that has no preset file', () => {
+    const result = plan({ ...full(), topic: { ...topic(), rules: ['missing'] }, presets: {} }, ON_PLATFORM, DONE_STATE());
+    expect(result.errors).toEqual(['автоправила: пресету `missing` немає в репозиторії; є: жодного']);
+  });
+
+  it('does not recreate a rule the state already names, when the platform still has it', () => {
+    const rule: PlatformRule = { id: 900, topic_id: 106752, userId: 1099, conditions: stopLoss().conditions, actions: stopLoss().actions };
+    const state = { ...DONE_STATE(), rules: { 'stop-loss': 900 } };
+    const result = plan(withRule(), { ...ON_PLATFORM, rules: [rule] }, state);
+    expect(result.steps.some(s => s.kind === 'rule.create')).toBe(false);
+    expect(result.resolved.rules).toEqual({ 'stop-loss': 900 });
+  });
+
+  it('adopts a rule already on the topic with the same conditions and actions instead of creating a twin', () => {
+    const rule: PlatformRule = { id: 901, topic_id: 106752, userId: 1099, conditions: stopLoss().conditions, actions: stopLoss().actions };
+    const result = plan(withRule(), { ...ON_PLATFORM, rules: [rule] }, DONE_STATE());
+    expect(result.steps.some(s => s.kind === 'rule.create')).toBe(false);
+    expect(result.resolved.rules).toEqual({ 'stop-loss': 901 });
+    expect(result.warnings.some(w => w.includes('уже є на топіку (id 901)'))).toBe(true);
+  });
+
+  it('warns when the buyer already has a general rule with no topic, which would stack onto the topic\'s own', () => {
+    const general: PlatformRule = { id: 5, topic_id: null, userId: 1099, conditions: [], actions: [] };
+    const result = plan(full(), { ...ON_PLATFORM, rules: [general] }, DONE_STATE());
+    expect(result.warnings).toContain('у байера вже є загальне автоправило без топіка (id 5) — воно накладеться на будь-яке автоправило цього топіка');
+  });
+
+  it('adds a rule.limits step, with the full body plus the limits, when the preset sets any', () => {
+    const preset = { ...stopLoss(), limits: { limit_max_duplicates: 3, limit_min_budget: null, limit_max_applications: null } };
+    const result = plan({ ...full(), topic: { ...topic(), rules: ['stop-loss'] }, presets: { 'stop-loss': preset } }, ON_PLATFORM, DONE_STATE());
+    const step = result.steps.find(s => s.kind === 'rule.limits');
+    expect(step).toMatchObject({ kind: 'rule.limits', preset: 'stop-loss', rule: { rule: 'stop-loss' }, body: { limit_max_duplicates: 3, limit_min_budget: null } });
+  });
+
+  it('leaves out rule.limits when the preset sets none', () => {
+    const result = plan(withRule(), ON_PLATFORM, DONE_STATE());
+    expect(result.steps.some(s => s.kind === 'rule.limits')).toBe(false);
   });
 });
 

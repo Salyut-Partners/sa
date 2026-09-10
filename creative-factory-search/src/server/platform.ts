@@ -13,6 +13,7 @@ import type {
 import type {
   Country, PlatformConfiguration, PlatformPost, PlatformTermGroup, PlatformTopic, Site, TermGroupBody,
 } from '../core/plan.ts';
+import type { PlatformRule, RuleAction, RuleCondition, RuleCreateBody, RuleLimitsBody } from '../core/rules.ts';
 import type { SaConfig } from './config.ts';
 
 /** How long one call may take before it is treated as unanswered. Posts are text; a video upload gets its own. */
@@ -312,6 +313,48 @@ export async function readTsps(client: PlatformClient, topicId: number, userId: 
     return { id: num(t['id']), name: str(t['name']), topic_id: num(t['topic_id']), fields: toTspFields(t) };
   }).filter(t => t.topic_id === topicId);
 }
+
+/** A JSON list the platform stores as text, or already as a list. Same trap as a TSP's `age_from`. */
+const ruleList = (v: unknown): { type: string; operator: string; value: string }[] => {
+  let raw: unknown = v;
+  if (typeof v === 'string') {
+    try {
+      raw = JSON.parse(v);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(raw) ? raw.map(r => { const b = bag(r); return { type: str(b['type']), operator: str(b['operator']), value: str(b['value']) }; }) : [];
+};
+
+const toRule = (raw: unknown): PlatformRule => {
+  const r = bag(raw);
+  const topicId = r['topic_id'] == null || r['topic_id'] === '' ? null : num(r['topic_id']);
+  return {
+    id: num(r['id']),
+    topic_id: topicId,
+    userId: num(r['ad_account_id'] ?? 0),
+    conditions: ruleList(r['conditions']) as RuleCondition[],
+    actions: ruleList(r['results']) as RuleAction[],
+  };
+};
+
+/**
+ * The buyer's autorules: topic-scoped and general alike, so `plan` can warn
+ * about a general one stacking onto the topic's own. The query's own name
+ * for the buyer is `ad_account_id` — the same trap the create call has.
+ */
+export async function readRules(client: PlatformClient, topicId: number, userId: number): Promise<PlatformRule[]> {
+  const body = need(await client.get('/campaign-rules', { ad_account_id: userId }), 'GET /campaign-rules');
+  return listOf(body, 'campaignRules').map(toRule).filter(r => r.topic_id === null || r.topic_id === topicId);
+}
+
+export const createRule = (client: PlatformClient, body: RuleCreateBody): Promise<Answer> =>
+  client.postJson('/campaign-rules', body);
+
+/** The limits a create cannot carry; the admin sends the whole body again, with them added. */
+export const updateRuleLimits = (client: PlatformClient, id: number, body: RuleLimitsBody): Promise<Answer> =>
+  client.putJson(`/campaign-rules/${id}`, body);
 
 const toBuilder = (raw: unknown): PlatformBuilder => {
   const b = bag(raw);

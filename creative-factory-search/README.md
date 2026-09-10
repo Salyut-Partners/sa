@@ -5,7 +5,7 @@ layers over them, generate a voice-over, export mp4 per photo and per locale.
 
 The spec lives in [`.scratch/prd-creative-factory-search.md`](.scratch/prd-creative-factory-search.md).
 
-## What works today (stage E5)
+## What works today (stage E6)
 
 Import a batch of 9:16 photos at once — the ones that do not fit are listed with
 a reason rather than failing the import. The batch lays out four to a row; a
@@ -115,6 +115,12 @@ machine is missing before the first file rather than on it. The mono-repo's
 
 ## Running it
 
+A new buyer's machine: `../setup.sh` from the mono-repo root installs Node,
+ffmpeg, both of this package's dependencies and `subs`', a config template,
+and an hourly `launchd` agent that keeps the server alive for ticket syncs.
+Rerunning it skips whatever is already there. `../ONBOARDING.md` is the one
+page from that script to a first `sa new`.
+
 ```sh
 npm install
 npm run dev        # server on 5180, editor on 5181
@@ -144,9 +150,13 @@ bin/sa plan ai-vadim-sperm-it
 bin/sa plan ai-vadim-sperm-it --campaign de-a
 bin/sa apply ai-vadim-sperm-it --confirm
 bin/sa apply ai-vadim-sperm-it --confirm --campaign de-a
+bin/sa --version
 ```
 
-`sa tickets` runs the ticket sync now and prints a line per folder.
+`sa --version` answers without the server — the one check a clean install can
+run before anything has ever been started. `sa tickets` runs the ticket sync
+now and prints a line per folder; it is also what the mono-repo's `launchd`
+agent calls hourly.
 
 `sa` is a thin HTTP client to the server: flags in, one JSON object out, an
 exit code that means something (0 done · 1 usage · 2 refused · 3 folder made
@@ -283,6 +293,23 @@ planned after the new builder, never before it. The campaign list is read
 with the admin's own query and a ninety-day range; whether the platform
 honours the range or its own week is a thing the first live relaunch has to
 show — a campaign the list does not show is named and left alone.
+
+### Autorules
+
+A preset is a file under `rules/` — conditions, an action, when the platform
+rechecks it, and optional limits — and `topic.yaml`'s `rules: [stop-loss]`
+names the ones a topic turns on. `plan` waits for the topic to exist, because
+the buyer the rule must carry — the platform's own field for it is named
+`ad_account_id` but actually takes a `user_id`, the trap the vault warns
+about — is read back off the topic rather than typed anywhere; a rule with no
+buyer fires for every buyer on the platform. Once the topic is known, `plan`
+creates what is missing, adopts a rule already on the topic whose conditions
+and action match the preset instead of making a twin, and — because the
+platform's create call refuses limits — follows a create with a `PUT` that
+adds them. An existing rule with no topic at all is named as a warning: it
+already applies to everything this buyer runs and will stack onto the
+topic's own. The preset-to-request-body conversion and all of this is
+`core/rules.ts`, tested there and in `core/plan.ts`.
 
 ### A batch in its topic folder
 

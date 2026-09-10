@@ -80,6 +80,7 @@ const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   themes: [{ id: 766, key: 'd', title: 'Default' }, { id: 768, key: 'g', title: 'Dark Gray' }],
   rsocCounts: [3, 4, 5, 6],
   languages: ['English (US)', 'German', 'Italian'],
+  rules: [],
   ...over,
 });
 
@@ -97,6 +98,7 @@ const contents = (...campaigns: CampaignSource[]): LaunchContents => ({
   termgroups: [tg('tg-main', ['avia sales'])],
   articles: [article('article-a', '# Jobs at airports\n\nText.')],
   campaigns,
+  presets: {},
   notes: [],
 });
 
@@ -108,6 +110,7 @@ const topicState = (campaigns: Record<string, CampaignState> = {}): LaunchState 
   pending: null,
   ticket: null,
   campaigns,
+  rules: {},
 });
 
 const video = (id: number, name: string, over: Partial<PlatformCreative> = {}): PlatformCreative => ({

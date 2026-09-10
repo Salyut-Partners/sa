@@ -16,6 +16,9 @@ import {
   emptyCampaignState, type PostRef, type ResolvedCampaign,
 } from './campaign-plan.ts';
 import type { ParseResult, TopicManifest } from './launch.ts';
+import {
+  hasLimits, ruleCreateBody, ruleLimitsBody, sameRule, type PlatformRule, type RuleCreateBody, type RuleLimitsBody, type RulePreset,
+} from './rules.ts';
 import { hashText } from './visual-key.ts';
 
 // ------------------------------------------------------------- folder --
@@ -41,6 +44,8 @@ export interface LaunchContents {
   termgroups: TermGroupSource[];
   articles: ArticleSource[];
   campaigns: CampaignSource[];
+  /** Every autorule preset the repository defines, by file name — not only the ones this topic enables, so `plan` can name what is missing. */
+  presets: Record<string, RulePreset>;
   /** What the folder reader left out and why — a campaign with no creatives yet, say. Shown as warnings. */
   notes: string[];
 }
@@ -135,10 +140,12 @@ export interface LaunchState {
   ticket: { id: string; url: string } | null;
   /** Campaign folder → its own `state.json`, read and written beside its manifest. */
   campaigns: Record<string, CampaignState>;
+  /** Preset name → the autorule's id on the platform, once `apply` has created it. */
+  rules: Record<string, number>;
 }
 
 export const emptyState = (): LaunchState => ({
-  topic_id: null, configuration_id: null, termgroups: {}, articles: {}, pending: null, ticket: null, campaigns: {},
+  topic_id: null, configuration_id: null, termgroups: {}, articles: {}, pending: null, ticket: null, campaigns: {}, rules: {},
 });
 
 const isBag = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -178,6 +185,13 @@ export function parseState(text: string): ParseResult<LaunchState> {
   if (isBag(rawTicket) && typeof rawTicket['id'] === 'string' && rawTicket['id'] !== '') {
     ticket = { id: rawTicket['id'], url: typeof rawTicket['url'] === 'string' ? rawTicket['url'] : '' };
   }
+  const rules: Record<string, number> = {};
+  if (isBag(data['rules'])) {
+    for (const [name, id] of Object.entries(data['rules'])) {
+      const value = asId(id);
+      if (value !== null) rules[name] = value;
+    }
+  }
   return {
     ok: true,
     value: {
@@ -188,6 +202,7 @@ export function parseState(text: string): ParseResult<LaunchState> {
       pending,
       ticket,
       campaigns: {},
+      rules,
     },
   };
 }
@@ -220,6 +235,8 @@ export interface Snapshot extends CampaignSnapshot {
   termGroups: PlatformTermGroup[];
   posts: PlatformPost[];
   sites: Site[];
+  /** Every autorule of the topic's buyer the platform holds — topic-scoped and general alike, so `plan` can warn about a general one overlapping. */
+  rules: PlatformRule[];
 }
 
 /** `All`, a two-letter code, or a name in any case — into the name the platform stores. */
@@ -238,6 +255,8 @@ export function resolveCountry(value: string, countries: readonly Country[]): Pa
 export type TopicRef = number | { after: 'topic' };
 /** A term group id known now, or the one this plan creates under that folder name. */
 export type TermGroupRef = number | { termgroup: string };
+/** An autorule's id known now, or the one this plan's own `rule.create` makes for that preset. */
+export type RuleRef = number | { rule: string };
 
 export interface TermGroupBody { name: string; country: string; language: string; terms: string[] }
 
@@ -260,6 +279,8 @@ export type PlanStep =
   | { kind: 'termgroup.weight'; label: string; topic: TopicRef; body: { id: TermGroupRef; weight: number }[] }
   | { kind: 'article.create'; label: string; name: string; hash: string; body: ArticleBody }
   | { kind: 'article.update'; label: string; name: string; id: number; hash: string; body: ArticleBody }
+  | { kind: 'rule.create'; label: string; preset: string; topic: TopicRef; userId: number; body: RuleCreateBody }
+  | { kind: 'rule.limits'; label: string; preset: string; rule: RuleRef; body: RuleLimitsBody }
   | CampaignStep;
 
 /** Ids the snapshot answered that the state did not hold — to be written down even when there is nothing to send. */
@@ -269,6 +290,8 @@ export interface Resolved {
   termgroups: Record<string, number>;
   articles: Record<string, number>;
   campaigns: Record<string, ResolvedCampaign>;
+  /** Preset name → the autorule's id, found on the platform rather than made by this plan's own step. */
+  rules: Record<string, number>;
 }
 
 export interface Plan {
@@ -352,7 +375,7 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
   const steps: PlanStep[] = [];
   const warnings: string[] = [];
   const errors: string[] = [];
-  const resolved: Resolved = { topic_id: null, configuration_id: null, termgroups: {}, articles: {}, campaigns: {} };
+  const resolved: Resolved = { topic_id: null, configuration_id: null, termgroups: {}, articles: {}, campaigns: {}, rules: {} };
   const { topic } = contents;
   warnings.push(...contents.notes);
 
@@ -509,6 +532,56 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
     steps.push({ kind: 'article.update', label: `оновити статтю «${article.title}» (id ${existing.id})`, name, id: existing.id, hash, body });
   }
 
+  // -- autorules: need the buyer, which this plan reads off the topic rather
+  // than off the manifest. There is no "who am I" call to ask the token
+  // directly — every write already goes out as whoever the token belongs to,
+  // topic creation included, so the topic's own `user_id` is that buyer.
+  // Waits for the topic to exist, same as a term group waits for nothing and
+  // a campaign waits for everything.
+  if (typeof topicRef === 'number') {
+    const buyerId = snapshot.topics.find(t => t.id === topicRef)?.user_id ?? null;
+    if (buyerId === null) {
+      if (topic.rules.length > 0) warnings.push('автоправила чекають: user_id байера ще не відомий — read-back топіка покаже його на наступному plan');
+    } else {
+      const general = snapshot.rules.find(r => r.topic_id === null);
+      if (general !== undefined) {
+        warnings.push(`у байера вже є загальне автоправило без топіка (id ${general.id}) — воно накладеться на будь-яке автоправило цього топіка`);
+      }
+      const onTopic = snapshot.rules.filter(r => r.topic_id === topicRef);
+      for (const name of topic.rules) {
+        const preset = contents.presets[name];
+        if (preset === undefined) {
+          errors.push(`автоправила: пресету \`${name}\` немає в репозиторії; є: ${Object.keys(contents.presets).join(', ') || 'жодного'}`);
+          continue;
+        }
+        const stateId = state.rules[name];
+        const known = stateId === undefined ? undefined : snapshot.rules.find(r => r.id === stateId);
+        if (known !== undefined) {
+          resolved.rules[name] = known.id;
+          continue;
+        }
+        const twin = onTopic.find(r => sameRule(preset, r));
+        if (twin !== undefined) {
+          resolved.rules[name] = twin.id;
+          warnings.push(`автоправило «${preset.title}» уже є на топіку (id ${twin.id}) — id записано в state.json`);
+          continue;
+        }
+        if (stateId !== undefined) warnings.push(`автоправила \`${name}\` (id ${stateId}) зі state.json на платформі немає — буде створено нове`);
+        const body = ruleCreateBody(preset, topicRef, buyerId);
+        steps.push({ kind: 'rule.create', label: `створити автоправило «${preset.title}» з пресета \`${name}\``, preset: name, topic: topicRef, userId: buyerId, body });
+        if (preset.schedule.length > 0) warnings.push(`автоправило «${preset.title}»: форма розкладу по годинах не звірена з дампами — перевірте правило на платформі після apply`);
+        if (hasLimits(preset.limits)) {
+          steps.push({
+            kind: 'rule.limits', label: `виставити ліміти автоправила «${preset.title}»`, preset: name, rule: { rule: name },
+            body: ruleLimitsBody(preset, topicRef, buyerId),
+          });
+        }
+      }
+    }
+  } else if (topic.rules.length > 0) {
+    warnings.push('автоправила чекають створення топіка — буде видно на наступному plan');
+  }
+
   // -- campaigns: after everything they point at, with ids where known and refs to this plan's own steps otherwise.
   const termGroupRefs: Record<string, TermGroupRef> = {};
   for (const group of contents.termgroups) termGroupRefs[group.name] = resolved.termgroups[group.name] ?? { termgroup: group.name };
@@ -599,6 +672,7 @@ export function adoptResolved(state: LaunchState, planned: Plan): LaunchState {
     termgroups: { ...state.termgroups, ...planned.resolved.termgroups },
     articles: { ...state.articles },
     campaigns: { ...state.campaigns },
+    rules: { ...state.rules, ...planned.resolved.rules },
   };
   for (const [name, id] of Object.entries(planned.resolved.articles)) {
     if (next.articles[name]?.id !== id) next.articles[name] = { id, hash: '' };

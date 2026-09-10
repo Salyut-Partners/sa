@@ -15,6 +15,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArticle, type ImageReader } from '../core/article.ts';
 import { isFolderName, mimeFor } from '../core/batch-folder.ts';
 import {
@@ -25,24 +26,41 @@ import { parseCampaignManifest, parseTopicManifest, type TopicManifest } from '.
 import {
   adoptResolved, campaignOf, campaignOutline, chooseTopic, emptyState, firstNew, narrowPlan, parseKeywords, parseState, parseTermGroupOptions,
   plan as makePlan, previewPlan, type ArticleSource, type CampaignOutline, type LaunchContents, type LaunchState, type Plan,
-  type PlanPreview, type PlanStep, type Snapshot, type TermGroupRef, type TermGroupSource, type TopicRef,
+  type PlanPreview, type PlanStep, type RuleRef, type Snapshot, type TermGroupRef, type TermGroupSource, type TopicRef,
 } from '../core/plan.ts';
 import { CREATIVES_DIR } from '../core/placement.ts';
 import { DEFAULT_QUEUE, nextAction, pauseBefore, type Attempt } from '../core/queue.ts';
+import { parseRulePreset, sameRule, type RulePreset } from '../core/rules.ts';
 import { launchFolder } from './batches.ts';
 import type { SaConfig } from './config.ts';
 import { createJob, settleJob, type Job } from './jobs.ts';
 import { RefusedError } from './launches.ts';
 import {
-  createBuilder, createConfiguration, createdId, createHeadline, createPost, createTermGroup, createTopic, createTsp,
+  createBuilder, createConfiguration, createdId, createHeadline, createPost, createRule, createTermGroup, createTopic, createTsp,
   pauseCampaigns, PlatformClient, platformState, readAdAccounts, readBuilders, readCampaigns, readConfigurations,
-  readCountries, readCreatives, readLanguages, readPixels, readPosts, readRsocCounts, readSites, readTermGroups, readThemes,
-  readTopic, readTsps, searchTopics, setTermGroupWeights, updatePost, updateTermGroup, updateTsp, uploadCreative,
-  type Answer,
+  readCountries, readCreatives, readLanguages, readPixels, readPosts, readRsocCounts, readRules, readSites, readTermGroups,
+  readThemes, readTopic, readTsps, searchTopics, setTermGroupWeights, updatePost, updateRuleLimits, updateTermGroup, updateTsp,
+  uploadCreative, type Answer,
 } from './platform.ts';
 
 const STATE_FILE = 'state.json';
 const CAMPAIGNS_DIR = 'campaigns';
+
+/** The autorule preset catalogue: `rules/<name>.yaml`, at the package root next to `src/`, not inside any launch folder. */
+const RULES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'rules');
+
+/** Every preset the repository defines. A preset that does not parse is left out — `plan` already refuses a topic that names a preset it cannot find. */
+function readPresets(): Record<string, RulePreset> {
+  const presets: Record<string, RulePreset> = {};
+  if (!fs.existsSync(RULES_DIR)) return presets;
+  for (const entry of fs.readdirSync(RULES_DIR, { withFileTypes: true })) {
+    if (!entry.isFile() || !/\.ya?ml$/i.test(entry.name)) continue;
+    const name = entry.name.replace(/\.ya?ml$/i, '');
+    const parsed = parseRulePreset(name, fs.readFileSync(path.join(RULES_DIR, entry.name), 'utf8'));
+    if (parsed.ok) presets[name] = parsed.value;
+  }
+  return presets;
+}
 
 // ------------------------------------------------------------- folder --
 
@@ -159,8 +177,9 @@ export function readLaunchContents(folder: string): LaunchContents {
   const termgroups = readTermGroupFolders(folder, errors);
   const articles = readArticleFolders(folder, errors);
   const campaigns = manifest.ok ? readCampaignFolders(folder, manifest.value, errors, notes) : [];
+  const presets = readPresets();
   if (!manifest.ok || errors.length > 0) throw new RefusedError(errors.join('\n'));
-  return { topic: manifest.value, termgroups, articles, campaigns, notes };
+  return { topic: manifest.value, termgroups, articles, campaigns, presets, notes };
 }
 
 export function readState(folder: string): LaunchState {
@@ -239,17 +258,17 @@ export async function readSnapshot(api: PlatformClient, topic: TopicManifest, st
   // The rest is filtered by the topic `plan` will settle on — the same rule, asked once in core.
   const choice = chooseTopic(topics, topic, state);
   if (choice.kind !== 'known' && choice.kind !== 'found') {
-    return { ...directories, topics, configurations: [], termGroups: [], posts: [], creatives: [], tsps: [], builders: [], campaigns: [] };
+    return { ...directories, topics, configurations: [], termGroups: [], posts: [], creatives: [], tsps: [], builders: [], campaigns: [], rules: [] };
   }
   const topicId = choice.id;
   const userId = topics.find(t => t.id === topicId)?.user_id ?? 0;
-  const [configurations, termGroups, posts, creatives, tsps, builders] = await Promise.all([
+  const [configurations, termGroups, posts, creatives, tsps, builders, rules] = await Promise.all([
     readConfigurations(api, topicId), readTermGroups(api, topicId), readPosts(api, topicId),
-    readCreatives(api, topicId), readTsps(api, topicId, userId), readBuilders(api, topicId),
+    readCreatives(api, topicId), readTsps(api, topicId, userId), readBuilders(api, topicId), readRules(api, topicId, userId),
   ]);
   // The campaign list is read for the campaigns the builders made, and only those: it is what says whether an old one is live.
   const campaigns = await readCampaigns(api, builders.flatMap(b => b.campaigns.map(c => c.id)));
-  return { ...directories, topics, configurations, termGroups, posts, creatives, tsps, builders, campaigns };
+  return { ...directories, topics, configurations, termGroups, posts, creatives, tsps, builders, campaigns, rules };
 }
 
 // --------------------------------------------------------------- plan --
@@ -347,6 +366,8 @@ interface Run {
   contents: LaunchContents;
   /** Ids created or resolved during this run, by folder name. */
   termgroups: Record<string, number>;
+  /** Autorule ids created during this run, by preset name. */
+  rules: Record<string, number>;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -367,6 +388,13 @@ const resolveTermGroup = (run: Run, ref: TermGroupRef): number => {
   if (typeof ref === 'number') return ref;
   const id = run.termgroups[ref.termgroup] ?? run.state.termgroups[ref.termgroup];
   if (id === undefined) throw new StepError(`термгрупу \`${ref.termgroup}\` ще не створено, а крок її потребує`);
+  return id;
+};
+
+const resolveRule = (run: Run, ref: RuleRef): number => {
+  if (typeof ref === 'number') return ref;
+  const id = run.rules[ref.rule] ?? run.state.rules[ref.rule];
+  if (id === undefined) throw new StepError(`автоправило \`${ref.rule}\` ще не створено, а крок його потребує`);
   return id;
 };
 
@@ -420,7 +448,7 @@ export async function startApply(
   if (planned.plan.steps.length === 0) return { id: null, steps: 0 };
 
   const job = createJob(planned.plan.steps.length, new Map(), 'sa-apply-');
-  const run: Run = { api: client(config), launchKey, folder: planned.folder, job, state, contents: planned.contents, termgroups: {} };
+  const run: Run = { api: client(config), launchKey, folder: planned.folder, job, state, contents: planned.contents, termgroups: {}, rules: {} };
   applying.add(launchKey);
   void runSteps(run, planned.plan.steps).finally(() => {
     applying.delete(launchKey);
@@ -605,6 +633,23 @@ async function runStep(run: Run, step: PlanStep): Promise<void> {
       const fields = { ...step.body, topic_ids: [String(topicId)] };
       await written(run, step, () => updatePost(api, step.id, fields));
       commit(run, state => ({ ...state, articles: { ...state.articles, [step.name]: { id: step.id, hash: step.hash } }, pending: null }));
+      return;
+    }
+    case 'rule.create': {
+      const topicId = resolveTopic(run, step.topic);
+      const preset = run.contents.presets[step.preset];
+      if (preset === undefined) throw new StepError(`пресету \`${step.preset}\` немає в репозиторії`);
+      const list = async (): Promise<number[]> => (await readRules(api, topicId, step.userId)).filter(r => sameRule(preset, r)).map(r => r.id);
+      const { id } = await withPolicy(run, step, list, () => createRule(api, step.body), freshIn(list));
+      if (id === null) throw new StepError('автоправило відправлено, але read-back його не бачить серед правил топіка');
+      run.rules[step.preset] = id;
+      commit(run, state => ({ ...state, rules: { ...state.rules, [step.preset]: id }, pending: null }));
+      return;
+    }
+    case 'rule.limits': {
+      const ruleId = resolveRule(run, step.rule);
+      await written(run, step, () => updateRuleLimits(api, ruleId, step.body));
+      commit(run, state => ({ ...state, pending: null }));
       return;
     }
     case 'creatives.upload': {

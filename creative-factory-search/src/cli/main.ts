@@ -11,6 +11,7 @@
 // deny the command outright — the gate is the flag and the deny, not a
 // permission prompt a model in auto mode would never see.
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -34,6 +35,7 @@ const USAGE = `sa — робоче місце байера
                       з --campaign — лише те, що потрібно одній кампанії
   sa apply <launch-key> --confirm [--campaign <name>]
                       виконати план; без --confirm відмовляється
+  sa --version         версія sa; не потребує сервера
 
 Launch key: малі літери, цифри й дефіси, щонайменше два сегменти — перший це
 скорочення команди. Відповідь завжди JSON в один об'єкт.`;
@@ -138,6 +140,13 @@ async function commandLaunches(): Promise<number> {
   return 0;
 }
 
+/** No server needed: a clean install has to answer this before one has ever been started. */
+function commandVersion(): number {
+  const pkg = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8')) as { version: string };
+  out({ sa: pkg.version });
+  return 0;
+}
+
 async function commandConfig(): Promise<number> {
   await ensureServer();
   const { body } = await ask('/api/config');
@@ -229,6 +238,8 @@ async function main(): Promise<number> {
     case 'config': return commandConfig();
     case 'plan': return commandPlan(rest);
     case 'apply': return commandApply(rest);
+    case '--version':
+      return commandVersion();
     case undefined:
     case '-h':
     case '--help':

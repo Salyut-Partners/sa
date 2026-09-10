@@ -62,25 +62,89 @@ else
 fi
 [ "$SUBS_OK" = 1 ] || printf "\n  \033[33m!\033[0m %s\n" "субтитри не встановились; редактор і залив працюють без них"
 
-# 6. Конфігурація байера — поза git. Не перезаписується, лише підказка.
+# 6. Конфігурація байера — поза git, бо `~/sa` це git і `.env` у ньому рано чи
+#    пізно закомітять. Файл, що вже є, не перезаписується — тільки підказка;
+#    його відсутність дістає шаблон із плейсхолдерами, щоб було що заповнити.
 echo
 CONFIG="${SA_CONFIG:-$HOME/.config/sa/config.json}"
 if [ -f "$CONFIG" ]; then
-  ok "конфігурація: $CONFIG"
+  ok "конфігурація вже стоїть: $CONFIG"
 else
-  info "конфігурації ще немає: $CONFIG"
-  echo "    Без неї заливи лягають у ~/sa/launches, а тікет у ClickUp не створюється."
-  echo "    Приклад:"
-  echo '    { "launches_root": "~/sa/launches", "clickup": { "token": "pk_…", "list_id": "…" } }'
+  info "пишу шаблон конфігурації: $CONFIG"
+  mkdir -p "$(dirname "$CONFIG")"
+  cat > "$CONFIG" <<'EOF1'
+{
+  "launches_root": "~/sa/launches",
+  "clickup": {
+    "token": "REPLACE_CLICKUP_TOKEN",
+    "list_id": "REPLACE_LIST_ID"
+  },
+  "platform": {
+    "token": "REPLACE_PLATFORM_BEARER",
+    "organization_id": 0
+  }
+}
+EOF1
+  ok "шаблон записано — заповни токени перед першим \`sa plan\`"
 fi
 
-cat <<'EOF2'
+# 7. launchd-агент: тримає сервер живим для погодинної звірки тікетів, навіть
+#    коли редактор не відкривали цілий день. Ідемпотентний — уже завантажений
+#    агент пропускається, а не перевантажується.
+echo
+AGENT_LABEL="io.sa.tickets"
+AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
+SA_BIN="$(cd "$(dirname "$0")/creative-factory-search" && pwd)/bin/sa"
+if launchctl list "$AGENT_LABEL" >/dev/null 2>&1; then
+  ok "launchd-агент $AGENT_LABEL вже стоїть"
+else
+  info "ставлю launchd-агент $AGENT_LABEL (погодинно: $SA_BIN tickets)…"
+  mkdir -p "$(dirname "$AGENT_PLIST")"
+  cat > "$AGENT_PLIST" <<EOF3
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$AGENT_LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$SA_BIN</string>
+    <string>tickets</string>
+  </array>
+  <key>StartInterval</key><integer>3600</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/tmp/sa-tickets.log</string>
+  <key>StandardErrorPath</key><string>/tmp/sa-tickets.log</string>
+</dict>
+</plist>
+EOF3
+  launchctl load "$AGENT_PLIST" 2>/dev/null && ok "launchd-агент поставлено" \
+    || printf "  \033[33m!\033[0m %s\n" "launchctl load не вдався — піднімай сервер вручну: $SA_BIN tickets"
+fi
+
+# 8. Критичне: без нього `sa new`/`sa plan`/`sa apply` працюють лише частково.
+echo
+echo "Критичне для платформи й ClickUp:"
+if grep -q REPLACE_PLATFORM_BEARER "$CONFIG" 2>/dev/null; then
+  printf "  \033[33m!\033[0m %s\n" "platform.token не заповнено — plan/apply відмовляться, редактор і sa new далі працюють"
+else
+  ok "platform.token заповнено"
+fi
+if grep -q REPLACE_CLICKUP_TOKEN "$CONFIG" 2>/dev/null; then
+  printf "  \033[33m!\033[0m %s\n" "clickup.token не заповнено — sa new робить лише теку, без тікета"
+else
+  ok "clickup.token заповнено"
+fi
+
+cat <<EOF2
 
 Готово. Запуск:
 
     cd creative-factory-search && npm run dev     # редактор на 5181, сервер на 5180
-    creative-factory-search/bin/sa new <launch-key>
+    $SA_BIN new <launch-key>
+    $SA_BIN --version
     cd subs && ./run.sh                            # вотчер inbox/, якщо потрібен
 
 Таба «Субтитри» в редакторі працює без вотчера: сервер сам викликає пайплайн.
+Онбординг: cat ONBOARDING.md
 EOF2
