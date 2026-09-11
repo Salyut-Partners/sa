@@ -1,11 +1,17 @@
-// Where each exported file lands: which campaign folder, in the launch the
+// Where each exported file lands: which campaign folders, in the launch the
 // batch belongs to. The rule is by language — one campaign is one script, and
-// a script is one language — with two ways for the buyer to say otherwise:
-// point a whole language at another campaign or at nothing, and single photos
-// out of it, because campaigns are sometimes split by place rather than tongue.
+// a script is one language — and since the matrix, one language is several
+// campaigns: two cabinets, two sources. So a language goes to a set of
+// campaigns, every one that speaks it by default, and the file is copied into
+// each. The buyer takes campaigns off, adds one that speaks another language
+// when a campaign is split by place rather than tongue, and singles photos
+// out of the row.
 //
 // It is data and pure functions so the panel can show the split before the
-// button is pressed and so the rule is tested without a folder in sight.
+// button is pressed and so the rule is tested without a folder in sight. The
+// copies are cheap; what they buy is a folder that says in Finder exactly what
+// the campaign holds. The plan pays for them once: a file that is the same in
+// two campaigns of a topic is uploaded once (`campaign-plan.ts`).
 import YAML from 'yaml';
 import type { BatchPlan } from './batch.ts';
 import { releaseLocales } from './locales.ts';
@@ -25,15 +31,19 @@ export interface CampaignInfo {
   country: string | null;
 }
 
-/** A campaign's target, or null for "not exported". */
-export type Target = string | null;
+/** The campaigns a file goes to; none is "not exported". Sorted, no repeats. */
+export type Target = string[];
 
 export interface ExportLayout {
-  /** Each release language's campaign. A language absent here goes nowhere. */
+  /** Each release language's campaigns. A language absent here goes nowhere. */
   locales: Partial<Record<LocaleId, Target>>;
   /** Photos sent somewhere other than their language's row: photo id → language → target. */
   overrides: Record<string, Partial<Record<LocaleId, Target>>>;
 }
+
+/** A target in one shape, so two that name the same campaigns compare equal. */
+const canon = (target: readonly string[]): Target => [...new Set(target)].sort();
+const sameTarget = (a: readonly string[], b: readonly string[]): boolean => canon(a).join('\n') === canon(b).join('\n');
 
 /**
  * The language and country of a campaign manifest, read loosely.
@@ -55,18 +65,18 @@ export function campaignSummary(source: string): { language: string | null; coun
   return { language: text(bag['language']), country: text(bag['country']) };
 }
 
+/** The campaigns that speak a language, by name. */
+export const speakers = (campaigns: readonly CampaignInfo[], locale: LocaleId): string[] =>
+  canon(campaigns.filter(c => c.language?.toLowerCase() === locale).map(c => c.name));
+
 /**
- * The layout the panel opens with: every release language pointed at the
- * campaign that speaks it, the first by name when several do, none when none
- * does. A language with no campaign is left out rather than guessed into one.
+ * The layout the panel opens with: every release language pointed at every
+ * campaign that speaks it, and at none when none does. Nothing is guessed
+ * across languages: a campaign of another tongue is the buyer's to add.
  */
 export function defaultLayout(project: Project, campaigns: readonly CampaignInfo[]): ExportLayout {
-  const sorted = [...campaigns].sort((a, b) => a.name.localeCompare(b.name));
   const locales: ExportLayout['locales'] = {};
-  for (const locale of releaseLocales(project)) {
-    const match = sorted.find(c => c.language?.toLowerCase() === locale.id);
-    locales[locale.id] = match?.name ?? null;
-  }
+  for (const locale of releaseLocales(project)) locales[locale.id] = speakers(campaigns, locale.id);
   return { locales, overrides: {} };
 }
 
@@ -83,15 +93,15 @@ export function mergeLayout(
 ): ExportLayout {
   const locales: ExportLayout['locales'] = {};
   for (const id of release) {
-    locales[id] = id in current.locales ? current.locales[id] ?? null : fresh.locales[id] ?? null;
+    locales[id] = id in current.locales ? current.locales[id] ?? [] : fresh.locales[id] ?? [];
   }
   return { ...current, locales };
 }
 
 /**
- * What the selected photos say for one language: a campaign or null they all
- * name by hand, `'inherit'` when none of them does, `'mixed'` when they
- * disagree. The photo select shows this and writes onto all of them.
+ * What the selected photos say for one language: the campaigns they all name
+ * by hand, `'inherit'` when none of them does, `'mixed'` when they disagree.
+ * The photo row shows this and writes onto all of them.
  */
 export function selectionTarget(
   layout: ExportLayout,
@@ -100,22 +110,29 @@ export function selectionTarget(
 ): Target | 'inherit' | 'mixed' {
   const said = photoIds.map(id => {
     const own = layout.overrides[id];
-    return own !== undefined && locale in own ? (own[locale] ?? null) : 'inherit';
+    return own !== undefined && locale in own ? canon(own[locale] ?? []) : 'inherit';
   });
   const first = said[0];
   if (first === undefined) return 'inherit';
-  return said.every(t => t === first) ? first : 'mixed';
+  const agree = said.every(t => (t === 'inherit' ? first === 'inherit' : first !== 'inherit' && sameTarget(t, first)));
+  return agree ? first : 'mixed';
 }
 
 /** Where one file goes: the photo's own say first, then its language's. */
 export function destinationFor(layout: ExportLayout, photoId: string, locale: LocaleId): Target {
   const own = layout.overrides[photoId];
-  if (own !== undefined && locale in own) return own[locale] ?? null;
-  return layout.locales[locale] ?? null;
+  if (own !== undefined && locale in own) return canon(own[locale] ?? []);
+  return canon(layout.locales[locale] ?? []);
 }
 
-export function setLocaleTarget(layout: ExportLayout, locale: LocaleId, target: Target): ExportLayout {
-  return { ...layout, locales: { ...layout.locales, [locale]: target } };
+export function setLocaleTarget(layout: ExportLayout, locale: LocaleId, target: readonly string[]): ExportLayout {
+  return { ...layout, locales: { ...layout.locales, [locale]: canon(target) } };
+}
+
+/** One campaign on or off a language's row. */
+export function toggleLocaleTarget(layout: ExportLayout, locale: LocaleId, campaign: string, on: boolean): ExportLayout {
+  const current = layout.locales[locale] ?? [];
+  return setLocaleTarget(layout, locale, on ? [...current, campaign] : current.filter(c => c !== campaign));
 }
 
 /**
@@ -127,45 +144,70 @@ export function setPhotoTarget(
   layout: ExportLayout,
   photoIds: readonly string[],
   locale: LocaleId,
-  target: Target | 'inherit',
+  target: readonly string[] | 'inherit',
 ): ExportLayout {
   const overrides = { ...layout.overrides };
   for (const id of photoIds) {
     const own = { ...(overrides[id] ?? {}) };
     if (target === 'inherit') delete own[locale];
-    else own[locale] = target;
+    else own[locale] = canon(target);
     if (Object.keys(own).length === 0) delete overrides[id];
     else overrides[id] = own;
   }
   return { ...layout, overrides };
 }
 
+/**
+ * One campaign on or off for the selected photos. A photo that was following
+ * its row starts from the row's campaigns, so ticking one box adds to what
+ * the language already sends rather than replacing it with one folder.
+ */
+export function togglePhotoTarget(
+  layout: ExportLayout,
+  photoIds: readonly string[],
+  locale: LocaleId,
+  campaign: string,
+  on: boolean,
+): ExportLayout {
+  let next = layout;
+  for (const id of photoIds) {
+    const current = destinationFor(next, id, locale);
+    next = setPhotoTarget(next, [id], locale, on ? [...current, campaign] : current.filter(c => c !== campaign));
+  }
+  return next;
+}
+
 export interface RowShare {
-  campaign: Target;
+  /** A campaign, or null for the files that stay home. */
+  campaign: string | null;
   count: number;
 }
 
 /**
  * One language's row summed up over the selected photos: how many files go to
- * each campaign, the row's own campaign first, and how many stay home last.
+ * each campaign, the row's own campaigns first, and how many stay home last.
  */
 export function rowSummary(project: Project, layout: ExportLayout, locale: LocaleId): RowShare[] {
   const chosen = new Set(project.selection);
-  const counts = new Map<Target, number>();
-  const home = layout.locales[locale] ?? null;
+  const counts = new Map<string | null, number>();
+  const home = new Set(layout.locales[locale] ?? []);
   for (const photo of project.photos) {
     if (!chosen.has(photo.id)) continue;
-    const target = destinationFor(layout, photo.id, locale);
-    counts.set(target, (counts.get(target) ?? 0) + 1);
+    const targets = destinationFor(layout, photo.id, locale);
+    if (targets.length === 0) counts.set(null, (counts.get(null) ?? 0) + 1);
+    for (const target of targets) counts.set(target, (counts.get(target) ?? 0) + 1);
   }
   const shares = [...counts.entries()].map(([campaign, count]) => ({ campaign, count }));
-  const rank = (s: RowShare): number => (s.campaign === home ? 0 : s.campaign === null ? 2 : 1);
+  const rank = (s: RowShare): number => (s.campaign === null ? 2 : home.has(s.campaign) ? 0 : 1);
   return shares.sort((a, b) => rank(a) - rank(b) || String(a.campaign).localeCompare(String(b.campaign)));
 }
 
 /** How big the laid-out export is, by arithmetic — for the button, not the job. */
 export interface PlacementSize {
+  /** Files that go somewhere. */
   total: number;
+  /** Files written, counting every folder a file is copied into. */
+  copies: number;
   skipped: number;
 }
 
@@ -177,15 +219,20 @@ export interface PlacementSize {
 export function placementSize(project: Project, layout: ExportLayout): PlacementSize {
   const chosen = new Set(project.selection);
   let total = 0;
+  let copies = 0;
   let skipped = 0;
   for (const photo of project.photos) {
     if (!chosen.has(photo.id)) continue;
     for (const locale of releaseLocales(project)) {
-      if (destinationFor(layout, photo.id, locale.id) === null) skipped++;
-      else total++;
+      const targets = destinationFor(layout, photo.id, locale.id);
+      if (targets.length === 0) skipped++;
+      else {
+        total++;
+        copies += targets.length;
+      }
     }
   }
-  return { total, skipped };
+  return { total, copies, skipped };
 }
 
 /** How many of the files going out get subtitles, of how many go out. */
@@ -206,7 +253,7 @@ export function subtitleCount(project: Project, layout: ExportLayout | null): Su
   for (const photo of project.photos) {
     if (!chosen.has(photo.id)) continue;
     for (const locale of releaseLocales(project)) {
-      if (layout !== null && destinationFor(layout, photo.id, locale.id) === null) continue;
+      if (layout !== null && destinationFor(layout, photo.id, locale.id).length === 0) continue;
       total++;
       if (subtitleStyleFor(project, locale.id) !== null) burned++;
     }
@@ -217,28 +264,28 @@ export function subtitleCount(project: Project, layout: ExportLayout | null): Su
 export interface PlacedPlan {
   /** The plan with every file that goes nowhere taken out, and empty groups with it. */
   plan: BatchPlan;
-  /** Archive name → campaign folder name. */
-  destinations: Record<string, string>;
+  /** Archive name → the campaign folders it is written into. */
+  destinations: Record<string, string[]>;
   /** Files the layout left out. */
   skipped: number;
 }
 
 /**
  * Apply the layout to a plan: keep the files that have somewhere to go, name
- * the folder for each, and drop the rest — including any group that held only
+ * the folders for each, and drop the rest — including any group that held only
  * dropped files, so the render count still says what will actually be drawn.
  */
 export function placePlan(plan: BatchPlan, layout: ExportLayout): PlacedPlan {
-  const destinations: Record<string, string> = {};
+  const destinations: Record<string, string[]> = {};
   let skipped = 0;
   const groups = plan.groups.flatMap(group => {
     const items = group.items.filter(item => {
-      const target = destinationFor(layout, item.photoId, item.locale);
-      if (target === null) {
+      const targets = destinationFor(layout, item.photoId, item.locale);
+      if (targets.length === 0) {
         skipped++;
         return false;
       }
-      destinations[item.name] = target;
+      destinations[item.name] = targets;
       return true;
     });
     return items.length === 0 ? [] : [{ ...group, items }];

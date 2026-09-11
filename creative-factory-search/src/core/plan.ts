@@ -15,7 +15,7 @@ import {
   planCampaigns, previewTspBody, type CampaignSnapshot, type CampaignSource, type CampaignState, type CampaignStep,
   emptyCampaignState, type PostRef, type ResolvedCampaign,
 } from './campaign-plan.ts';
-import type { ParseResult, TopicManifest } from './launch.ts';
+import { topicSources, type ParseResult, type TopicManifest, type TrafficSource } from './launch.ts';
 import {
   hasLimits, ruleCreateBody, ruleLimitsBody, sameRule, type PlatformRule, type RuleCreateBody, type RuleLimitsBody, type RulePreset,
 } from './rules.ts';
@@ -130,7 +130,8 @@ export interface PendingWrite {
 
 export interface LaunchState {
   topic_id: number | null;
-  configuration_id: number | null;
+  /** Traffic source → the topic's configuration for it. One per source the cabinets launch on. */
+  configurations: Record<string, number>;
   /** Folder name → term group id. */
   termgroups: Record<string, number>;
   /** Folder name → post id and the hash of what was last sent. */
@@ -145,7 +146,7 @@ export interface LaunchState {
 }
 
 export const emptyState = (): LaunchState => ({
-  topic_id: null, configuration_id: null, termgroups: {}, articles: {}, pending: null, ticket: null, campaigns: {}, rules: {},
+  topic_id: null, configurations: {}, termgroups: {}, articles: {}, pending: null, ticket: null, campaigns: {}, rules: {},
 });
 
 const isBag = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -192,11 +193,21 @@ export function parseState(text: string): ParseResult<LaunchState> {
       if (value !== null) rules[name] = value;
     }
   }
+  // A file from before sources lived on cabinets held one `configuration_id`
+  // with no source to file it under; it is dropped, and the next plan finds
+  // the configuration again by read-back — the list carries its source.
+  const configurations: Record<string, number> = {};
+  if (isBag(data['configurations'])) {
+    for (const [source, id] of Object.entries(data['configurations'])) {
+      const value = asId(id);
+      if (value !== null) configurations[source] = value;
+    }
+  }
   return {
     ok: true,
     value: {
       topic_id: asId(data['topic_id']),
-      configuration_id: asId(data['configuration_id']),
+      configurations,
       termgroups,
       articles,
       pending,
@@ -273,7 +284,7 @@ export interface ArticleBody {
 
 export type PlanStep =
   | { kind: 'topic.create'; label: string; body: { name: string; internal_name: string } }
-  | { kind: 'configuration.create'; label: string; topic: TopicRef; body: { name: string; country: string; traffic_source: string; special_categories: [] } }
+  | { kind: 'configuration.create'; label: string; topic: TopicRef; source: TrafficSource; body: { name: string; country: string; traffic_source: string; special_categories: [] } }
   | { kind: 'termgroup.create'; label: string; name: string; topic: TopicRef; body: TermGroupBody }
   | { kind: 'termgroup.update'; label: string; name: string; id: number; body: TermGroupBody }
   | { kind: 'termgroup.weight'; label: string; topic: TopicRef; body: { id: TermGroupRef; weight: number }[] }
@@ -286,7 +297,8 @@ export type PlanStep =
 /** Ids the snapshot answered that the state did not hold — to be written down even when there is nothing to send. */
 export interface Resolved {
   topic_id: number | null;
-  configuration_id: number | null;
+  /** Traffic source → configuration id the snapshot answered. */
+  configurations: Record<string, number>;
   termgroups: Record<string, number>;
   articles: Record<string, number>;
   campaigns: Record<string, ResolvedCampaign>;
@@ -375,7 +387,7 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
   const steps: PlanStep[] = [];
   const warnings: string[] = [];
   const errors: string[] = [];
-  const resolved: Resolved = { topic_id: null, configuration_id: null, termgroups: {}, articles: {}, campaigns: {}, rules: {} };
+  const resolved: Resolved = { topic_id: null, configurations: {}, termgroups: {}, articles: {}, campaigns: {}, rules: {} };
   const { topic } = contents;
   warnings.push(...contents.notes);
 
@@ -409,21 +421,24 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
   }
   if (typeof topicRef === 'number') resolved.topic_id = topicRef;
 
-  // -- configuration: one per topic, no id in the answer, so the read-back is the list.
-  if (typeof topicRef === 'number') {
-    const configuration = (state.configuration_id === null
-      ? undefined
-      : snapshot.configurations.find(c => c.id === state.configuration_id)) ?? snapshot.configurations[0];
+  // -- configurations: one per traffic source the cabinets launch on; no id
+  // in the answer, so the read-back is the list, and the list says the source.
+  for (const source of topicSources(topic)) {
+    if (typeof topicRef !== 'number') {
+      steps.push(configurationStep(topic, topicRef, source));
+      continue;
+    }
+    const known = state.configurations[source];
+    const configuration = (known === undefined ? undefined : snapshot.configurations.find(c => c.id === known))
+      ?? snapshot.configurations.find(c => c.traffic_source === source);
     if (configuration !== undefined) {
-      resolved.configuration_id = configuration.id;
-      if (state.configuration_id !== configuration.id) {
-        warnings.push(`конфігурація топіка вже є (id ${configuration.id}) — id записано в state.json`);
+      resolved.configurations[source] = configuration.id;
+      if (known !== configuration.id) {
+        warnings.push(`конфігурація топіка для ${source} вже є (id ${configuration.id}) — id записано в state.json`);
       }
     } else {
-      steps.push(configurationStep(topic, topicRef));
+      steps.push(configurationStep(topic, topicRef, source));
     }
-  } else {
-    steps.push(configurationStep(topic, topicRef));
   }
 
   // -- term groups
@@ -668,7 +683,7 @@ export function adoptResolved(state: LaunchState, planned: Plan): LaunchState {
   const next: LaunchState = {
     ...state,
     topic_id: planned.resolved.topic_id ?? state.topic_id,
-    configuration_id: planned.resolved.configuration_id ?? state.configuration_id,
+    configurations: { ...state.configurations, ...planned.resolved.configurations },
     termgroups: { ...state.termgroups, ...planned.resolved.termgroups },
     articles: { ...state.articles },
     campaigns: { ...state.campaigns },
@@ -710,12 +725,13 @@ export function campaignOutline(planned: Plan, names: readonly string[]): Campai
   }));
 }
 
-function configurationStep(topic: TopicManifest, topicRef: TopicRef): PlanStep {
+function configurationStep(topic: TopicManifest, topicRef: TopicRef, source: TrafficSource): PlanStep {
   return {
     kind: 'configuration.create',
-    label: `створити конфігурацію топіка (${topic.traffic_source}, All)`,
+    label: `створити конфігурацію топіка (${source}, All)`,
     topic: topicRef,
-    body: { name: topic.name, country: 'All', traffic_source: topic.traffic_source, special_categories: [] },
+    source,
+    body: { name: topic.name, country: 'All', traffic_source: source, special_categories: [] },
   };
 }
 

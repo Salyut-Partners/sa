@@ -124,6 +124,10 @@ export const fetchBatches = (launchKey: string): Promise<string[]> =>
 export const readBatch = (launchKey: string, batch: string): Promise<BatchRead> =>
   ask<BatchRead>(`/api/launches/${launchKey}/batches/${batch}`);
 
+/** Save into a batch the server names by the clock; the answer says which. */
+export const createBatch = (launchKey: string, file: ProjectFile): Promise<BatchWritten> =>
+  ask<BatchWritten>(`/api/launches/${launchKey}/batches`, asJson(file));
+
 export const writeBatch = (launchKey: string, batch: string, file: ProjectFile): Promise<BatchWritten> =>
   ask<BatchWritten>(`/api/launches/${launchKey}/batches/${batch}`, {
     method: 'PUT',

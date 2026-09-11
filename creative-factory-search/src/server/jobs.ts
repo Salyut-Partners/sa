@@ -71,10 +71,11 @@ export interface Job {
   /** Files this job made on its way, deleted when it settles. */
   scratch: string[];
   /**
-   * Output name → the file it is written as, for a job going to folders. Null
-   * is a download: everything stays in `dir` until it is fetched.
+   * Output name → the files it is written as, for a job going to folders —
+   * one per campaign the file goes to, the first written and the rest copied.
+   * Null is a download: everything stays in `dir` until it is fetched.
    */
-  targets: Map<string, string> | null;
+  targets: Map<string, string[]> | null;
   /** Folders that received at least one file, for the panel to name. */
   folders: Set<string>;
   /** Something to do the moment the job is cancelled — kill a child, say. */
@@ -86,7 +87,7 @@ const jobs = new Map<string, Job>();
 export class BadRequestError extends Error {}
 
 /** A new running job, registered and given its scratch folder. */
-export function createJob(total: number, targets: Map<string, string> | null, prefix: string): Job {
+export function createJob(total: number, targets: Map<string, string[]> | null, prefix: string): Job {
   const job: Job = {
     id: crypto.randomUUID(),
     state: 'running',

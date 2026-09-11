@@ -9,11 +9,11 @@ import { isLocaleId } from '../core/locales.ts';
 import { VOICE_MODELS } from '../core/voice.ts';
 import { describePlan, onApplySettled, planLaunch, startApply } from './apply.ts';
 import { startBatch } from './batch.ts';
-import { campaignCreativesDir, listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
+import { campaignCreativesDir, createBatch, listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
 import { clickupState } from './clickup.ts';
 import { configPath, ensureLaunchesRoot, loadConfig } from './config.ts';
-import { createLaunch, existingLaunchKeys, launchesTree, RefusedError } from './launches.ts';
+import { createCampaign, createLaunch, existingLaunchKeys, expandLaunch, launchesTree, RefusedError } from './launches.ts';
 import { isTrafficSource } from '../core/launch.ts';
 import { BadRequestError, cancelJob, jobById, outputsOf, statusOf } from './jobs.ts';
 import { PlatformReadError, platformState } from './platform.ts';
@@ -158,6 +158,39 @@ app.post('/api/launches', async (req, res) => {
   }
 });
 
+/**
+ * The matrix as folders: the body is the matrix JSON, the answer says what
+ * was made and what was already there. Nothing on the platform is touched.
+ */
+app.post('/api/launches/:key/expand', (req, res) => {
+  try {
+    res.json(expandLaunch(loadConfig(), req.params.key, req.body));
+  } catch (e) {
+    answerFailure(res, e, 'expand');
+  }
+});
+
+/** One campaign folder from its axes; a taken name is a 400. */
+app.post('/api/launches/:key/campaigns', (req, res) => {
+  const body = (typeof req.body === 'object' && req.body !== null ? req.body : {}) as Record<string, unknown>;
+  const text = (key: string): string => (typeof body[key] === 'string' ? (body[key] as string) : '');
+  const num = (key: string): number | undefined => (typeof body[key] === 'number' ? (body[key] as number) : undefined);
+  const bid = num('bid');
+  const budget = num('budget');
+  try {
+    res.json(createCampaign(loadConfig(), req.params.key, {
+      termgroup: text('termgroup'), article: text('article'), language: text('language'), country: text('country'), account: text('account'),
+      ...(typeof body['name'] === 'string' ? { name: body['name'] } : {}),
+      ...(typeof body['theme'] === 'string' ? { theme: body['theme'] } : {}),
+      ...(typeof body['headline'] === 'string' ? { headline: body['headline'] } : {}),
+      ...(bid !== undefined ? { bid } : {}),
+      ...(budget !== undefined ? { budget } : {}),
+    }));
+  } catch (e) {
+    answerFailure(res, e, 'new campaign');
+  }
+});
+
 /** A refusal is the buyer's to fix and comes back as a 400; anything else is ours. */
 function answerFailure(res: express.Response, e: unknown, what: string): void {
   if (e instanceof RefusedError) res.status(400).json({ error: e.message });
@@ -228,6 +261,15 @@ app.get('/api/launches/:key/batches/:batch', (req, res) => {
     res.json(readBatch(loadConfig(), req.params.key, req.params.batch));
   } catch (e) {
     answerFailure(res, e, 'batch read');
+  }
+});
+
+/** A batch saved for the first time: the server names it by the clock and answers with the name. */
+app.post('/api/launches/:key/batches', (req, res) => {
+  try {
+    res.json(createBatch(loadConfig(), req.params.key, req.body));
+  } catch (e) {
+    answerFailure(res, e, 'batch create');
   }
 });
 

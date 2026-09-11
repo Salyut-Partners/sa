@@ -13,13 +13,14 @@ import {
 const TOPIC = `
 launch_key: ai-vadim-sperm-it
 name: AI Vadim Sperm IT
-traffic_source: tiktok
 site: 182
 accounts:
   main:
+    source: tiktok
     ad_account: "53560"
     pixel: "35967"
   other:
+    source: tiktok
     ad_account: "53561"
     pixel: "35968"
 `;
@@ -104,7 +105,7 @@ const contents = (...campaigns: CampaignSource[]): LaunchContents => ({
 
 const topicState = (campaigns: Record<string, CampaignState> = {}): LaunchState => ({
   topic_id: 106752,
-  configuration_id: 108397,
+  configurations: { tiktok: 108397 },
   termgroups: { 'tg-main': 211532 },
   articles: { 'article-a': { id: 130892, hash: articleHash(contents().articles[0]!.article, topic(), ['All']) } },
   pending: null,
@@ -156,6 +157,48 @@ describe('a campaign planned for the first time', () => {
     const result = plan(contents(campaign('de-a')), snapshot(), topicState());
     expect(result.errors).toEqual([]);
     expect(kinds(result)).toEqual(['creatives.upload', 'headline.create', 'tsp.create', 'builder.create']);
+  });
+
+  it('takes the source from the campaign\'s cabinet: a Facebook cabinet gives Facebook creatives, headline, profile and builder', () => {
+    const fb = { ...topic(), accounts: { ...topic().accounts, other: { source: 'facebook' as const, ad_account: '53561', pixel: '35968' } } };
+    const c = campaign('de-fb', { yaml: CAMPAIGN.replace('account: main', 'account: other') });
+    const result = plan({ ...contents(c), topic: fb }, snapshot(), topicState());
+    expect(result.errors).toEqual([]);
+    const kinds = Object.fromEntries(result.steps.map(s => [s.kind, s]));
+    expect(kinds['creatives.upload']).toMatchObject({ body: { traffic_sources: ['facebook'] } });
+    expect(kinds['headline.create']).toMatchObject({ body: { source: 'facebook' } });
+    expect(kinds['tsp.create']).toMatchObject({ body: { traffic_source: 'facebook' } });
+    expect(kinds['builder.create']).toMatchObject({ body: { traffic_source: 'facebook' } });
+    // the sibling on the TikTok cabinet is untouched by it
+    const tk = plan({ ...contents(campaign('de-a')), topic: fb }, snapshot(), topicState());
+    expect(tk.steps.find(s => s.kind === 'builder.create')).toMatchObject({ body: { traffic_source: 'tiktok' } });
+  });
+
+  it('uploads a file the same in two campaigns of the topic once, the second campaign pointing at the first\'s upload', () => {
+    const a = campaign('de-a', { files: ['01.mp4', '02.mp4'] });
+    const b = campaign('de-b', { yaml: CAMPAIGN.replace('account: main', 'account: other'), files: ['01.mp4', '03.mp4'] });
+    const result = plan(contents(a, b), snapshot(), topicState());
+    expect(result.errors).toEqual([]);
+    const uploads = result.steps.filter(s => s.kind === 'creatives.upload');
+    expect(uploads).toMatchObject([{ campaign: 'de-a', files: ['01.mp4', '02.mp4'] }, { campaign: 'de-b', files: ['03.mp4'] }]);
+    const builderB = result.steps.find(s => s.kind === 'builder.create' && s.campaign === 'de-b');
+    expect(builderB).toMatchObject({ body: { creative_repo_ids: [{ campaign: 'de-a', headline: 'Learn more' }, { campaign: 'de-a', file: '01.mp4' }, { campaign: 'de-b', file: '03.mp4' }] } });
+    // narrowed to de-b, the plan still carries de-a's upload, which it leans on
+    const narrowed = narrowPlan(result, 'de-b');
+    expect(narrowed.steps.filter(s => s.kind === 'creatives.upload').map(s => (s as { campaign: string }).campaign)).toEqual(['de-a', 'de-b']);
+  });
+
+  it('a file one campaign already has on the platform is not uploaded again by another', () => {
+    const a = campaign('de-a', { files: ['01.mp4'] });
+    const b = campaign('de-b', { yaml: CAMPAIGN.replace('account: main', 'account: other'), files: ['01.mp4'] });
+    const snap = snapshot({ creatives: [video(500, '01.mp4')] });
+    const state = topicState({ 'de-a': { ...emptyCampaignState(), creatives: { '01.mp4': { id: 500, hash: 'h-01.mp4' } } } });
+    const result = plan(contents(a, b), snap, state);
+    expect(result.steps.filter(s => s.kind === 'creatives.upload')).toEqual([]);
+    expect(result.resolved.campaigns['de-b']?.creatives).toEqual({ '01.mp4': { id: 500, hash: 'h-01.mp4' } });
+    // a different file under the same name is a different creative, and the platform pairs by name: refused
+    const remade = { ...b, creatives: [{ name: '01.mp4', hash: 'h-other' }] };
+    expect(plan(contents(a, remade), snap, state).errors.join()).toMatch(/01\.mp4.*різні відео/);
   });
 
   it('uploads every file in one step with the campaign script as ad_script', () => {
@@ -478,9 +521,10 @@ describe('two campaigns in one plan', () => {
     });
   });
 
-  it('refuses the same file name in two campaigns of one plan', () => {
-    const result = plan(contents(campaign('de-a'), campaign('de-b')), snapshot(), topicState());
-    expect(result.errors.join()).toMatch(/01\.mp4/);
+  it('refuses the same file name with different bytes in two campaigns of one plan, and takes the same bytes as one creative', () => {
+    const other = { ...campaign('de-b'), creatives: [{ name: '01.mp4', hash: 'h-different' }] };
+    expect(plan(contents(campaign('de-a'), other), snapshot(), topicState()).errors.join()).toMatch(/01\.mp4/);
+    expect(plan(contents(campaign('de-a'), campaign('de-b')), snapshot(), topicState()).errors).toEqual([]);
   });
 });
 
@@ -552,11 +596,11 @@ describe('what stops a campaign plan', () => {
 
   it('an ad account or pixel the platform does not list; a pixel made under another account is fine, as the real launches pair them', () => {
     const c = campaign('de-a');
-    const off = { ...topic(), accounts: { main: { ad_account: '1', pixel: '35967' } } };
+    const off = { ...topic(), accounts: { main: { source: 'tiktok' as const, ad_account: '1', pixel: '35967' } } };
     expect(plan({ ...contents(c), topic: off }, snapshot(), topicState()).errors.join()).toMatch(/кабінет/);
-    const noPixel = { ...topic(), accounts: { main: { ad_account: '53560', pixel: '1' } } };
+    const noPixel = { ...topic(), accounts: { main: { source: 'tiktok' as const, ad_account: '53560', pixel: '1' } } };
     expect(plan({ ...contents(c), topic: noPixel }, snapshot(), topicState()).errors.join()).toMatch(/піксел/);
-    const swapped = { ...topic(), accounts: { main: { ad_account: '53560', pixel: '35968' } } };
+    const swapped = { ...topic(), accounts: { main: { source: 'tiktok' as const, ad_account: '53560', pixel: '35968' } } };
     const result = plan({ ...contents(c), topic: swapped }, snapshot(), topicState());
     expect(result.errors).toEqual([]);
     expect(result.warnings).toEqual([]);

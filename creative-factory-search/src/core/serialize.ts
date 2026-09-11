@@ -6,7 +6,7 @@ import { isLocaleId, newLocale } from './locales.ts';
 import { DEFAULT_CANVAS, DEFAULT_DURATION, DEFAULT_FPS, MAX_PHOTOS } from './project.ts';
 import { DEFAULT_MODEL_ID } from './voice.ts';
 import type {
-  ButtonLayer, CanvasSize, FieldValue, Locale, LocaleId, Photo, Project, PropLayer, Rect,
+  ButtonLayer, CanvasSize, FieldValue, Locale, LocaleId, Photo, Project, Rect,
   TemplateLayer, Timing,
 } from './types.ts';
 
@@ -94,18 +94,12 @@ const isButton = (v: unknown): v is ButtonLayer =>
   isBag(v) && isText(v['id']) && isText(v['styleId']) && isText(v['fontId']) &&
   isText(v['text']) && isText(v['color']) && isRect(v['rect']) && isTiming(v['timing']);
 
-const isProp = (v: unknown): v is PropLayer =>
-  isBag(v) && isText(v['id']) && isText(v['propId']) && isRect(v['rect']) &&
-  isTiming(v['timing']) && Array.isArray(v['colors']) && v['colors'].every(isText);
-
 const isPhoto = (v: unknown): v is Photo =>
   isBag(v) && isText(v['id']) && isText(v['name']) && isText(v['image']) &&
   isText(v['accent']) && typeof v['pushIn'] === 'boolean' && typeof v['glare'] === 'boolean' &&
   // Absent is a valid answer, and the one a version 1 file gives.
   (v['template'] == null || isTemplate(v['template'])) &&
-  Array.isArray(v['buttons']) && v['buttons'].every(isButton) &&
-  // Absent is what every file written before props existed says.
-  (v['props'] === undefined || (Array.isArray(v['props']) && v['props'].every(isProp)));
+  Array.isArray(v['buttons']) && v['buttons'].every(isButton);
 
 const isCanvas = (v: unknown): v is CanvasSize => isBag(v) && isNum(v['width']) && isNum(v['height']);
 
@@ -130,11 +124,18 @@ export function fromFile(data: unknown): LoadResult {
   if (data['photos'].length > MAX_PHOTOS) return { ok: false, reason: 'too-many' };
 
   const stored = data['photos'] as (Photo & { template: (TemplateLayer & { values?: unknown }) | null })[];
-  // Normalised on the way in rather than defended against everywhere after: the
-  // rest of the app may assume a photo has the field, whatever the file said.
-  const photos = stored.map(p => ({
-    ...p,
-    props: p.props ?? [],
+  // Rebuilt field by field rather than spread: a file written while the editor
+  // still had a layer of catalogue objects carries `props`, and copying the
+  // photo whole would carry that into a model that has no such field. Every
+  // photo comes back with exactly the shape the rest of the app assumes.
+  const photos: Photo[] = stored.map(p => ({
+    id: p.id,
+    name: p.name,
+    image: p.image,
+    accent: p.accent,
+    pushIn: p.pushIn,
+    glare: p.glare,
+    buttons: p.buttons,
     template: p.template == null
       ? null
       : {
@@ -183,8 +184,8 @@ function readLocales(
   photos: readonly { template: (TemplateLayer & { values?: unknown }) | null }[],
 ): Locale[] {
   if (Array.isArray(stored)) {
-    // Normalised on the way in, like a photo's props: a language from before
-    // subtitles existed is one that never opted out.
+    // Normalised on the way in, like a photo's template: a language from
+    // before subtitles existed is one that never opted out.
     const locales = stored.filter(isLocale)
       .map(l => ({ ...l, subtitles: l.subtitles !== false, overrides: { ...l.overrides } }));
     // One record per language: two would make "the German script" ambiguous

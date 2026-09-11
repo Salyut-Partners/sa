@@ -24,9 +24,6 @@ interface Props {
  *
  * Only the selected one carries handles. The rest are outlines: visible enough
  * to aim at, quiet enough not to read as part of the creative.
- *
- * Buttons and props share this because on the frame they are the same thing: a
- * rectangle to drag. What they are made of is the panel's business.
  */
 export function LayerBoxes(props: Props) {
   const { layers, activeIndex, cellWidth, cellHeight } = props;

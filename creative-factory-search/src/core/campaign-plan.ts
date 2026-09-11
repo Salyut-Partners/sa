@@ -364,10 +364,10 @@ export const sameTsp = (a: TspFields, b: TspFields): boolean => canon(a) === can
 /** The grid the admin sends beside an empty schedule: nine rows of twenty-four, none ticked. */
 const emptyScheduleCells = (): boolean[][] => Array.from({ length: 9 }, () => Array.from({ length: 24 }, () => false));
 
-function tspBody(topic: TopicManifest, topicRef: TopicRef, fields: TspFields): TspBody {
+function tspBody(source: string, topicRef: TopicRef, fields: TspFields): TspBody {
   return {
     topic_id: topicRef,
-    traffic_source: topic.traffic_source,
+    traffic_source: source,
     cbo: 0,
     acb_budget_type: '',
     acb_schedule: 0,
@@ -523,15 +523,17 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
   const resolved: Record<string, ResolvedCampaign> = {};
   const { topic, topicRef } = input;
 
-  // -- one name, one file, across the whole plan: the read-back pairs by name.
-  const owners = new Map<string, string>();
+  // -- one name, one file, across the whole plan: the read-back pairs by
+  // name. The same bytes under one name in two campaigns is the export's
+  // copy and is fine — it is one creative; different bytes are not.
+  const owners = new Map<string, { campaign: string; hash: string }>();
   for (const c of input.campaigns) {
     for (const file of c.creatives) {
       const owner = owners.get(file.name);
-      if (owner !== undefined && owner !== c.name) {
-        errors.push(`файл \`${file.name}\` є і в campaigns/${owner}, і в campaigns/${c.name} — платформа зіставляє за ім'ям, перейменуйте один`);
+      if (owner !== undefined && owner.campaign !== c.name && owner.hash !== file.hash) {
+        errors.push(`файл \`${file.name}\` є і в campaigns/${owner.campaign}, і в campaigns/${c.name}, але це різні відео — платформа зіставляє за ім'ям, перейменуйте один`);
       }
-      owners.set(file.name, c.name);
+      if (owner === undefined) owners.set(file.name, { campaign: c.name, hash: file.hash });
     }
   }
 
@@ -541,6 +543,21 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
   const headlineMakers = new Map<string, string>();
   /** The campaigns whose `tsp.create` is in this plan, with the fields, for the ones after them to share. */
   const tspMakers: { campaign: string; fields: TspFields }[] = [];
+  /**
+   * The same file in two campaigns of the topic is one creative: the export
+   * copies it into every campaign of its language, and the repository need
+   * not hold it twice. Keyed by name and hash — a remade file is a new one.
+   * `shared` is what some campaign's state already knows and the platform
+   * still lists; `uploadMakers` is who uploads it in this plan.
+   */
+  const fileKey = (file: CreativeSource): string => `${file.name}|${file.hash}`;
+  const shared = new Map<string, number>();
+  for (const own of Object.values(states)) {
+    for (const [name, known] of Object.entries(own.creatives)) {
+      if (snapshot.creatives.some(v => v.id === known.id && v.media_type === 'Video')) shared.set(`${name}|${known.hash}`, known.id);
+    }
+  }
+  const uploadMakers = new Map<string, string>();
 
   for (const c of input.campaigns) {
     const state = states[c.name] ?? emptyCampaignState();
@@ -588,6 +605,8 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
       errors.push(...own.map(e => `${at}: ${e}`));
       continue;
     }
+    // The campaign's source is its cabinet's; past the gate above the cabinet is known.
+    const source = account!.source;
 
     const result: ResolvedCampaign = { creatives: {}, headline: null, tsp: null, builder: null, history: state.history };
     resolved[c.name] = result;
@@ -614,6 +633,14 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
         if (known.hash === file.hash) id = known.id;
       } else if (known !== undefined) {
         warnings.push(`${at}: креативу \`${file.name}\` (id ${known.id}) у топіку немає — буде завантажено знову`);
+      } else if (shared.has(fileKey(file))) {
+        // Another campaign of this folder already put the same file up.
+        id = shared.get(fileKey(file))!;
+      } else if (uploadMakers.has(fileKey(file))) {
+        // Another campaign of this plan uploads it first; this one points at that upload.
+        creativeRefs.push({ campaign: uploadMakers.get(fileKey(file))!, file: file.name });
+        everyIdKnown = false;
+        continue;
       } else if (twins.length === 1) {
         id = twins[0]!.id;
         warnings.push(`${at}: \`${file.name}\` уже є в репозиторії топіка (id ${id}) — id записано в state.json`);
@@ -627,6 +654,7 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
         ownIds.push(id);
       } else {
         toUpload.push(file.name);
+        uploadMakers.set(fileKey(file), c.name);
         creativeRefs.push({ campaign: c.name, file: file.name });
         everyIdKnown = false;
       }
@@ -639,7 +667,7 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
         files: toUpload,
         body: {
           grade: 'New', language: 'All', ad_script: script, media_type: 'Video',
-          traffic_sources: [topic.traffic_source], topic_ids: [topicRef], countries: [countryName],
+          traffic_sources: [source], topic_ids: [topicRef], countries: [countryName],
         },
       });
     }
@@ -670,7 +698,7 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
         text: headline,
         body: {
           grade: 'Strong', countries: [countryName], headlines: [headlineHtml(headline)], primary_texts: [''], descriptions: [''],
-          language: 'All', source: topic.traffic_source, topic_ids: [topicRef],
+          language: 'All', source, topic_ids: [topicRef],
         },
       });
     }
@@ -681,7 +709,7 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
 
     // -- TSP: shared by every campaign of the topic with the same fields; updated in place until the campaign is built.
     const fields = tspFieldsOf({ ...m.tsp, gender: gender! }, countryName, language!);
-    const body = tspBody(topic, topicRef, fields);
+    const body = tspBody(source, topicRef, fields);
     let tspRef: TspRef;
     let knownTsp = state.tsp === null ? undefined : snapshot.tsps.find(t => t.id === state.tsp!.id);
     const alike = snapshot.tsps.filter(t => sameTsp(t.fields, fields));
@@ -794,7 +822,7 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
         rsoc_count: String(m.rsoc_count),
         conversion_event_type: 'Purchase',
         pixel_id: String(pixel!.id),
-        traffic_source: topic.traffic_source,
+        traffic_source: source,
         traffic_source_profile_ids: [tspRef],
         creative_repo_ids: [headlineRef, ...creativeRefs],
         term_group_ids: [termGroupRef!],

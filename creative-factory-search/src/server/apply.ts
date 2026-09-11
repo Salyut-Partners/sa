@@ -22,7 +22,7 @@ import {
   emptyCampaignState, headlineText, matchUploads, parseCampaignState, sameSet, sameTsp, withRetired, type CampaignSource,
   type CampaignState, type CreativeRef, type PostRef, type TspRef,
 } from '../core/campaign-plan.ts';
-import { parseCampaignManifest, parseTopicManifest, type TopicManifest } from '../core/launch.ts';
+import { parseCampaignManifest, parseTopicManifest, topicSources, type TopicManifest } from '../core/launch.ts';
 import {
   adoptResolved, campaignOf, campaignOutline, chooseTopic, emptyState, firstNew, narrowPlan, parseKeywords, parseState, parseTermGroupOptions,
   plan as makePlan, previewPlan, type ArticleSource, type CampaignOutline, type LaunchContents, type LaunchState, type Plan,
@@ -243,17 +243,22 @@ async function findTopics(api: PlatformClient, topic: TopicManifest, state: Laun
 
 export async function readSnapshot(api: PlatformClient, topic: TopicManifest, state: LaunchState): Promise<Snapshot> {
   const siteId = Number(topic.site);
-  const [countries, sites, topics, pixels, adAccounts, themes, rsocCounts, languages] = await Promise.all([
+  // Pixels and cabinets are listed per traffic source; a topic whose cabinets
+  // span two sources needs both lists, and ids do not collide between them.
+  const sources = topicSources(topic);
+  const [countries, sites, topics, pixelLists, adAccountLists, themes, rsocCounts, languages] = await Promise.all([
     readCountries(api),
     readSites(api),
     findTopics(api, topic, state),
-    readPixels(api, topic.traffic_source),
+    Promise.all(sources.map(source => readPixels(api, source))),
     // A placeholder site cannot be asked about; the plan refuses it by name.
-    Number.isInteger(siteId) && siteId > 0 ? readAdAccounts(api, siteId, topic.traffic_source) : Promise.resolve([]),
+    Number.isInteger(siteId) && siteId > 0 ? Promise.all(sources.map(source => readAdAccounts(api, siteId, source))) : Promise.resolve([]),
     readThemes(api),
     readRsocCounts(api),
     readLanguages(api),
   ]);
+  const pixels = pixelLists.flat();
+  const adAccounts = adAccountLists.flat();
   const directories = { countries, sites, pixels, adAccounts, themes, rsocCounts, languages };
   // The rest is filtered by the topic `plan` will settle on — the same rule, asked once in core.
   const choice = chooseTopic(topics, topic, state);
@@ -589,7 +594,7 @@ async function runStep(run: Run, step: PlanStep): Promise<void> {
       // The answer carries no id: the read-back is how it is learned even after a clean ok.
       const configurationId = id ?? await fresh(seen);
       if (configurationId === null) throw new StepError('конфігурацію створено, але read-back її не бачить');
-      commit(run, state => ({ ...state, configuration_id: configurationId, pending: null }));
+      commit(run, state => ({ ...state, configurations: { ...state.configurations, [step.source]: configurationId }, pending: null }));
       return;
     }
     case 'termgroup.create': {

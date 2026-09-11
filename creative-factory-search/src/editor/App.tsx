@@ -54,9 +54,6 @@ interface Cell {
 export function App() {
   const [history, setHistory] = useState<History<Project>>(() => historyOf(createProject()));
   const [activeButton, setActiveButton] = useState<number | null>(null);
-  // One layer is being edited at a time, whichever kind it is: two sets of
-  // handles on one frame would leave the arrow keys with nothing to aim at.
-  const [activeProp, setActiveProp] = useState<number | null>(null);
   const [report, setReport] = useState<ImportReport>(NOTHING_IMPORTED);
   const [status, setStatus] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -203,14 +200,9 @@ export function App() {
     if (result.ok) dispatch({ type: 'photo/replace', id, name: result.name, image: result.image });
   }, [dispatch]);
 
-  /**
-   * The layer being edited, as the keyboard needs it: outside React's render.
-   * One of the two at a time, so the arrows always have a single target.
-   */
-  const editing = useRef<{ kind: 'button' | 'prop'; index: number } | null>(null);
-  editing.current = activeButton !== null
-    ? { kind: 'button', index: activeButton }
-    : activeProp !== null ? { kind: 'prop', index: activeProp } : null;
+  /** The button being edited, as the keyboard needs it: outside React's render. */
+  const editing = useRef<number | null>(null);
+  editing.current = activeButton;
 
   // ------------------------------------------------------------ keyboard --
   useEffect(() => {
@@ -253,16 +245,16 @@ export function App() {
       const nudge = NUDGES[e.key];
       // A slider's own arrows move the playhead; a layer's move the layer.
       const onSlider = target instanceof HTMLElement && target.matches('input[type=range]');
-      const layer = editing.current;
-      if (!nudge || onSlider || layer === null || meta) return;
+      const index = editing.current;
+      if (!nudge || onSlider || index === null || meta) return;
       e.preventDefault();
       // A step is one canvas pixel, which is what "по пікселю" has to mean when
       // the geometry is in percent and the cell on screen is a quarter size.
       const by = e.shiftKey ? 10 : 1;
       dispatch({
-        type: layer.kind === 'button' ? 'button/nudge' : 'prop/nudge',
+        type: 'button/nudge',
         ids: latest.current.selection,
-        index: layer.index,
+        index,
         by: { x: nudge.x * by, y: nudge.y * by },
       });
     };
@@ -345,7 +337,7 @@ export function App() {
             disabled={project.photos.length === 0 || (topic.location !== null && !topic.dirty)}
             title={topic.location === null
               ? 'Завантажити creatives.json (⌘S)'
-              : `Зберегти в ${topic.location.launchKey}/${topic.location.batch} (⌘S)`}
+              : `Зберегти в ${topic.location.launchKey}/sources/${topic.location.batch} (⌘S)`}
           >
             Зберегти
           </button>
@@ -374,7 +366,7 @@ export function App() {
         </div>
         {topic.location === null ? null : (
           <div className={'save-state' + (topic.dirty ? ' dirty' : '')}>
-            {topic.location.launchKey}/{topic.location.batch}
+            {topic.location.launchKey}/sources/{topic.location.batch}
             {topic.dirty ? ' · не збережено в теку' : ' · у теці'}
           </div>
         )}
@@ -414,40 +406,23 @@ export function App() {
                       ? { type: 'photo/toggle', id: photo.id }
                       : { type: 'photo/activate', id: photo.id });
                     setActiveButton(null);
-                    setActiveProp(null);
                   }}
                   overlay={
                     photo.id === project.activeId ? (
-                      <>
-                        <LayerBoxes
-                          layers={photo.props}
-                          activeIndex={activeProp}
-                          cellWidth={CELL_WIDTH}
-                          cellHeight={project.canvas.height * scale}
-                          onSelect={index => { setActiveButton(null); setActiveProp(index); }}
-                          onChange={rect =>
-                            dispatch({
-                              type: 'prop/patch',
-                              ids: project.selection,
-                              index: activeProp!,
-                              patch: { rect },
-                            })}
-                        />
-                        <LayerBoxes
-                          layers={photo.buttons}
-                          activeIndex={activeButton}
-                          cellWidth={CELL_WIDTH}
-                          cellHeight={project.canvas.height * scale}
-                          onSelect={index => { setActiveProp(null); setActiveButton(index); }}
-                          onChange={rect =>
-                            dispatch({
-                              type: 'button/patch',
-                              ids: project.selection,
-                              index: activeButton!,
-                              patch: { rect },
-                            })}
-                        />
-                      </>
+                      <LayerBoxes
+                        layers={photo.buttons}
+                        activeIndex={activeButton}
+                        cellWidth={CELL_WIDTH}
+                        cellHeight={project.canvas.height * scale}
+                        onSelect={setActiveButton}
+                        onChange={rect =>
+                          dispatch({
+                            type: 'button/patch',
+                            ids: project.selection,
+                            index: activeButton!,
+                            patch: { rect },
+                          })}
+                      />
                     ) : null
                   }
                 />
@@ -463,8 +438,6 @@ export function App() {
           dispatch={dispatch}
           activeButton={activeButton}
           setActiveButton={setActiveButton}
-          activeProp={activeProp}
-          setActiveProp={setActiveProp}
           onFiles={onFiles}
           onReplace={onReplace}
           report={report}

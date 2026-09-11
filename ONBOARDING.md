@@ -1,7 +1,7 @@
 # Онбординг
 
 Одна сторінка: що поставити, куди покласти токени, і з чого почати. Решту —
-«як влаштований код», «де волт» — читай з `CLAUDE.md`.
+«як влаштований код», «де плейбук» — читай з `CLAUDE.md`.
 
 ## 1. Встановлення
 
@@ -71,7 +71,7 @@ bin/sa plan my-first-launch
 
 ## Далі
 
-- Брейншторм зв'язки і правила комплаєнсу — волт, `sa-knowledge/CLAUDE.md`.
+- Правила заливу і комплаєнс — плейбук, `playbook/rules.md` і `playbook/compliance/`.
 - Повний опис `sa`, `plan`/`apply`, автоправил, таби заливів і субтитрів —
   `creative-factory-search/README.md`.
 - Що саме будуємо і чому — `creative-factory-search/.scratch/prd-autolaunch.md`.

@@ -1,20 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkNewLaunch, internalName, isLaunchKey, NAME_PLACEHOLDER, newLaunchTree, parseCampaignManifest,
-  parseTopicManifest, resolveTicketFields, type TopicManifest,
+  parseTopicManifest, resolveTicketFields, sourceOf, topicSources, type TopicManifest,
 } from './launch.ts';
 
 const TOPIC = `
 launch_key: ai-vadim-sperm-it
 name: AI Vadim Sperm IT
 internal_name: AIVadimSpermIT
-traffic_source: tiktok
 site: 182
 accounts:
   main:
+    source: tiktok
     ad_account: "53560"
     pixel: "35967"
   second:
+    source: facebook
     ad_account: "53561"
     pixel: "35968"
 rules: [stop-loss]
@@ -61,10 +62,12 @@ describe('a topic manifest', () => {
     expect(t.launch_key).toBe('ai-vadim-sperm-it');
     expect(t.name).toBe('AI Vadim Sperm IT');
     expect(t.internal_name).toBe('AIVadimSpermIT');
-    expect(t.traffic_source).toBe('tiktok');
     expect(t.site).toBe('182');
     expect(Object.keys(t.accounts)).toEqual(['main', 'second']);
-    expect(t.accounts['main']).toEqual({ ad_account: '53560', pixel: '35967' });
+    expect(t.accounts['main']).toEqual({ source: 'tiktok', ad_account: '53560', pixel: '35967' });
+    expect(topicSources(t)).toEqual(['tiktok', 'facebook']);
+    expect(sourceOf(t, { account: 'second' })).toBe('facebook');
+    expect(sourceOf(t, { account: 'ghost' })).toBeNull();
     expect(t.rules).toEqual(['stop-loss']);
   });
 
@@ -84,17 +87,25 @@ describe('a topic manifest', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.errors.join('\n')).toMatch(/name/);
-    expect(result.errors.join('\n')).toMatch(/traffic_source/);
     expect(result.errors.join('\n')).toMatch(/site/);
     expect(result.errors.join('\n')).toMatch(/accounts/);
   });
 
-  it('refuses a bad launch key and an unknown traffic source', () => {
+  it('refuses a bad launch key and an unknown cabinet source', () => {
     const bad = parseTopicManifest(TOPIC.replace('ai-vadim-sperm-it', 'Ai Vadim').replace('tiktok', 'vk'));
     expect(bad.ok).toBe(false);
     if (bad.ok) return;
     expect(bad.errors.join('\n')).toMatch(/launch_key/);
-    expect(bad.errors.join('\n')).toMatch(/traffic_source/);
+    expect(bad.errors.join('\n')).toMatch(/кабінет `main`.*source/);
+  });
+
+  it('refuses a traffic source on the topic and a cabinet without one, saying where it went', () => {
+    const onTopic = parseTopicManifest(TOPIC.replace('site: 182', 'traffic_source: tiktok\nsite: 182'));
+    expect(onTopic.ok).toBe(false);
+    expect(!onTopic.ok && onTopic.errors.join('\n')).toMatch(/traffic_source.*переїхало на кабінет/);
+    const noSource = parseTopicManifest(TOPIC.replace('    source: facebook\n', ''));
+    expect(noSource.ok).toBe(false);
+    expect(!noSource.ok && noSource.errors.join('\n')).toMatch(/кабінет `second`.*source/);
   });
 
   it('refuses an account without a pixel', () => {
@@ -183,7 +194,7 @@ describe('starting a launch', () => {
 
   it('lays out the folder tree with a topic manifest and a campaign example', () => {
     const tree = newLaunchTree({ launchKey: 'ai-vadim-sperm-it', name: 'AI Vadim Sperm IT' });
-    expect(tree.dirs.slice(0, 4)).toEqual(['termgroups', 'articles', 'batches', 'campaigns']);
+    expect(tree.dirs.slice(0, 4)).toEqual(['termgroups', 'articles', 'sources', 'campaigns']);
     const names = tree.files.map(f => f.path);
     expect(names).toContain('topic.yaml');
     expect(names.some(n => n.startsWith('campaigns/') && n.endsWith('campaign.yaml'))).toBe(true);
@@ -229,7 +240,7 @@ describe('starting a launch', () => {
 
 describe('geo in the manifest', () => {
   it('reads a list of codes, a comma string, or nothing', () => {
-    const base = 'launch_key: ai-a-b\nname: AI A B\ntraffic_source: tiktok\nsite: 182\naccounts:\n  main: {ad_account: "1", pixel: "2"}\n';
+    const base = 'launch_key: ai-a-b\nname: AI A B\nsite: 182\naccounts:\n  main: {source: tiktok, ad_account: "1", pixel: "2"}\n';
     const list = parseTopicManifest(base + 'geo: [DE, IT]');
     expect(list.ok && list.value.geo).toEqual(['DE', 'IT']);
     const text = parseTopicManifest(base + 'geo: "DE, IT"');

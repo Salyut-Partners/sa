@@ -132,8 +132,8 @@ export async function renderSpecToFile(
     // open end reaches the new end rather than the one the user authored at.
     await page.evaluate(s => window.__init(s), { ...spec, duration });
     // A half-decoded image would be captured as a blank frame. Every image on
-    // the page rather than the photo alone: a prop is fetched from the catalogue
-    // over the network, so it lands later than a photo that came in the spec.
+    // the page rather than the photo alone, so a layer that brings its own
+    // artwork is waited for the same way.
     await page.evaluate(() => Promise.all(
       [...document.images]
         .filter(img => !img.complete)

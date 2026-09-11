@@ -195,7 +195,7 @@ function burn(job: Job, name: string, input: string, request: SubtitleRequest): 
     const output = path.join(request.dest, uniqueName(
       subtitledName(name, request.style), n => fs.existsSync(path.join(request.dest, n)),
     ));
-    job.targets!.set(name, output);
+    job.targets!.set(name, [output]);
     const args = [STYLER, input, '-o', output, '--style', request.style];
     if (request.lang !== null) args.push('--lang', request.lang);
     const child = spawn(VENV_PYTHON, args, { cwd: TECHNICAL, stdio: ['ignore', 'pipe', 'pipe'] });

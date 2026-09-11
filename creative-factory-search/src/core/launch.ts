@@ -22,11 +22,15 @@ export const isTrafficSource = (value: unknown): value is TrafficSource =>
   typeof value === 'string' && (TRAFFIC_SOURCES as readonly string[]).includes(value);
 
 /**
- * A cabinet the topic may launch from, and the pixel that belongs to it. Keyed
- * by an alias the buyer picks, so a campaign says `account: main` rather than
- * repeating two platform ids.
+ * A cabinet the topic may launch from, the pixel that belongs to it, and the
+ * traffic source both were made for. Keyed by an alias the buyer picks, so a
+ * campaign says `account: main` rather than repeating two platform ids. The
+ * source lives here and nowhere higher: the platform's topic has none, its
+ * cabinets and pixels do, and a TikTok cabinet cannot launch on Facebook — so
+ * a campaign's source is whatever its cabinet's is.
  */
 export interface Account {
+  source: TrafficSource;
   ad_account: string;
   pixel: string;
 }
@@ -36,7 +40,6 @@ export interface TopicManifest {
   name: string;
   /** The platform's system name: `name` with the spaces taken out. */
   internal_name: string;
-  traffic_source: TrafficSource;
   /** The site (domain) articles are published on. */
   site: string;
   accounts: Record<string, Account>;
@@ -161,11 +164,9 @@ export function parseTopicManifest(source: string): ParseResult<TopicManifest> {
       errors.push(`поле \`internal_name\` має бути назвою без пробілів: \`${derived}\``);
     }
   }
-  const sourceText = text(bag, 'traffic_source', errors);
-  if (sourceText !== '' && !isTrafficSource(sourceText)) {
-    errors.push(`поле \`traffic_source\` має бути одним із: ${TRAFFIC_SOURCES.join(', ')}`);
+  if (bag['traffic_source'] !== undefined) {
+    errors.push('поле `traffic_source` переїхало на кабінет: `accounts.<alias>.source: tiktok|facebook`; на рівні топіка його більше немає');
   }
-  const trafficSource = sourceText as TrafficSource;
   const site = text(bag, 'site', errors);
 
   const accounts: Record<string, Account> = {};
@@ -174,11 +175,13 @@ export function parseTopicManifest(source: string): ParseResult<TopicManifest> {
   } else {
     for (const [alias, raw] of Object.entries(bag['accounts'])) {
       if (!isBag(raw)) {
-        errors.push(`кабінет \`${alias}\` має мати поля \`ad_account\` і \`pixel\``);
+        errors.push(`кабінет \`${alias}\` має мати поля \`source\`, \`ad_account\` і \`pixel\``);
         continue;
       }
       const own: string[] = [];
-      const account = { ad_account: text(raw, 'ad_account', own), pixel: text(raw, 'pixel', own) };
+      const sourceText = text(raw, 'source', own);
+      if (sourceText !== '' && !isTrafficSource(sourceText)) own.push(`поле \`source\` має бути одним із: ${TRAFFIC_SOURCES.join(', ')}`);
+      const account: Account = { source: sourceText as TrafficSource, ad_account: text(raw, 'ad_account', own), pixel: text(raw, 'pixel', own) };
       if (own.length > 0) errors.push(`кабінет \`${alias}\`: ${own.join('; ')}`);
       else accounts[alias] = account;
     }
@@ -206,9 +209,22 @@ export function parseTopicManifest(source: string): ParseResult<TopicManifest> {
   if (errors.length > 0) return { ok: false, errors };
   return {
     ok: true,
-    value: { launch_key: launchKey, name, internal_name: internal, traffic_source: trafficSource, site, accounts, rules, vertical, geo },
+    value: { launch_key: launchKey, name, internal_name: internal, site, accounts, rules, vertical, geo },
   };
 }
+
+/** The traffic sources the topic launches on — one per distinct cabinet source, in the order the cabinets are listed. */
+export function topicSources(topic: TopicManifest): TrafficSource[] {
+  const sources: TrafficSource[] = [];
+  for (const account of Object.values(topic.accounts)) {
+    if (!sources.includes(account.source)) sources.push(account.source);
+  }
+  return sources;
+}
+
+/** The source a campaign launches on: its cabinet's. Null when the manifest names a cabinet the topic does not have. */
+export const sourceOf = (topic: TopicManifest, campaign: Pick<CampaignManifest, 'account'>): TrafficSource | null =>
+  topic.accounts[campaign.account]?.source ?? null;
 
 export function parseCampaignManifest(source: string, topic: TopicManifest): ParseResult<CampaignManifest> {
   const parsed = parseYaml(source);
@@ -286,6 +302,7 @@ export interface NewLaunchOptions {
    * placeholder the buyer must replace before the first plan.
    */
   name?: string;
+  /** The source of the one placeholder cabinet the manifest starts with. */
   trafficSource?: TrafficSource;
   /** The niche, when the buyer named one; it goes into the manifest as `vertical`. */
   vertical?: string;
@@ -302,7 +319,7 @@ export interface LaunchTree {
   files: { path: string; content: string }[];
 }
 
-export const LAUNCH_DIRS = ['termgroups', 'articles', 'batches', 'campaigns'] as const;
+export const LAUNCH_DIRS = ['termgroups', 'articles', 'sources', 'campaigns'] as const;
 
 /**
  * What `sa new` lays out. Pure: the caller writes it to disk. The manifests
@@ -318,16 +335,17 @@ export function newLaunchTree(options: NewLaunchOptions): LaunchTree {
     `launch_key: ${options.launchKey}`,
     `name: ${YAML.stringify(name).trim()}`,
     `internal_name: ${internalName(name)}`,
-    `traffic_source: ${source}`,
     '# Ніша (вертикаль): jobs, loans… Таба заливів групує топіки за нею.',
     `vertical: ${YAML.stringify(options.vertical?.trim() ?? '').trim()}`,
     '# Гео заливу кодами країн — мітки `geo` на тікеті. Не гео кампаній: те живе в campaign.yaml.',
     `geo: [${(options.geo ?? []).map(g => g.trim()).filter(Boolean).join(', ')}]`,
     '# Сайт (домен), на якому публікуються статті. Id з GET /sites.',
     'site: "REPLACE_SITE_ID"',
-    '# Кабінети, з яких ллється цей топік, і піксель кожного. Кампанія посилається на alias.',
+    '# Кабінети, з яких ллється цей топік: джерело трафіку, id кабінету й піксель кожного.',
+    '# Кампанія посилається на alias; її джерело — джерело кабінету. Кабінет TikTok не ллє у Facebook.',
     'accounts:',
     '  main:',
+    `    source: ${source}`,
     '    ad_account: "REPLACE_AD_ACCOUNT_ID"',
     '    pixel: "REPLACE_PIXEL_ID"',
     '# Автоправила з пресетів репозиторію, які стоятимуть на топіку.',

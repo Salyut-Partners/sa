@@ -143,6 +143,9 @@ silent creatives, and the panel says which key is missing rather than failing.
 
 ```sh
 bin/sa new ai-vadim-sperm-it --name "AI Vadim Sperm IT" --vertical jobs --geo DE,IT
+echo '{"termgroups": {...}, "articles": {...}, "geos": [...], "defaults": {...}}' | bin/sa expand ai-vadim-sperm-it
+bin/sa expand ai-vadim-sperm-it --file matrix.json
+bin/sa new campaign ai-vadim-sperm-it --termgroup tg-wh --article a-wh --language de --country DE --account main
 bin/sa launches
 bin/sa tickets
 bin/sa config
@@ -164,6 +167,26 @@ but no ticket · 4 no server · 5 server failed). It starts the server if none a
 lays out the launch folder under `launches_root` and files a ticket in
 ClickUp; the folder always comes first, so a missing token leaves the buyer
 with somewhere to work and a sentence saying why there is no ticket.
+
+`sa expand` is the launch matrix as folders. The JSON names the axes — term
+groups (with their keys, or `null` for a folder that exists), articles (with a
+title, or `null`), `geos` as language+country pairs, `accounts` as cabinet
+aliases from `topic.yaml` (every cabinet when left out) — plus `defaults` for
+every cell (`theme`, `headline`, `rsoc_count`, `keyword_rotation`, `tsp`) and
+`overrides`, each a `where` over the axes and a `set` of fields, a `name`
+among them. The cells are the product; each becomes `campaigns/<name>/` with a
+manifest the plan reads and an empty `script.md`. The name is the rule
+`<language>-<country>-<account>-<termgroup>-<article>` unless the cell says
+otherwise. The matrix is a generator, not a file: nothing of it is kept, a
+folder that exists is skipped and never rewritten, and a second run with the
+same JSON makes nothing. `sa new campaign` is the one-cell version over folders
+that already exist, and refuses a name that is taken. The rule for all of it
+is `core/matrix.ts`.
+
+A topic has no traffic source of its own — the platform's does not either.
+Each cabinet in `topic.yaml` carries `source: tiktok|facebook` beside its
+`ad_account` and `pixel`, a campaign's source is its cabinet's, and the plan
+makes one topic configuration per source the cabinets span.
 
 The buyer's own settings — `launches_root`, the ClickUp token and list, and
 the platform's Bearer with the organisation id — live in
@@ -311,24 +334,40 @@ already applies to everything this buyer runs and will stack onto the
 topic's own. The preset-to-request-body conversion and all of this is
 `core/rules.ts`, tested there and in `core/plan.ts`.
 
-### A batch in its topic folder
+### Sources in the topic folder
 
-The panel's first group binds the project to `launches/<key>/batches/<batch>/`.
-Pick a topic, open a batch or save the one on screen under a new name, and
-from then on ⌘S and the header's Save write there: `project.json` with the
-pictures beside it in `photos/`, referenced by name rather than embedded. The
+Nothing is chosen up front: the buyer drops photos and works. The export
+panel's «Куди» picks the topic — or none, for a download as before — and
+the first export into its campaigns saves the batch under
+`launches/<key>/sources/<MMDD-HHmm>/`, named by the server's clock, and binds
+the project to it; from then on ⌘S and the header's Save write there, and a
+second export of the same session writes into the same batch. `project.json`
+lies beside the pictures, flat, referenced by name rather than embedded. The
 split happens on the server, in `core/batch-folder.ts`; the editor sends and
 receives the same file it would download, so a `creatives.json` saved through
-the browser opens from the folder chooser too and comes out as files on the
+the browser opens from the sources chooser too and comes out as files on the
 next save. A photo whose file has gone is left out on open and named, rather
-than opened blank. Pictures are only ever written, never removed: a photo
-taken out of the batch leaves its file in `photos/` until the buyer deletes it.
+than opened blank. Pictures are only ever written, never removed. The
+«Ісходники» group in the side panel says where the batch is, lets an older
+one be opened again to regenerate a creative or two, and lets the binding go
+so the next export starts a new batch. A batch bound to one topic will not
+export into another — one export is one topic — until it is unbound.
+
+Since the matrix, one language is several campaigns. The «Куди» rows show a
+box per campaign that speaks the language, all ticked, with the rest of the
+topic's campaigns folded under «інші кампанії» for the split by place rather
+than tongue; the file is copied into every ticked folder, rendered once. A
+partial selection gets a second set of boxes for those photos alone, and
+«як мова» hands them back to the row. The rule is `core/placement.ts`; the
+plan pays for the copies once — the same bytes under one name in two
+campaigns of a topic is one creative, uploaded by the first campaign and
+referenced by the rest (`core/campaign-plan.ts`).
 
 Two stores, one source. The autosave in IndexedDB is the browser's memory of
 the session; the folder is the batch. The header says which it is looking at
-— `key/batch · у теці` or `· не збережено в теку` — and after a reload it
-reads the folder back and compares before saying either. The `.json` button
-beside Save is the old path and stays as the fallback.
+— `key/sources/batch · у теці` or `· не збережено в теку` — and after a
+reload it reads the folder back and compares before saying either. The
+`.json` button beside Save is the old path and stays as the fallback.
 
 ## Shape of the code
 
@@ -355,7 +394,8 @@ Three build units and one rule.
   bodies, create against update — from the folder, a snapshot and the state,
   and narrows that to one campaign for the tab and `--campaign`;
   `core/launches-tree.ts` turns the folder structure into the tree the tab
-  draws;
+  draws; `core/matrix.ts` turns a launch matrix into the folders `sa expand`
+  and `sa new campaign` write, and decides their names;
   `core/campaign-plan.ts` does the same for a campaign — creatives,
   headline, profile, builder — and pairs uploads with read-backs;
   `core/article.ts` turns `article.md` into the HTML that is sent;

@@ -26,6 +26,13 @@ const USAGE = `sa — робоче місце байера
 
   sa new <launch-key> [--name "AI Vadim Sperm IT"] [--source tiktok|facebook]
                       [--vertical jobs] [--geo DE,IT]
+  sa expand <launch-key> [--file matrix.json]
+                      матриця заливу → теки: термгрупи, статті й кампанії, яких ще
+                      немає; JSON зі stdin або з --file; наявні теки не чіпає
+  sa new campaign <launch-key> --termgroup <tg> --article <a> --language de
+                      --country DE --account <alias> [--name <тека>] [--theme <id>]
+                      [--headline "…"] [--bid 0.45] [--budget 20]
+                      одна кампанія над наявними термгрупою і статтею
   sa launches         список заливів у launches_root
   sa tickets          звірити теки з листом ClickUp зараз: тікет на кожну теку,
                       «in progress» там, де є зібрана кампанія
@@ -98,6 +105,7 @@ const asJson = (body: unknown): RequestInit => ({
 // ---------------------------------------------------------------- commands --
 
 async function commandNew(args: string[]): Promise<number> {
+  if (args[0] === 'campaign') return commandNewCampaign(args.slice(1));
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -123,6 +131,71 @@ async function commandNew(args: string[]): Promise<number> {
   if (status === 400) return 2;
   if (status !== 200) return 5;
   return 'ticket' in body && body.ticket.ok ? 0 : 3;
+}
+
+interface Expanded {
+  created: { termgroups: string[]; articles: string[]; campaigns: string[] };
+  notes: string[];
+}
+
+async function commandNewCampaign(args: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      termgroup: { type: 'string' }, article: { type: 'string' }, language: { type: 'string' }, country: { type: 'string' },
+      account: { type: 'string' }, name: { type: 'string' }, theme: { type: 'string' }, headline: { type: 'string' },
+      bid: { type: 'string' }, budget: { type: 'string' },
+    },
+  });
+  const launchKey = positionals[0];
+  if (launchKey === undefined) fail(1, 'sa new campaign потребує launch key: sa new campaign ai-jobs-de-wh --termgroup tg-wh --article a-wh --language de --country DE --account main');
+  const number = (flag: 'bid' | 'budget'): number | undefined => {
+    if (values[flag] === undefined) return undefined;
+    const value = Number(values[flag]);
+    if (!Number.isFinite(value) || value <= 0) fail(1, `--${flag} має бути додатним числом`);
+    return value;
+  };
+  const bid = number('bid');
+  const budget = number('budget');
+  const request = {
+    termgroup: values.termgroup ?? '', article: values.article ?? '', language: values.language ?? '',
+    country: values.country ?? '', account: values.account ?? '',
+    ...(values.name !== undefined ? { name: values.name } : {}),
+    ...(values.theme !== undefined ? { theme: values.theme } : {}),
+    ...(values.headline !== undefined ? { headline: values.headline } : {}),
+    ...(bid !== undefined ? { bid } : {}),
+    ...(budget !== undefined ? { budget } : {}),
+  };
+  await ensureServer();
+  const { status, body } = await ask<Expanded | { error: string }>(`/api/launches/${launchKey}/campaigns`, asJson(request));
+  out(body);
+  if (status === 400) return 2;
+  return status === 200 ? 0 : 5;
+}
+
+/** The matrix: a JSON object from `--file` or stdin, handed to the server as is. */
+async function commandExpand(args: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { file: { type: 'string' } } });
+  const launchKey = positionals[0];
+  if (launchKey === undefined) fail(1, 'sa expand потребує launch key: echo \'{...}\' | sa expand ai-jobs-de-wh');
+  let text: string;
+  try {
+    text = values.file !== undefined ? fs.readFileSync(values.file, 'utf8') : fs.readFileSync(0, 'utf8');
+  } catch (e) {
+    fail(1, `матриця не читається: ${(e as Error).message}`);
+  }
+  let matrix: unknown;
+  try {
+    matrix = JSON.parse(text);
+  } catch (e) {
+    fail(1, `матриця має бути JSON: ${(e as Error).message}`);
+  }
+  await ensureServer();
+  const { status, body } = await ask<Expanded | { error: string }>(`/api/launches/${launchKey}/expand`, asJson(matrix));
+  out(body);
+  if (status === 400) return 2;
+  return status === 200 ? 0 : 5;
 }
 
 async function commandTickets(): Promise<number> {
@@ -233,6 +306,7 @@ async function main(): Promise<number> {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
     case 'new': return commandNew(rest);
+    case 'expand': return commandExpand(rest);
     case 'launches': return commandLaunches();
     case 'tickets': return commandTickets();
     case 'config': return commandConfig();

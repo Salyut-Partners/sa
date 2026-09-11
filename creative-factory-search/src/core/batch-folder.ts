@@ -1,5 +1,7 @@
-// A batch as a folder in the topic: `project.json` beside a `photos/` folder,
-// with the file pointing at the pictures by name instead of carrying them.
+// A batch as a folder in the topic: `sources/<batch>/project.json` beside the
+// pictures themselves, with the file pointing at them by name instead of
+// carrying them. The folder is the buyer's «ісходники»: what the creatives
+// were made from, laid flat where Finder shows it.
 //
 // The editor's own model keeps a photo as a data URL, and the browser path —
 // autosave, the `.json` download — still writes it that way. This module is
@@ -9,8 +11,8 @@
 import { safeStem } from './batch.ts';
 import type { ProjectFile } from './serialize.ts';
 
-/** The folder beside `project.json` that holds the pictures. */
-export const PHOTOS_DIR = 'photos';
+/** The folder under a launch that holds the batches. */
+export const SOURCES_DIR = 'sources';
 
 /**
  * The name of a folder inside a launch — a batch, a campaign. Lower-case, no
@@ -22,12 +24,16 @@ const FOLDER_NAME = /^[a-z0-9][a-z0-9._-]*$/;
 export const isFolderName = (value: unknown): value is string =>
   typeof value === 'string' && FOLDER_NAME.test(value) && !value.includes('..');
 
-/** Whether a photo's `image` is a file in the batch folder rather than the picture itself. */
-export const isPhotoRef = (image: string): boolean => image.startsWith(PHOTOS_DIR + '/');
+/**
+ * Whether a photo's `image` is a file in the batch folder rather than the
+ * picture itself. Anything that is not a data URL is a path — a flat name
+ * today, `photos/<name>` in the batches the format before `sources/` wrote.
+ */
+export const isPhotoRef = (image: string): boolean => !image.startsWith('data:');
 
 /** One picture to write beside the file. */
 export interface PhotoFile {
-  /** Relative to the batch folder: `photos/airport.jpg`. */
+  /** Relative to the batch folder: `airport.jpg`. */
   path: string;
   mime: string;
   base64: string;
@@ -87,7 +93,7 @@ export function splitPhotos(file: ProjectFile): SplitBatch {
     const base = safeBase(name);
     const ext = extensionFor(mime);
     for (let n = 1; ; n++) {
-      const path = `${PHOTOS_DIR}/${base}${n === 1 ? '' : '-' + n}.${ext}`;
+      const path = `${base}${n === 1 ? '' : '-' + n}.${ext}`;
       const held = taken.get(path);
       if (held === base64) return path;
       if (held === undefined) {

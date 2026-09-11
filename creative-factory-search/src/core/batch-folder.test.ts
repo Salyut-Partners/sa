@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  decodeDataUrl, isFolderName, isPhotoRef, joinPhotos, mimeFor, sameProjectFile, splitPhotos, PHOTOS_DIR,
+  decodeDataUrl, isFolderName, isPhotoRef, joinPhotos, mimeFor, sameProjectFile, splitPhotos,
 } from './batch-folder.ts';
 import { apply, createProject } from './project.ts';
 import { fromFile, toFile, type ProjectFile } from './serialize.ts';
@@ -61,12 +61,12 @@ describe('splitPhotos', () => {
   it('moves every picture out of the file and leaves a reference behind', () => {
     const { file, photos } = splitPhotos(toFile(sample()));
     expect(file.photos.map(p => p.image)).toEqual([
-      `${PHOTOS_DIR}/airport.jpg`,
-      `${PHOTOS_DIR}/Фото_2_копія.png`,
+      `airport.jpg`,
+      `Фото_2_копія.png`,
     ]);
     expect(photos).toEqual([
-      { path: `${PHOTOS_DIR}/airport.jpg`, mime: 'image/jpeg', base64: '/9j/AAAA' },
-      { path: `${PHOTOS_DIR}/Фото_2_копія.png`, mime: 'image/png', base64: 'iVBORw0KGgo=' },
+      { path: `airport.jpg`, mime: 'image/jpeg', base64: '/9j/AAAA' },
+      { path: `Фото_2_копія.png`, mime: 'image/png', base64: 'iVBORw0KGgo=' },
     ]);
     expect(file.photos.every(p => isPhotoRef(p.image))).toBe(true);
   });
@@ -85,7 +85,7 @@ describe('splitPhotos', () => {
     });
     p = apply(p, { type: 'photo/add', photos: [{ id: 'b', name: 'other.PNG', image: JPEG }] });
     const { photos } = splitPhotos(toFile(p));
-    expect(photos.map(f => f.path)).toEqual([`${PHOTOS_DIR}/shot.jpg`, `${PHOTOS_DIR}/other.jpg`]);
+    expect(photos.map(f => f.path)).toEqual([`shot.jpg`, `other.jpg`]);
   });
 
   it('keeps two photos with the same name apart, and shares a file when the bytes are the same', () => {
@@ -99,17 +99,17 @@ describe('splitPhotos', () => {
     });
     const { file, photos } = splitPhotos(toFile(p));
     expect(file.photos.map(f => f.image)).toEqual([
-      `${PHOTOS_DIR}/x.jpg`, `${PHOTOS_DIR}/x-2.jpg`, `${PHOTOS_DIR}/x.jpg`,
+      `x.jpg`, `x-2.jpg`, `x.jpg`,
     ]);
-    expect(photos.map(f => f.path)).toEqual([`${PHOTOS_DIR}/x.jpg`, `${PHOTOS_DIR}/x-2.jpg`]);
+    expect(photos.map(f => f.path)).toEqual([`x.jpg`, `x-2.jpg`]);
   });
 
   it('leaves a photo that already points at a file alone, with nothing to write for it', () => {
     const file = toFile(sample());
-    file.photos[0]!.image = `${PHOTOS_DIR}/kept.jpg`;
+    file.photos[0]!.image = 'photos/kept.jpg';
     const split = splitPhotos(file);
-    expect(split.file.photos[0]!.image).toBe(`${PHOTOS_DIR}/kept.jpg`);
-    expect(split.photos.map(f => f.path)).toEqual([`${PHOTOS_DIR}/Фото_2_копія.png`]);
+    expect(split.file.photos[0]!.image).toBe('photos/kept.jpg');
+    expect(split.photos.map(f => f.path)).toEqual([`Фото_2_копія.png`]);
   });
 });
 
@@ -130,9 +130,9 @@ describe('joinPhotos', () => {
 
   it('opens without a photo whose file is gone, and says which one', () => {
     const { file, bytes } = onDisk();
-    bytes.delete(`${PHOTOS_DIR}/airport.jpg`);
+    bytes.delete(`airport.jpg`);
     const joined = joinPhotos(file, path => bytes.get(path) ?? null);
-    expect(joined.missing).toEqual([`${PHOTOS_DIR}/airport.jpg`]);
+    expect(joined.missing).toEqual([`airport.jpg`]);
     const result = fromFile(joined.file);
     expect(result.ok).toBe(true);
     expect((result as { project: Project }).project.photos.map(p => p.id)).toEqual(['b']);

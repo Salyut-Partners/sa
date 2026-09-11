@@ -29,12 +29,12 @@ function readConcurrency(): number {
 
 /**
  * Where the files go when they go to a launch rather than to a download:
- * archive name → campaign folder name, inside the launch. The plan has
- * already been cut down to the files that have a destination.
+ * archive name → the campaign folders, inside the launch, the file is copied
+ * into. The plan has already been cut down to the files that have one.
  */
 export interface BatchOutput {
   launchKey: string;
-  destinations: Record<string, string>;
+  destinations: Record<string, string[]>;
 }
 
 export interface BatchRequest {
@@ -56,17 +56,21 @@ export function startBatch(request: unknown, origin: string, resolve: FolderReso
   const { groups, duration, fitToVoice, output } = validate(request);
   // Folders are resolved before the job exists: a campaign that is not there
   // is a refusal the buyer reads now, not an error against every file later.
-  let targets: Map<string, string> | null = null;
+  let targets: Map<string, string[]> | null = null;
   if (output !== undefined) {
     const folders = new Map<string, string>();
     targets = new Map();
-    for (const [name, campaign] of Object.entries(output.destinations)) {
-      let folder = folders.get(campaign);
-      if (folder === undefined) {
-        folder = resolve(output.launchKey, campaign);
-        folders.set(campaign, folder);
+    for (const [name, campaigns] of Object.entries(output.destinations)) {
+      const files: string[] = [];
+      for (const campaign of campaigns) {
+        let folder = folders.get(campaign);
+        if (folder === undefined) {
+          folder = resolve(output.launchKey, campaign);
+          folders.set(campaign, folder);
+        }
+        files.push(path.join(folder, name));
       }
-      targets.set(name, path.join(folder, name));
+      targets.set(name, files);
     }
   }
   const job = createJob(groups.reduce((sum, g) => sum + g.items.length, 0), targets, 'cfs-batch-');
@@ -110,7 +114,8 @@ function validate(request: unknown): BatchRequest {
     }
     for (const group of groups) {
       for (const item of group.items) {
-        if (typeof output.destinations[item.name] !== 'string') {
+        const to = output.destinations[item.name];
+        if (!Array.isArray(to) || to.length === 0 || !to.every(c => typeof c === 'string')) {
           throw new BadRequestError(`файл ${item.name} не має теки призначення`);
         }
       }
@@ -231,7 +236,7 @@ async function renderGroup(job: Job, group: BatchGroup, ctx: GroupContext): Prom
     // Made in scratch and moved into place whole: a campaign folder must never
     // hold a file ffmpeg was half-way through when it failed or was cancelled.
     const made = path.join(job.dir, item.name);
-    const out = job.targets?.get(item.name) ?? made;
+    const [out = made, ...copies] = job.targets?.get(item.name) ?? [];
     try {
       await working(job, item.name, async () => {
         if (clip === null) await fs.promises.copyFile(silent, made);
@@ -247,9 +252,12 @@ async function renderGroup(job: Job, group: BatchGroup, ctx: GroupContext): Prom
           await burn(job, item.name, made, item.subtitles, clip.words);
         }
         if (out !== made) await fs.promises.rename(made, out);
+        // The same file in every other campaign of its language: copied, not
+        // rendered again, and after the move so no folder ever holds a half.
+        for (const copy of copies) await fs.promises.copyFile(out, copy);
       });
       job.outputs.push({ name: item.name, file: out });
-      if (job.targets !== null) job.folders.add(relativeFolder(out));
+      if (job.targets !== null) for (const file of [out, ...copies]) job.folders.add(relativeFolder(file));
     } catch (e) {
       job.errors.push({ name: item.name, message: explain(e) });
     }

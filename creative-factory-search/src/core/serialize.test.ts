@@ -157,6 +157,29 @@ describe('a project file carrying templates', () => {
   it('refuses a file from a schema this build has never seen', () => {
     expect(fromFile({ ...toFile(saved()), version: 99 })).toEqual({ ok: false, reason: 'version' });
   });
+
+  it('opens a file saved while photos carried catalogue objects, and drops them', () => {
+    // The editor once placed objects from a catalogue on a photo, under a
+    // `props` field. The layer is gone; a batch saved with it still opens, and
+    // is saved back without it rather than carrying a field nothing reads.
+    const file = toFile(saved()) as unknown as Record<string, unknown>;
+    const older = {
+      ...file,
+      photos: (file['photos'] as Record<string, unknown>[]).map(p => ({
+        ...p,
+        props: [{
+          id: 'x', propId: 'iron', rect: { x: 55, y: 26, w: 36, h: 34 }, colors: ['#ff0000'],
+          timing: { appearAt: 0.35, hideAt: null, enter: 'pop', enterDuration: 0.5 },
+        }],
+      })),
+    };
+    const result = fromFile(older);
+    expect(result.ok).toBe(true);
+    const project = (result as { project: Project }).project;
+    expect(project.photos[0]).not.toHaveProperty('props');
+    expect(project.photos[0]!.template!.definitionId).toBe('jobs-card-panel');
+    expect(toFile(project).photos[0]).not.toHaveProperty('props');
+  });
 });
 
 describe('a project file carrying languages', () => {

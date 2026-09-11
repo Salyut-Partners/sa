@@ -4,9 +4,8 @@ import { buildLaunchesTree, type LaunchFolderListing } from './launches-tree.ts'
 const TOPIC = (name: string, vertical: string | null) => [
   'launch_key: ai-x-y',
   `name: ${name}`,
-  'traffic_source: tiktok',
   'site: 182',
-  'accounts: { main: { ad_account: "1", pixel: "2" } }',
+  'accounts: { main: { source: tiktok, ad_account: "1", pixel: "2" } }',
   ...(vertical === null ? [] : [`vertical: ${vertical}`]),
 ].join('\n');
 

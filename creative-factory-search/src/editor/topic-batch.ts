@@ -1,7 +1,11 @@
 // The batch's place in the launch tree: which topic folder it lives in and which
-// `batches/<batch>` it is. Opening and saving go through the server, which owns
+// `sources/<batch>` it is. Opening and saving go through the server, which owns
 // the disk; this hook owns the binding and the one question the header has to
 // answer — whether what is on screen has reached that folder.
+//
+// The binding is made by the export, not chosen up front: the buyer drops
+// photos and works, and the first export into a topic's campaigns saves the
+// batch under that topic, named by the clock. From then on ⌘S goes there.
 //
 // Two stores, one source. The autosave in IndexedDB is the browser's memory of
 // the session and nothing more: it is what comes back after a reload. The
@@ -13,7 +17,7 @@ import { isFolderName, sameProjectFile } from '../core/batch-folder.ts';
 import { fromFile, toFile } from '../core/serialize.ts';
 import type { Project } from '../core/types.ts';
 import { explainRefusal } from './project-file.ts';
-import { fetchBatches, fetchLaunches, readBatch, writeBatch } from './server.ts';
+import { createBatch, fetchBatches, fetchLaunches, readBatch, writeBatch } from './server.ts';
 
 export interface BatchLocation {
   launchKey: string;
@@ -85,8 +89,14 @@ export interface TopicBatch {
   offline: string;
   browse: (launchKey: string) => void;
   open: (batch: string) => void;
-  /** Save into the bound batch, or into a new one under the browsed topic. */
-  save: (batch?: string) => void;
+  /** Save into the bound batch. Nothing happens while unbound: the export binds. */
+  save: () => void;
+  /**
+   * The batch on disk under this topic, saved and bound: the bound one,
+   * written if it changed, or a new one the server names. Refuses a topic
+   * other than the bound one — one export is one topic.
+   */
+  ensureSaved: (launchKey: string) => Promise<BatchLocation>;
   /** Forget the binding; the project stays on screen and the folder stays as it is. */
   unbind: () => void;
 }
@@ -187,32 +197,48 @@ export function useTopicBatch(
       .finally(() => setBusy(false));
   }, [launchKey, replaceProject, say]);
 
-  const save = useCallback((batch?: string) => {
-    const target = batch === undefined
-      ? location
-      : { launchKey, batch: batch.trim() };
-    if (target === null || target.launchKey === '') {
-      say('Спершу оберіть топік і назву пачки.', true);
-      return;
-    }
-    if (!isFolderName(target.batch)) {
-      say('Назва пачки: малі літери, цифри, крапки й дефіси — наприклад batch-1.', true);
-      return;
-    }
+  /** The write itself: into the bound batch, or into one the server names under the topic. */
+  const write = useCallback(async (key: string, batch: string | null): Promise<BatchLocation> => {
     const current = latest.current;
     setBusy(true);
-    writeBatch(target.launchKey, target.batch, toFile(current))
-      .then(written => {
-        setSaved(fingerprint(current));
-        setLocation(target);
-        writeLocation(target);
-        setBatches(list => (list.includes(target.batch) ? list : [...list, target.batch].sort()));
-        say(`Збережено в ${target.launchKey}/${target.batch}` +
-          (written.written.length === 0 ? '' : ` · фото: ${written.written.length}`));
-      })
-      .catch(e => say((e as Error).message, true))
-      .finally(() => setBusy(false));
-  }, [location, launchKey, say]);
+    try {
+      const written = batch === null
+        ? await createBatch(key, toFile(current))
+        : await writeBatch(key, batch, toFile(current));
+      const target = { launchKey: key, batch: written.batch };
+      setSaved(fingerprint(current));
+      setLocation(target);
+      writeLocation(target);
+      setLaunchKey(key);
+      setBatches(list => (list.includes(target.batch) ? list : [...list, target.batch].sort()));
+      say(`Ісходники збережено в ${key}/sources/${target.batch}` +
+        (written.written.length === 0 ? '' : ` · фото: ${written.written.length}`));
+      return target;
+    } catch (e) {
+      say((e as Error).message, true);
+      throw e;
+    } finally {
+      setBusy(false);
+    }
+  }, [say]);
+
+  const save = useCallback(() => {
+    if (location === null) {
+      say('Ісходники збережуться в теку топіка при першому експорті.', true);
+      return;
+    }
+    void write(location.launchKey, location.batch).catch(() => undefined);
+  }, [location, say, write]);
+
+  const ensureSaved = useCallback(async (key: string): Promise<BatchLocation> => {
+    if (location !== null && location.launchKey !== key) {
+      const message = `Ця пачка вже лежить у ${location.launchKey}; один експорт — один топік. Відв'яжіть її, щоб експортувати в ${key}.`;
+      say(message, true);
+      throw new Error(message);
+    }
+    if (location !== null && same(saved, fingerprint(latest.current))) return location;
+    return write(key, location?.batch ?? null);
+  }, [location, saved, say, write]);
 
   const unbind = useCallback(() => {
     setLocation(null);
@@ -225,6 +251,6 @@ export function useTopicBatch(
 
   return useMemo(() => ({
     location, launches, batches, launchKey, dirty, busy, note, failed, offline,
-    browse, open, save, unbind,
-  }), [location, launches, batches, launchKey, dirty, busy, note, failed, offline, browse, open, save, unbind]);
+    browse, open, save, ensureSaved, unbind,
+  }), [location, launches, batches, launchKey, dirty, busy, note, failed, offline, browse, open, save, ensureSaved, unbind]);
 }

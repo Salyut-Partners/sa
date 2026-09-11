@@ -1,10 +1,11 @@
-// A batch on disk: `batches/<batch>/project.json` and its `photos/`, inside a
-// launch folder. The server is the only thing that touches the folder; the
+// A batch on disk: `sources/<batch>/project.json` beside its pictures, inside
+// a launch folder. The server is the only thing that touches the folder; the
 // editor posts and receives the same file it would download, pictures inside,
-// and the split into files happens here on the way through.
+// and the split into files happens here on the way through. A new batch is
+// named here too, by the clock, when the export saves one for the first time.
 import fs from 'node:fs';
 import path from 'node:path';
-import { isFolderName, joinPhotos, mimeFor, splitPhotos } from '../core/batch-folder.ts';
+import { isFolderName, joinPhotos, mimeFor, SOURCES_DIR, splitPhotos } from '../core/batch-folder.ts';
 import { isLaunchKey } from '../core/launch.ts';
 import { campaignSummary, CREATIVES_DIR, type CampaignInfo } from '../core/placement.ts';
 import { fromFile, type ProjectFile } from '../core/serialize.ts';
@@ -27,17 +28,31 @@ function batchFolder(config: SaConfig, launchKey: string, batch: string): string
   if (!isFolderName(batch)) {
     throw new RefusedError(`назва пачки має бути з малих літер, цифр, крапок і дефісів: \`${batch}\``);
   }
-  return path.join(launchFolder(config, launchKey), 'batches', batch);
+  return path.join(launchFolder(config, launchKey), SOURCES_DIR, batch);
 }
 
-/** The batches a launch has: every folder under `batches/` holding a project file. */
+/** The batches a launch has: every folder under `sources/` holding a project file. */
 export function listBatches(config: SaConfig, launchKey: string): string[] {
-  const dir = path.join(launchFolder(config, launchKey), 'batches');
+  const dir = path.join(launchFolder(config, launchKey), SOURCES_DIR);
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true })
-    .filter(d => d.isDirectory() && isFolderName(d.name))
+    .filter(d => d.isDirectory() && isFolderName(d.name) && fs.existsSync(path.join(dir, d.name, PROJECT_FILE)))
     .map(d => d.name)
     .sort();
+}
+
+/**
+ * The name a batch gets when the export saves it for the first time: the day
+ * and the minute, `0911-1432`, and a `-2` when that minute already has one.
+ * The buyer never types it — «ісходники від 11.09 о 14:32» is what it means.
+ */
+export function newBatchName(taken: readonly string[], now: Date): string {
+  const two = (n: number): string => String(n).padStart(2, '0');
+  const stamp = `${two(now.getMonth() + 1)}${two(now.getDate())}-${two(now.getHours())}${two(now.getMinutes())}`;
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? stamp : `${stamp}-${n}`;
+    if (!taken.includes(name)) return name;
+  }
 }
 
 export interface BatchRead {
@@ -98,6 +113,8 @@ export function campaignCreativesDir(config: SaConfig, launchKey: string, campai
 }
 
 export interface BatchWritten {
+  /** The batch the file went into — the one asked for, or the one just named. */
+  batch: string;
   folder: string;
   /** Picture files written this time — unchanged ones are left as they are. */
   written: string[];
@@ -126,5 +143,10 @@ export function writeBatch(config: SaConfig, launchKey: string, batch: string, b
     written.push(photo.path);
   }
   fs.writeFileSync(path.join(folder, PROJECT_FILE), JSON.stringify(file, null, 2) + '\n');
-  return { folder, written };
+  return { batch, folder, written };
+}
+
+/** A batch saved for the first time: named by the clock, under `sources/`. */
+export function createBatch(config: SaConfig, launchKey: string, body: unknown, now = new Date()): BatchWritten {
+  return writeBatch(config, launchKey, newBatchName(listBatches(config, launchKey), now), body);
 }

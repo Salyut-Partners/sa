@@ -1,7 +1,7 @@
 # sa
 
 Робоче місце байера Search Arbitrage: редактор креативів і залив
-(`creative-factory-search`), база знань (`sa-knowledge`), автосубтитри (`subs`).
+(`creative-factory-search`), плейбук байера (`playbook`), автосубтитри (`subs`).
 
 ```sh
 git clone <repo> ~/sa

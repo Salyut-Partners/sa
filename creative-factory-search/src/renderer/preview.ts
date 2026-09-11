@@ -50,7 +50,6 @@ export function previewSpec(
       timing: { appearAt: 0, hideAt: null, enter: 'none', enterDuration: 0 },
     }],
     template: null,
-  props: [],
     locale: 'en',
     ...SILENT,
   };
@@ -87,7 +86,6 @@ export function templatePreviewSpec(
     pushIn: false,
     glare: true,
     buttons: [],
-    props: [],
     template: templateById(definitionId) === null ? null : {
       definitionId,
       fields: templateFields(definitionId, locale),

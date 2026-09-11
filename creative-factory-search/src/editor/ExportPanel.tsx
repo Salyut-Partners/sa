@@ -3,8 +3,8 @@ import { batchSize, planBatch, type BatchPlan } from '../core/batch.ts';
 import { LOCALE_NAMES, releaseLocales } from '../core/locales.ts';
 import { FLAGS } from '../core/phrasebook.ts';
 import {
-  defaultLayout, mergeLayout, placementSize, placePlan, rowSummary, selectionTarget, setLocaleTarget,
-  setPhotoTarget, subtitleCount, type CampaignInfo, type ExportLayout, type Target,
+  defaultLayout, mergeLayout, placementSize, placePlan, rowSummary, selectionTarget, setPhotoTarget, speakers,
+  subtitleCount, toggleLocaleTarget, togglePhotoTarget, type CampaignInfo, type ExportLayout,
 } from '../core/placement.ts';
 import type { Command } from '../core/project.ts';
 import type { LocaleId, Project } from '../core/types.ts';
@@ -24,14 +24,6 @@ interface Props {
 /** The style select's value for "no subtitles" — a select cannot hold null. */
 const NO_STYLE = ' none';
 
-/** The select's value for "not exported" — a select cannot hold null. */
-const NOWHERE = ' none';
-/** The photo row's value for "wherever the language goes". */
-const AS_ROW = ' row';
-
-const toValue = (target: Target): string => target ?? NOWHERE;
-const fromValue = (value: string): Target => (value === NOWHERE ? null : value);
-
 /**
  * The export, and what it is doing.
  *
@@ -39,14 +31,18 @@ const fromValue = (value: string): Target => (value === NOWHERE ? null : value);
  * release are different acts with different costs, and a batch of twelve photos
  * across seven languages is not something to start by accident.
  *
- * Bound to a topic, the files go to campaign folders and the panel shows a row
- * per language saying which. Unbound, the export is a download, as it was.
+ * With a topic chosen, the files go to its campaign folders — every campaign
+ * of the language, ticked by default — and the sources are saved under the
+ * topic on the way, which is what binds the batch to it. With none, the
+ * export is a download, as it was. A batch already bound stays with its
+ * topic: one export is one topic.
  */
 export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Props) {
   // Counted, not planned: the plan is built at the press. See `batchSize`.
   const { photos, locales, total } = batchSize(project);
   const { status } = run;
-  const launchKey = topic.location?.launchKey ?? null;
+  const bound = topic.location?.launchKey ?? null;
+  const launchKey = bound ?? (topic.launchKey === '' ? null : topic.launchKey);
 
   const [campaigns, setCampaigns] = useState<CampaignInfo[] | null>(null);
   const [campaignsNote, setCampaignsNote] = useState('');
@@ -88,7 +84,11 @@ export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Prop
   }, []);
   const burned = subtitleCount(project, launchKey === null ? null : layout);
 
-  /** Start a plan: laid into folders when bound, as a download when not. */
+  /**
+   * Start a plan: laid into folders when a topic is chosen, as a download when
+   * not. The sources are saved first — the batch has to be in the topic's
+   * folder before its creatives are in the topic's campaigns.
+   */
   const go = (plan: BatchPlan): void => {
     if (launchKey === null) {
       run.start(plan, project.duration, project.fitToVoice);
@@ -96,13 +96,10 @@ export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Prop
     }
     const laid = placePlan(plan, layout);
     const output: BatchOutput = { launchKey, destinations: laid.destinations };
-    run.start(laid.plan, project.duration, project.fitToVoice, output);
+    topic.ensureSaved(launchKey)
+      .then(() => run.start(laid.plan, project.duration, project.fitToVoice, output))
+      .catch(() => undefined);
   };
-
-  const options = (campaigns ?? []).map(c => ({
-    id: c.name,
-    label: c.language === null ? c.name : `${c.name} · ${c.language}${c.country ? '/' + c.country : ''}`,
-  }));
 
   return (
     <>
@@ -165,34 +162,47 @@ export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Prop
         )}
       </div>
 
-      {launchKey === null ? null : (
-        <div className="group">
-          <div className="lab">
-            Куди
-            <span className="val">{launchKey}</span>
-          </div>
-          {campaigns === null ? <div className="note">Читаю кампанії…</div> : null}
-          {campaignsNote !== '' ? <div className="error">{campaignsNote}</div> : null}
-          {campaigns !== null && campaigns.length === 0 && campaignsNote === '' ? (
-            <div className="warn">У {launchKey}/campaigns немає жодної кампанії — файли нікуди класти.</div>
-          ) : null}
-          {campaigns === null || campaigns.length === 0 ? null : release.map(id => (
-            <LocaleRow
-              key={id}
-              id={id}
-              project={project}
-              layout={layout}
-              options={options}
-              selectedAll={selectedAll}
-              onRow={target => setLayout(l => setLocaleTarget(l, id, target))}
-              onPhotos={target => setLayout(l => setPhotoTarget(l, project.selection, id, target))}
-            />
-          ))}
-          {placed !== null && placed.skipped > 0 ? (
-            <div className="note">Не експортується: {placed.skipped} файлів.</div>
-          ) : null}
+      <div className="group">
+        <div className="lab">
+          Куди
+          <span className="val">{launchKey ?? 'у завантаження'}</span>
         </div>
-      )}
+        {bound === null ? (
+          <select
+            value={topic.launchKey}
+            onChange={e => topic.browse(e.target.value)}
+            disabled={run.running || topic.busy}
+          >
+            <option value="">— завантажити файлом —</option>
+            {topic.launches.map(key => <option key={key} value={key}>{key}</option>)}
+          </select>
+        ) : null}
+        {topic.offline !== '' && bound === null ? <div className="warn">{topic.offline}</div> : null}
+        {launchKey === null ? (
+          <div className="note">Оберіть топік — файли ляжуть у його кампанії, а ісходники в його теку.</div>
+        ) : null}
+        {launchKey !== null && campaigns === null ? <div className="note">Читаю кампанії…</div> : null}
+        {campaignsNote !== '' ? <div className="error">{campaignsNote}</div> : null}
+        {launchKey !== null && campaigns !== null && campaigns.length === 0 && campaignsNote === '' ? (
+          <div className="warn">У {launchKey}/campaigns немає жодної кампанії — файли нікуди класти. Кампанії створює <code>sa expand</code>.</div>
+        ) : null}
+        {launchKey === null || campaigns === null || campaigns.length === 0 ? null : release.map(id => (
+          <LocaleRow
+            key={id}
+            id={id}
+            project={project}
+            layout={layout}
+            campaigns={campaigns}
+            selectedAll={selectedAll}
+            onRow={(campaign, on) => setLayout(l => toggleLocaleTarget(l, id, campaign, on))}
+            onPhotos={(campaign, on) => setLayout(l => togglePhotoTarget(l, project.selection, id, campaign, on))}
+            onPhotosAsRow={() => setLayout(l => setPhotoTarget(l, project.selection, id, 'inherit'))}
+          />
+        ))}
+        {placed !== null && placed.skipped > 0 ? (
+          <div className="note">Не експортується: {placed.skipped} файлів.</div>
+        ) : null}
+      </div>
 
       <div className="group">
         <button
@@ -214,13 +224,15 @@ export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Prop
         >
           {placed === null
             ? `Експортувати ${photos} × ${locales} = ${total}`
-            : `Експортувати в теки: ${placed.total}`}
+            : `Експортувати в теки: ${placed.total}${placed.copies > placed.total ? ` (${placed.copies} файлів)` : ''}`}
         </button>
 
         <div className="note">
           {total === 0
             ? 'Оберіть фото і хоча б одну мову в експорт.'
-            : `${photos} фото × ${locales} мов. Однакові відеоряди рендеряться один раз.`}
+            : placed !== null && placed.copies > placed.total
+              ? `${photos} фото × ${locales} мов; файл копіюється в кожну кампанію своєї мови. Однакові відеоряди рендеряться один раз.`
+              : `${photos} фото × ${locales} мов. Однакові відеоряди рендеряться один раз.`}
         </div>
       </div>
 
@@ -271,48 +283,74 @@ interface RowProps {
   id: LocaleId;
   project: Project;
   layout: ExportLayout;
-  options: readonly { id: string; label: string }[];
+  campaigns: readonly CampaignInfo[];
   selectedAll: boolean;
-  onRow: (target: Target) => void;
-  onPhotos: (target: Target | 'inherit') => void;
+  onRow: (campaign: string, on: boolean) => void;
+  onPhotos: (campaign: string, on: boolean) => void;
+  onPhotosAsRow: () => void;
 }
 
+const campaignLabel = (c: CampaignInfo): string =>
+  c.language === null ? c.name : `${c.name} · ${c.language}${c.country ? '/' + c.country : ''}`;
+
 /**
- * One language: where it goes, and — when only some photos are selected —
- * where those go instead. The photo select shows what the selection agrees
- * on, or "as the row" when it follows the row or disagrees; choosing anything
- * writes it onto the whole selection, as every control in the panel does.
+ * One language: the campaigns it goes to, a box each — the ones that speak
+ * it first and ticked, the rest of the topic folded away for the campaign
+ * split by place rather than tongue. When only some photos are selected, a
+ * second set of boxes says where those go instead; ticking one writes onto
+ * the whole selection, as every control in the panel does, and «як мова»
+ * hands them back to the row.
  */
-function LocaleRow({ id, project, layout, options, selectedAll, onRow, onPhotos }: RowProps) {
+function LocaleRow({ id, project, layout, campaigns, selectedAll, onRow, onPhotos, onPhotosAsRow }: RowProps) {
   const shares = rowSummary(project, layout, id);
-  const home = layout.locales[id] ?? null;
+  const home = new Set(layout.locales[id] ?? []);
+  const own = speakers(campaigns, id);
+  const others = campaigns.filter(c => !own.includes(c.name));
   const said = selectionTarget(layout, project.selection, id);
-  const photosValue = said === 'inherit' || said === 'mixed' ? AS_ROW : toValue(said);
-  const label = (target: Target): string => target ?? 'не експортувати';
+  const chosen = said === 'inherit' ? null : said === 'mixed' ? 'mixed' : new Set(said);
+  const label = (target: string | null): string => target ?? 'не експортувати';
+
+  const boxes = (list: readonly CampaignInfo[], has: (name: string) => boolean, onTick: (name: string, on: boolean) => void, indeterminate = false) =>
+    list.map(c => (
+      <label className="check" key={c.name}>
+        <input
+          type="checkbox"
+          checked={has(c.name)}
+          ref={el => { if (el !== null) el.indeterminate = indeterminate; }}
+          onChange={e => onTick(c.name, e.target.checked)}
+        />
+        {campaignLabel(c)}
+      </label>
+    ));
 
   return (
     <div className="dest-row">
-      <div className="row">
-        <span className="dest-lang">{FLAGS[id]} {LOCALE_NAMES[id]}</span>
-        <select value={toValue(home)} onChange={e => onRow(fromValue(e.target.value))}>
-          <option value={NOWHERE}>— не експортувати —</option>
-          {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-        </select>
-      </div>
+      <div className="dest-lang">{FLAGS[id]} {LOCALE_NAMES[id]}</div>
+      {own.length === 0 ? <div className="note">Жодна кампанія не говорить цією мовою.</div> : null}
+      {boxes(campaigns.filter(c => own.includes(c.name)), name => home.has(name), onRow)}
+      {others.length === 0 ? null : (
+        <details>
+          <summary className="note">інші кампанії топіка{[...home].filter(n => !own.includes(n)).length > 0 ? ` · ${[...home].filter(n => !own.includes(n)).length} обрано` : ''}</summary>
+          {boxes(others, name => home.has(name), onRow)}
+        </details>
+      )}
       {selectedAll || project.selection.length === 0 ? null : (
-        <div className="row dest-photos">
-          <span className="dest-lang">виділені {project.selection.length} →</span>
-          <select
-            value={photosValue}
-            onChange={e => onPhotos(e.target.value === AS_ROW ? 'inherit' : fromValue(e.target.value))}
-          >
-            <option value={AS_ROW}>як мова</option>
-            <option value={NOWHERE}>— не експортувати —</option>
-            {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-          </select>
+        <div className="dest-photos">
+          <div className="dest-lang">
+            виділені {project.selection.length} →{' '}
+            {chosen === null ? 'як мова' : (
+              <button type="button" className="link" onClick={onPhotosAsRow}>як мова</button>
+            )}
+          </div>
+          {boxes(
+            campaigns,
+            name => (chosen === null ? home.has(name) : chosen === 'mixed' ? false : chosen.has(name)),
+            onPhotos,
+            chosen === 'mixed',
+          )}
         </div>
       )}
-      {shares.length > 1 || (shares.length === 1 && shares[0]!.campaign !== home) ? (
+      {shares.length > 1 || shares.some(s => s.campaign === null || !home.has(s.campaign)) ? (
         <div className="note dest-note">
           {shares.map(s => `${s.count} → ${label(s.campaign)}`).join(' · ')}
         </div>

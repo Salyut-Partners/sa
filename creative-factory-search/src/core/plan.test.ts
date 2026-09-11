@@ -11,10 +11,10 @@ import { parseRulePreset, type PlatformRule, type RulePreset } from './rules.ts'
 const TOPIC = `
 launch_key: ai-vadim-sperm-it
 name: AI Vadim Sperm IT
-traffic_source: tiktok
 site: 182
 accounts:
   main:
+    source: tiktok
     ad_account: "53560"
     pixel: "35967"
 `;
@@ -87,7 +87,7 @@ const ON_PLATFORM = snapshot({
 
 const DONE_STATE = (): LaunchState => ({
   topic_id: 106752,
-  configuration_id: 108397,
+  configurations: { tiktok: 108397 },
   termgroups: { 'tg-main': 211532 },
   articles: { 'article-a': { id: 130892, hash: articleHash(full().articles[0]!.article, topic(), ['All']) } },
   pending: null,
@@ -133,6 +133,30 @@ describe('plan on a folder that has never been applied', () => {
   });
 });
 
+describe('configurations follow the cabinets\' sources', () => {
+  const twoSources = (): TopicManifest => ({
+    ...topic(), accounts: { ...topic().accounts, fb: { source: 'facebook', ad_account: '9001', pixel: '9002' } },
+  });
+
+  it('plans one configuration per source of a new topic', () => {
+    const result = plan({ ...full(), topic: twoSources() }, snapshot(), emptyState());
+    const configurations = result.steps.filter(s => s.kind === 'configuration.create');
+    expect(configurations.map(s => (s as { source: string }).source)).toEqual(['tiktok', 'facebook']);
+    expect(configurations.map(s => (s as { body: { traffic_source: string } }).body.traffic_source)).toEqual(['tiktok', 'facebook']);
+  });
+
+  it('on a topic that has the TikTok one, adds only the Facebook one and files both by source', () => {
+    const result = plan({ ...full(), topic: twoSources() }, ON_PLATFORM, DONE_STATE());
+    expect(result.steps.filter(s => s.kind === 'configuration.create')).toMatchObject([{ source: 'facebook' }]);
+    expect(result.resolved.configurations).toEqual({ tiktok: 108397 });
+    const both = { ...ON_PLATFORM, configurations: [...ON_PLATFORM.configurations, { id: 108398, name: 'x', topic_id: 106752, country: 'All', traffic_source: 'facebook' }] };
+    const found = plan({ ...full(), topic: twoSources() }, both, DONE_STATE());
+    expect(found.steps.filter(s => s.kind === 'configuration.create')).toEqual([]);
+    expect(found.resolved.configurations).toEqual({ tiktok: 108397, facebook: 108398 });
+    expect(found.warnings.join()).toMatch(/facebook вже є \(id 108398\)/);
+  });
+});
+
 describe('plan after everything is on the platform', () => {
   it('is empty when the state holds every id and nothing changed', () => {
     const result = plan(full(), ON_PLATFORM, DONE_STATE());
@@ -144,7 +168,7 @@ describe('plan after everything is on the platform', () => {
     const result = plan(bare(), ON_PLATFORM, emptyState());
     expect(result.steps.map(s => s.kind)).toEqual([]);
     expect(result.resolved.topic_id).toBe(106752);
-    expect(result.resolved.configuration_id).toBe(108397);
+    expect(result.resolved.configurations).toEqual({ tiktok: 108397 });
     expect(result.warnings.join()).toMatch(/AIVadimSpermIT/);
   });
 
@@ -328,7 +352,7 @@ describe('state', () => {
     const result = parseState('{"topic_id": 5}');
     expect(result).toEqual({
       ok: true,
-      value: { topic_id: 5, configuration_id: null, termgroups: {}, articles: {}, pending: null, ticket: null, campaigns: {}, rules: {} },
+      value: { topic_id: 5, configurations: {}, termgroups: {}, articles: {}, pending: null, ticket: null, campaigns: {}, rules: {} },
     });
     const withTicket = parseState('{"ticket": {"id": "869ez", "url": "https://app.clickup.com/t/869ez"}}');
     expect(withTicket.ok && withTicket.value.ticket).toEqual({ id: '869ez', url: 'https://app.clickup.com/t/869ez' });
@@ -340,7 +364,7 @@ describe('state', () => {
 describe('adoptResolved', () => {
   it('writes the ids a plan found by read-back into the state, the article with an empty hash', () => {
     const adopted = adoptResolved(emptyState(), plan(full(), ON_PLATFORM, emptyState()));
-    expect(adopted).toMatchObject({ topic_id: 106752, configuration_id: 108397, termgroups: { 'tg-main': 211532 } });
+    expect(adopted).toMatchObject({ topic_id: 106752, configurations: { tiktok: 108397 }, termgroups: { 'tg-main': 211532 } });
     expect(adopted.articles['article-a']).toEqual({ id: 130892, hash: '' });
   });
 
