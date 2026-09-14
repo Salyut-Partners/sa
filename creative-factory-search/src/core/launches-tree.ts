@@ -53,7 +53,7 @@ export const NO_NICHE = 'без ніші';
 const CAMPAIGN_PATH = /^campaigns\/([^/]+)(?:\/(.*))?$/;
 const isVideo = (name: string): boolean => /\.mp4$/i.test(name);
 
-function campaignsOf(paths: readonly string[]): TreeCampaign[] {
+export function campaignsOf(paths: readonly string[]): TreeCampaign[] {
   const campaigns = new Map<string, TreeCampaign>();
   for (const path of paths) {
     const match = CAMPAIGN_PATH.exec(path);

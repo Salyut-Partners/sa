@@ -89,6 +89,8 @@ export interface TopicBatch {
   offline: string;
   browse: (launchKey: string) => void;
   open: (batch: string) => void;
+  /** Open a batch of a named topic — from the topic table, where the topic is not the one being browsed. */
+  openIn: (launchKey: string, batch: string) => void;
   /** Save into the bound batch. Nothing happens while unbound: the export binds. */
   save: () => void;
   /**
@@ -173,10 +175,11 @@ export function useTopicBatch(
     setNote('');
   }, []);
 
-  const open = useCallback((batch: string) => {
-    if (launchKey === '' || !isFolderName(batch)) return;
+  const openIn = useCallback((key: string, batch: string) => {
+    if (key === '' || !isFolderName(batch)) return;
+    setLaunchKey(key);
     setBusy(true);
-    readBatch(launchKey, batch)
+    readBatch(key, batch)
       .then(read => {
         const result = fromFile(read.file);
         if (!result.ok) {
@@ -185,17 +188,19 @@ export function useTopicBatch(
         }
         replaceProject(result.project);
         setSaved(fingerprint(result.project));
-        const next = { launchKey, batch };
+        const next = { launchKey: key, batch };
         setLocation(next);
         writeLocation(next);
         say(read.missing.length === 0
-          ? `Відкрито ${launchKey}/${batch}`
-          : `Відкрито ${launchKey}/${batch}; не знайдено фото: ${read.missing.join(', ')} — їх пропущено`,
+          ? `Відкрито ${key}/${batch}`
+          : `Відкрито ${key}/${batch}; не знайдено фото: ${read.missing.join(', ')} — їх пропущено`,
         read.missing.length > 0);
       })
       .catch(e => say((e as Error).message, true))
       .finally(() => setBusy(false));
-  }, [launchKey, replaceProject, say]);
+  }, [replaceProject, say]);
+
+  const open = useCallback((batch: string) => openIn(launchKey, batch), [launchKey, openIn]);
 
   /** The write itself: into the bound batch, or into one the server names under the topic. */
   const write = useCallback(async (key: string, batch: string | null): Promise<BatchLocation> => {
@@ -251,6 +256,6 @@ export function useTopicBatch(
 
   return useMemo(() => ({
     location, launches, batches, launchKey, dirty, busy, note, failed, offline,
-    browse, open, save, ensureSaved, unbind,
-  }), [location, launches, batches, launchKey, dirty, busy, note, failed, offline, browse, open, save, ensureSaved, unbind]);
+    browse, open, openIn, save, ensureSaved, unbind,
+  }), [location, launches, batches, launchKey, dirty, busy, note, failed, offline, browse, open, openIn, save, ensureSaved, unbind]);
 }

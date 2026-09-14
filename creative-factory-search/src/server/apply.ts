@@ -80,7 +80,10 @@ function readTermGroupFolders(folder: string, errors: string[]): TermGroupSource
     const options = parseTermGroupOptions(fs.existsSync(optionsFile) ? fs.readFileSync(optionsFile, 'utf8') : null);
     if (!keywords.ok) errors.push(...keywords.errors.map(e => `termgroups/${entry.name}: ${e}`));
     if (!options.ok) errors.push(...options.errors.map(e => `termgroups/${entry.name}: ${e}`));
-    if (keywords.ok && options.ok) groups.push({ name: entry.name, keywords: keywords.value, ...options.value });
+    if (keywords.ok && options.ok) {
+      const { name, ...rest } = options.value;
+      groups.push({ name: entry.name, ...(name === null ? {} : { platformName: name }), keywords: keywords.value, ...rest });
+    }
   }
   return groups.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -282,10 +285,10 @@ export interface Planned {
   folder: string;
   contents: LaunchContents;
   state: LaunchState;
-  /** The whole topic's plan, or one campaign's when asked for one. */
+  /** The whole topic's plan, or the part the named campaigns need when asked for some. */
   plan: Plan;
-  campaign: string | null;
-  /** One line per campaign folder, from the whole plan — what the tree offers on each. */
+  campaigns: string[] | null;
+  /** One line per campaign folder, from the whole plan — what the table offers on each. */
   outline: CampaignOutline[];
 }
 
@@ -308,11 +311,13 @@ export function onApplySettled(fn: ((launchKey: string) => void) | null): void {
  * this is the only moment those ids would ever land. Not while an apply is
  * running: that job is the file's writer until it stops.
  */
-export async function planLaunch(config: SaConfig, launchKey: string, campaign: string | null = null): Promise<Planned> {
+export async function planLaunch(config: SaConfig, launchKey: string, campaigns: readonly string[] | null = null): Promise<Planned> {
   const folder = launchFolder(config, launchKey);
-  if (campaign !== null && !campaignFolders(folder).includes(campaign)) {
-    throw new RefusedError(`кампанії \`${campaign}\` немає в ${launchKey}/campaigns`);
+  const folders = campaignFolders(folder);
+  for (const campaign of campaigns ?? []) {
+    if (!folders.includes(campaign)) throw new RefusedError(`кампанії \`${campaign}\` немає в ${launchKey}/campaigns`);
   }
+  if (campaigns !== null && campaigns.length === 0) throw new RefusedError('список кампаній порожній — нема що планувати');
   const contents = readLaunchContents(folder);
   const read = readState(folder);
   const snapshot = await readSnapshot(client(config), contents.topic, read);
@@ -320,9 +325,9 @@ export async function planLaunch(config: SaConfig, launchKey: string, campaign: 
   const state = applying.has(launchKey) ? read : adoptResolved(read, whole);
   if (state !== read) writeState(folder, state);
   return {
-    folder, contents, state, campaign,
-    plan: campaign === null ? whole : narrowPlan(whole, campaign),
-    outline: campaignOutline(whole, campaignFolders(folder)),
+    folder, contents, state, campaigns: campaigns === null ? null : [...campaigns],
+    plan: campaigns === null ? whole : narrowPlan(whole, campaigns),
+    outline: campaignOutline(whole, folders),
   };
 }
 
@@ -330,7 +335,8 @@ export async function planLaunch(config: SaConfig, launchKey: string, campaign: 
 export interface PlanDescription {
   launchKey: string;
   topic: string;
-  campaign: string | null;
+  /** The campaigns the plan was narrowed to, or null for the whole topic. */
+  campaigns: string[] | null;
   steps: PlanPreview['steps'];
   warnings: string[];
   errors: string[];
@@ -344,7 +350,7 @@ export function describePlan(planned: Planned): PlanDescription {
   return {
     launchKey: planned.contents.topic.launch_key,
     topic: planned.contents.topic.name,
-    campaign: planned.campaign,
+    campaigns: planned.campaigns,
     steps: shown.steps,
     warnings: shown.warnings,
     errors: shown.errors,
@@ -442,11 +448,11 @@ const resolveTsp = (run: Run, ref: TspRef): { id: number; name: string } => {
  * plan already did, this is the same write again for the run's own copy.
  */
 export async function startApply(
-  config: SaConfig, launchKey: string, confirmed: boolean, campaign: string | null = null,
+  config: SaConfig, launchKey: string, confirmed: boolean, campaigns: readonly string[] | null = null,
 ): Promise<{ id: string | null; steps: number }> {
   if (!confirmed) throw new RefusedError('apply без явного підтвердження не виконується: sa apply <key> --confirm');
   if (applying.has(launchKey)) throw new RefusedError(`залив \`${launchKey}\` уже застосовується — дочекайтесь, поки та задача закінчиться`);
-  const planned = await planLaunch(config, launchKey, campaign);
+  const planned = await planLaunch(config, launchKey, campaigns);
   if (planned.plan.errors.length > 0) throw new RefusedError('план має помилки:\n' + planned.plan.errors.join('\n'));
   const state = adoptResolved(planned.state, planned.plan);
   if (state !== planned.state) writeState(planned.folder, state);

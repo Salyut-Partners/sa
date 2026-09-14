@@ -1,6 +1,6 @@
 // An apply as the launches tab watches it. The job is the server's, like an
 // export: start it, get an id, ask after it until it stops. One at a time —
-// a second «Залити» while one runs is refused by the server anyway, one
+// a second «Залити N» while one runs is refused by the server anyway, one
 // writer of a state file being the rule — so this is a single run, kept in
 // the App so it goes on being watched while the buyer is on another tab.
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -9,14 +9,14 @@ import { cancelJob, jobStatus, startApply, type JobStatus } from './server.ts';
 const POLL_MS = 700;
 
 export interface ApplyRun {
-  /** Which launch and campaign the run is for, while there is one. */
-  target: { launchKey: string; campaign: string | null } | null;
+  /** Which launch and campaigns the run is for, while there is one; null campaigns is the whole topic. */
+  target: { launchKey: string; campaigns: string[] | null } | null;
   status: JobStatus | null;
   /** The last thing worth telling the buyer, in a sentence. */
   note: string;
   failed: boolean;
   running: boolean;
-  start: (launchKey: string, campaign: string | null) => void;
+  start: (launchKey: string, campaigns: readonly string[] | null) => void;
   cancel: () => void;
   /** Something to do when a run stops — the tab refreshes its plan. */
   onSettled: (fn: (() => void) | null) => void;
@@ -61,13 +61,13 @@ export function useApplyRun(): ApplyRun {
     return () => clearInterval(timer);
   }, [running, id]);
 
-  const start = useCallback((launchKey: string, campaign: string | null) => {
-    setTarget({ launchKey, campaign });
+  const start = useCallback((launchKey: string, campaigns: readonly string[] | null) => {
+    setTarget({ launchKey, campaigns: campaigns === null ? null : [...campaigns] });
     setFailed(false);
     setNote('');
     announced.current = false;
     setStatus({ id: '', state: 'running', done: 0, total: 0, current: 'запуск…', errors: [], elapsed: 0, remaining: null, ready: false, folders: [] });
-    void startApply(launchKey, campaign)
+    void startApply(launchKey, campaigns)
       .then(started => {
         if (started.id === null) {
           setStatus(null);

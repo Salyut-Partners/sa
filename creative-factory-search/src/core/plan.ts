@@ -24,8 +24,10 @@ import { hashText } from './visual-key.ts';
 // ------------------------------------------------------------- folder --
 
 export interface TermGroupSource {
-  /** The folder under `termgroups/`, which is also the group's name on the platform. */
+  /** The folder under `termgroups/`, which is the group's name on the platform unless `platformName` says otherwise. */
   name: string;
+  /** The name the platform holds when it is not a folder name — an adopted `tgHR` in a folder `tghr`. From `termgroup.yaml`'s `name`. */
+  platformName?: string;
   keywords: string[];
   /** From `termgroup.yaml`, or null for an equal share. */
   weight: number | null;
@@ -80,11 +82,13 @@ export interface TermGroupOptions {
   weight: number | null;
   country: string;
   language: string;
+  /** The group's name on the platform when it differs from the folder's, or null. */
+  name: string | null;
 }
 
-/** The optional `termgroup.yaml` beside the keys; absent means an equal share, All, All. */
+/** The optional `termgroup.yaml` beside the keys; absent means an equal share, All, All, the folder's name. */
 export function parseTermGroupOptions(source: string | null): ParseResult<TermGroupOptions> {
-  if (source === null || source.trim() === '') return { ok: true, value: { weight: null, country: 'All', language: 'All' } };
+  if (source === null || source.trim() === '') return { ok: true, value: { weight: null, country: 'All', language: 'All', name: null } };
   let data: unknown;
   try {
     data = YAML.parse(source);
@@ -111,7 +115,12 @@ export function parseTermGroupOptions(source: string | null): ParseResult<TermGr
   };
   const country = text('country');
   const language = text('language');
-  return errors.length > 0 ? { ok: false, errors } : { ok: true, value: { weight, country, language } };
+  let name: string | null = null;
+  if (bag['name'] !== undefined && bag['name'] !== null) {
+    if (typeof bag['name'] === 'string' && bag['name'].trim() !== '') name = bag['name'].trim();
+    else errors.push('termgroup.yaml: `name` має бути назвою');
+  }
+  return errors.length > 0 ? { ok: false, errors } : { ok: true, value: { weight, country, language, name } };
 }
 
 // -------------------------------------------------------------- state --
@@ -232,6 +241,11 @@ export interface PlatformPost {
   language: string;
   topic_ids: number[];
 }
+/** A post as its detail answers: the list's fields, the HTML, and the slug the platform made of the title. */
+export interface PlatformPostDetail extends PlatformPost {
+  description: string;
+  slug: string;
+}
 export interface Country { name: string; code: string }
 export interface Site { id: number; url: string }
 
@@ -316,7 +330,7 @@ export interface Plan {
 }
 
 /** The hash of what an article sends, so an unchanged one is not re-sent and a changed one is. */
-export const articleHash = (article: Article, topic: TopicManifest, countries: readonly string[]): string =>
+export const articleHash = (article: Article, topic: Pick<TopicManifest, 'site'>, countries: readonly string[]): string =>
   hashText(JSON.stringify([article.title, topic.site, article.language, countries, article.html]));
 
 const sameList = (a: readonly string[], b: readonly string[]): boolean =>
@@ -459,15 +473,16 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
     names.add(group.name);
     const country = resolveCountry(group.country, snapshot.countries);
     if (!country.ok) errors.push(`термгрупа \`${group.name}\`: ${country.errors.join('; ')}`);
+    const platformName = group.platformName ?? group.name;
     const body: TermGroupBody = {
-      name: group.name,
+      name: platformName,
       country: country.ok ? country.value : group.country,
       language: group.language,
       terms: group.keywords,
     };
     const wanted = group.weight ?? shares[index]!;
     const stateId = state.termgroups[group.name];
-    const twins = snapshot.termGroups.filter(t => t.name === group.name);
+    const twins = snapshot.termGroups.filter(t => t.name === platformName);
     const existing = (stateId === undefined ? undefined : snapshot.termGroups.find(t => t.id === stateId))
       ?? (twins.length === 1 ? twins[0] : newcomer(twins, state, 'termgroup.create', group.name));
     if (existing === undefined && twins.length > 1) {
@@ -637,15 +652,13 @@ function leansOn(step: PlanStep): { campaign: string; kind: CampaignStep['kind']
 }
 
 /**
- * The plan for one campaign of the topic: every topic-level step, the
- * campaign's own, and the steps of other campaigns it leans on — a profile
- * or a headline another campaign's step makes first. Warnings and errors of
- * the other campaigns are left out, so a manifest half-written in one folder
- * does not stop the launch of another; what is resolved stays whole, being
- * facts about the platform rather than choices.
+ * The steps a plan for these campaigns keeps: every topic-level step, the
+ * campaigns' own, and the steps of other campaigns they lean on — a profile
+ * or a headline another campaign's step makes first. As indexes into the
+ * whole plan, so the tab can tick campaigns and show what each tick adds.
  */
-export function narrowPlan(planned: Plan, campaign: string): Plan {
-  const own = planned.steps.filter(s => campaignOf(s) === campaign);
+export function keptSteps(planned: Plan, campaigns: readonly string[]): number[] {
+  const own = planned.steps.filter(s => campaigns.includes(campaignOf(s) ?? ''));
   const kept = new Set<PlanStep>(planned.steps.filter(s => campaignOf(s) === null));
   const queue = [...own];
   while (queue.length > 0) {
@@ -658,12 +671,26 @@ export function narrowPlan(planned: Plan, campaign: string): Plan {
       }
     }
   }
+  return planned.steps.flatMap((s, i) => (kept.has(s) ? [i] : []));
+}
+
+/**
+ * The plan for one campaign of the topic, or a few: every topic-level step,
+ * the campaigns' own, and the steps of other campaigns they lean on — a
+ * profile or a headline another campaign's step makes first. Warnings and
+ * errors of the other campaigns are left out, so a manifest half-written in
+ * one folder does not stop the launch of another; what is resolved stays
+ * whole, being facts about the platform rather than choices.
+ */
+export function narrowPlan(planned: Plan, campaign: string | readonly string[]): Plan {
+  const campaigns = typeof campaign === 'string' ? [campaign] : campaign;
+  const kept = new Set(keptSteps(planned, campaigns));
   const mine = (line: string): boolean => {
     const about = campaignOfLine(line);
-    return about === null || about === campaign;
+    return about === null || campaigns.includes(about);
   };
   return {
-    steps: planned.steps.filter(s => kept.has(s)),
+    steps: planned.steps.filter((_, i) => kept.has(i)),
     warnings: planned.warnings.filter(mine),
     errors: planned.errors.filter(mine),
     resolved: planned.resolved,
@@ -701,6 +728,7 @@ export function adoptResolved(state: LaunchState, planned: Plan): LaunchState {
       tsp: found.tsp ?? own.tsp,
       builder: found.builder ?? own.builder,
       history: found.history,
+      live: own.live ?? found.live,
     };
   }
   return JSON.stringify(next) === JSON.stringify(state) ? state : next;
@@ -710,16 +738,19 @@ export interface CampaignOutline {
   name: string;
   /** Steps of the campaign's own in the plan. */
   steps: number;
+  /** Indexes into the whole plan's steps of everything a plan for this campaign alone would keep — its own, the topic's, and what it leans on. */
+  kept: number[];
   /** Whether the plan replaces a campaign already built — or is still pausing the one it replaced. */
   relaunch: boolean;
   errors: number;
 }
 
-/** One line per campaign folder, for a tree that offers «Залити» or «Перезалити» and knows which. */
+/** One line per campaign folder, for a table that offers «Що буде залито» or «Що буде перезалито» and knows which. */
 export function campaignOutline(planned: Plan, names: readonly string[]): CampaignOutline[] {
   return names.map(name => ({
     name,
     steps: planned.steps.filter(s => campaignOf(s) === name).length,
+    kept: keptSteps(planned, [name]),
     relaunch: planned.steps.some(s => (s.kind === 'builder.create' && s.campaign === name && s.retires !== null) || (s.kind === 'campaign.pause' && s.campaign === name)),
     errors: planned.errors.filter(line => campaignOfLine(line) === name).length,
   }));

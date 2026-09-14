@@ -66,9 +66,18 @@ export interface CampaignState {
   pending: PendingWrite | null;
   /** Every campaign the folder ran before the current one, oldest first. */
   history: RetiredCampaign[];
+  /** The budget and bid last set on the live campaign through `sa budget` / `sa bid`, and when — the manifest keeps what it was built with. */
+  live: LiveValues | null;
 }
 
-export const emptyCampaignState = (): CampaignState => ({ creatives: {}, headline: null, tsp: null, builder: null, pending: null, history: [] });
+export interface LiveValues {
+  budget: number | null;
+  bid: number | null;
+  /** ISO time of the last change. */
+  changed_at: string;
+}
+
+export const emptyCampaignState = (): CampaignState => ({ creatives: {}, headline: null, tsp: null, builder: null, pending: null, history: [], live: null });
 
 const FATES: readonly RetiredFate[] = ['unpublished', 'deleted', 'paused', 'live'];
 
@@ -120,6 +129,11 @@ export function parseCampaignState(text: string): ParseResult<CampaignState> {
   if (isBag(pending) && typeof pending['step'] === 'string' && typeof pending['key'] === 'string' && Array.isArray(pending['before'])) {
     state.pending = { step: pending['step'], key: pending['key'], before: pending['before'].map(asId).filter((v): v is number => v !== null) };
   }
+  const live = data['live'];
+  if (isBag(live) && typeof live['changed_at'] === 'string') {
+    const money = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+    state.live = { budget: money(live['budget']), bid: money(live['bid']), changed_at: live['changed_at'] };
+  }
   return { ok: true, value: state };
 }
 
@@ -160,16 +174,57 @@ export interface PlatformTsp {
   fields: TspFields;
 }
 
+/** The review bot's word on one creative of a builder: `compliant` or `non_compliant`, and why. */
+export interface ReviewVerdict {
+  creative_id: number;
+  verdict: string;
+  reasons: string[];
+}
+
+/** Why the platform turned a builder down: the reasons it ticked, and the reviewer's text. */
+export interface Rejection {
+  reasons: string[];
+  details: string;
+}
+
+/** The builder's `status` as the platform spells a rejection. */
+export const BUILDER_REJECTED = 'NOT_APPROVED';
+export const BUILDER_APPROVED = 'APPROVED';
+
 export interface PlatformBuilder {
   id: number;
   topic_id: number;
   post_id: number;
   pixel_id: number;
+  /** `APPROVED`, `NOT_APPROVED`, or whatever the review stage spells. */
   status: string;
+  /** `tiktok` or `facebook` — the source it was built for. */
+  traffic_source: string;
   /** Every creative repo entry it was built with, headline included. */
   creative_ids: number[];
-  /** The campaigns the platform made from it — empty until it has. */
-  campaigns: { id: number; name: string; term_group_id: number | null }[];
+  /** The campaigns the platform made from it — empty until it has. `ad_account` is the platform's id of the cabinet, when the list says. */
+  campaigns: { id: number; name: string; term_group_id: number | null; ad_account?: string | null }[];
+  /** Why it was turned down, when it was. */
+  rejection: Rejection | null;
+  /** The bot's verdict per creative, when the bot has run. */
+  review: ReviewVerdict[];
+}
+
+/** Whether the builder was turned down. */
+export const isRejected = (builder: Pick<PlatformBuilder, 'status'>): boolean => builder.status.toUpperCase() === BUILDER_REJECTED;
+
+/** The creative ids the bot marked `non_compliant` on a builder. */
+export const nonCompliantIds = (builder: Pick<PlatformBuilder, 'review'>): Set<number> =>
+  new Set(builder.review.filter(v => v.verdict === 'non_compliant').map(v => v.creative_id));
+
+/**
+ * A file the bot marked `non_compliant` on the campaign's rejected builder,
+ * still in the folder unchanged: the relaunch leaves it out and names it, so
+ * the buyer sees what to replace rather than rebuilding the same rejection.
+ */
+export interface CutFile {
+  file: string;
+  reasons: string[];
 }
 
 /**
@@ -187,6 +242,9 @@ export interface PlatformCampaign {
   published: boolean;
   revenue: number;
   spend: number | null;
+  /** The daily budget and the bid as the list shows them; null when it does not. */
+  budget: number | null;
+  bid: number | null;
 }
 
 /** `ad_account_id` is the TikTok account the pixel was made under — routinely not the cabinet it is launched from, so it is shown, not checked. */
@@ -296,6 +354,8 @@ export type CampaignStep =
     kind: 'builder.create'; label: string; campaign: string; from: { account: string; pixel: string; theme: string }; body: BuilderBody;
     /** The campaign this one replaces, for the state's history — null for a first build. */
     retires: RetiredCampaign | null;
+    /** Files of the folder left out because the bot marked them non_compliant on the builder being replaced. */
+    cut: CutFile[];
   }
   | { kind: 'campaign.pause'; label: string; campaign: string; body: PauseBody };
 
@@ -458,6 +518,12 @@ export function judgeRetired(builder: PlatformBuilder | undefined, campaigns: re
   };
 }
 
+/** A rejection in one line: the ticked reasons, then the first sentence of the reviewer's text. */
+export function describeRejection(rejection: Rejection): string {
+  const first = rejection.details.split(/\n/).map(l => l.trim()).find(l => l !== '') ?? '';
+  return [rejection.reasons.join(', '), first].filter(p => p !== '').join(' — ');
+}
+
 /** The history with one record put in — replacing the entry for the same builder, so a plan run twice does not list it twice. */
 export const withRetired = (history: readonly RetiredCampaign[], record: RetiredCampaign): RetiredCampaign[] =>
   history.some(h => h.builder.id === record.builder.id)
@@ -478,6 +544,14 @@ const pauseStep = (campaign: string, record: RetiredCampaign): CampaignStep => (
 });
 
 // --------------------------------------------------------------- plan --
+
+/**
+ * The chain was taken from TikTok dumps; the admin's Facebook forms for a
+ * profile and a builder were never in them, and may want fields TikTok's do
+ * not. Until they are, a Facebook campaign plans with TikTok's bodies and
+ * says so — the buyer reads the bodies and decides.
+ */
+export const FACEBOOK_UNVERIFIED = 'Facebook: форми TSP і builder не звірені з дампами адмінки — тіла нижче складені за TikTok; перевірте їх перед apply і профіль із кампанією на платформі після';
 
 export interface CampaignPlanInput {
   topic: TopicManifest;
@@ -607,8 +681,9 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
     }
     // The campaign's source is its cabinet's; past the gate above the cabinet is known.
     const source = account!.source;
+    if (source === 'facebook') warnings.push(`${at}: ${FACEBOOK_UNVERIFIED}`);
 
-    const result: ResolvedCampaign = { creatives: {}, headline: null, tsp: null, builder: null, history: state.history };
+    const result: ResolvedCampaign = { creatives: {}, headline: null, tsp: null, builder: null, history: state.history, live: state.live };
     resolved[c.name] = result;
     const built = state.builder !== null && snapshot.builders.some(b => b.id === state.builder!.id);
     const creativeRefs: CreativeRef[] = [];
@@ -616,10 +691,21 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
     let everyIdKnown = true;
 
     // -- creatives: adopt what the list already shows under the name, upload the rest.
+    // A rejected campaign's files the bot marked non_compliant are cut first:
+    // unchanged, they would only rebuild the same rejection.
+    const rejectedBuilder = state.builder === null ? undefined : snapshot.builders.find(b => b.id === state.builder!.id && isRejected(b));
+    const nonCompliant = rejectedBuilder === undefined ? new Set<number>() : nonCompliantIds(rejectedBuilder);
+    const cut: CutFile[] = [];
     const toUpload: string[] = [];
     for (const file of c.creatives) {
       const twins = videos.filter(v => v.original_filename === file.name);
       const known = state.creatives[file.name];
+      if (known !== undefined && known.hash === file.hash && nonCompliant.has(known.id)) {
+        const reasons = rejectedBuilder!.review.filter(v => v.creative_id === known.id && v.verdict === 'non_compliant').flatMap(v => v.reasons);
+        cut.push({ file: file.name, reasons });
+        warnings.push(`${at}: \`${file.name}\` вирізано — бот платформи позначив non_compliant${reasons.length > 0 ? ': ' + reasons.join(' ') : ''} — замініть файл`);
+        continue;
+      }
       const made = madeBy(state, 'creatives.upload', c.name, twins);
       let id: number | null = null;
       if (made !== undefined) {
@@ -658,6 +744,14 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
         creativeRefs.push({ campaign: c.name, file: file.name });
         everyIdKnown = false;
       }
+    }
+    if (cut.length === c.creatives.length) {
+      errors.push(`${at}: усі креативи вирізані ботом платформи (${cut.map(f => f.file).join(', ')}) — замініть їх у creatives/`);
+      continue;
+    }
+    if (rejectedBuilder !== undefined && cut.length === 0) {
+      const why = rejectedBuilder.rejection === null ? '' : `: ${describeRejection(rejectedBuilder.rejection)}`;
+      warnings.push(`${at}: кампанію ${rejectedBuilder.id} відхилено${why} — бот не назвав файлів, змініть креативи або скрипт, щоб перезалити`);
     }
     if (toUpload.length > 0) {
       steps.push({
@@ -808,8 +902,8 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
     steps.push({
       kind: 'builder.create',
       label: retires === null
-        ? `${c.name}: зібрати кампанію (${countryName}, ${m.termgroup} + ${m.article}, ${c.creatives.length} креативів)`
-        : `${c.name}: перезалив — зібрати нову кампанію замість ${retires.builder.id} (${countryName}, ${m.termgroup} + ${m.article}, ${c.creatives.length} креативів)`,
+        ? `${c.name}: зібрати кампанію (${countryName}, ${m.termgroup} + ${m.article}, ${c.creatives.length - cut.length} креативів)`
+        : `${c.name}: перезалив — зібрати нову кампанію замість ${retires.builder.id} (${countryName}, ${m.termgroup} + ${m.article}, ${c.creatives.length - cut.length} креативів${cut.length > 0 ? `, ${cut.length} вирізано` : ''})`,
       campaign: c.name,
       from: { account: `${adAccount!.name} (${adAccount!.id})`, pixel: `${pixel!.name} (${pixel!.id})`, theme: `${theme!.title} (${theme!.id})` },
       body: {
@@ -832,6 +926,7 @@ export function planCampaigns(input: CampaignPlanInput, snapshot: CampaignSnapsh
         themes: [String(theme!.id)],
       },
       retires,
+      cut,
     });
     // The old campaign is paused after the new one is up, not before.
     steps.push(...pauses);

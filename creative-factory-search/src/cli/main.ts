@@ -26,6 +26,10 @@ const USAGE = `sa — робоче місце байера
 
   sa new <launch-key> [--name "AI Vadim Sperm IT"] [--source tiktok|facebook]
                       [--vertical jobs] [--geo DE,IT]
+  sa adopt <topic-id> --key <launch-key> [--vertical jobs]
+                      тека заливу з топіка, що вже є на платформі: topic.yaml,
+                      ключі термгруп, статті з картинками, state.json з id;
+                      кампанії не підхоплюються — далі sa expand
   sa expand <launch-key> [--file matrix.json]
                       матриця заливу → теки: термгрупи, статті й кампанії, яких ще
                       немає; JSON зі stdin або з --file; наявні теки не чіпає
@@ -42,6 +46,11 @@ const USAGE = `sa — робоче місце байера
                       з --campaign — лише те, що потрібно одній кампанії
   sa apply <launch-key> --confirm [--campaign <name>]
                       виконати план; без --confirm відмовляється
+  sa budget <launch-key>/<campaign> <value> [--confirm]
+  sa bid <launch-key>/<campaign> <value> [--confirm]
+  sa budget <launch-key> --all [--country DE] [--status active] <value> [--confirm]
+                      змінити бюджет чи бід живої кампанії: без --confirm — план
+                      «було → стане» і нічого не міняє; --confirm дає людина
   sa --version         версія sa; не потребує сервера
 
 Launch key: малі літери, цифри й дефіси, щонайменше два сегменти — перший це
@@ -174,6 +183,22 @@ async function commandNewCampaign(args: string[]): Promise<number> {
   return status === 200 ? 0 : 5;
 }
 
+/** A folder from a topic already on the platform. The key is the buyer's: it cannot be read off `AImobNLtrap`. */
+async function commandAdopt(args: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { key: { type: 'string' }, vertical: { type: 'string' } } });
+  const topicId = Number(positionals[0]);
+  if (positionals[0] === undefined || !Number.isInteger(topicId) || topicId <= 0) fail(1, 'sa adopt потребує id топіка з платформи: sa adopt 107567 --key ai-jobs-de-wh');
+  if (values.key === undefined) fail(1, 'sa adopt потребує --key <launch-key>: ім\'я теки заливу задає байер');
+  await ensureServer();
+  const { status, body } = await ask<LaunchCreated | { error: string }>('/api/launches/adopt', asJson({
+    topicId, launchKey: values.key, ...(values.vertical !== undefined ? { vertical: values.vertical } : {}),
+  }));
+  out(body);
+  if (status === 400) return 2;
+  if (status !== 200) return 5;
+  return 'ticket' in body && body.ticket.ok ? 0 : 3;
+}
+
 /** The matrix: a JSON object from `--file` or stdin, handed to the server as is. */
 async function commandExpand(args: string[]): Promise<number> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { file: { type: 'string' } } });
@@ -302,16 +327,60 @@ async function commandApply(args: string[]): Promise<number> {
   }
 }
 
+interface AdjustShown {
+  changes: { label: string }[];
+  skipped: string[];
+  warnings: string[];
+  errors: string[];
+  note: string;
+}
+
+/**
+ * `sa budget` and `sa bid`: `<key>/<campaign>` or `<key> --all` with filters,
+ * the value, and `--confirm` for the change itself. The plan half answers
+ * without the flag; the flag is a person's.
+ */
+async function commandAdjust(field: 'budget' | 'bid', args: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args, allowPositionals: true,
+    options: { all: { type: 'boolean' }, country: { type: 'string' }, status: { type: 'string' }, confirm: { type: 'boolean' } },
+  });
+  const [target, raw] = positionals;
+  if (target === undefined || raw === undefined) {
+    fail(1, `sa ${field} потребує кампанію й значення: sa ${field} ai-jobs-de-wh/de-a 40, або sa ${field} ai-jobs-de-wh --all --country DE 40`);
+  }
+  const [launchKey, campaign] = target.split('/', 2);
+  if (campaign === undefined && values.all !== true) fail(1, `назвіть кампанію як <key>/<campaign> або дайте --all`);
+  if (campaign !== undefined && values.all === true) fail(1, `або <key>/<campaign>, або --all — не обоє`);
+  const value = Number(raw.replace(',', '.'));
+  if (!Number.isFinite(value) || value <= 0) fail(1, `значення має бути додатним числом, отримано \`${raw}\``);
+  await ensureServer();
+  const { status, body } = await ask<AdjustShown | { error: string }>(`/api/launches/${launchKey}/adjust`, asJson({
+    field, value,
+    ...(campaign !== undefined ? { campaign } : { all: true }),
+    ...(values.country !== undefined ? { country: values.country } : {}),
+    ...(values.status !== undefined ? { status: values.status } : {}),
+    ...(values.confirm === true ? { confirm: true } : {}),
+  }));
+  out(body);
+  if (status === 400) return 2;
+  if (status !== 200) return 5;
+  return 'errors' in body && body.errors.length > 0 ? 2 : 0;
+}
+
 async function main(): Promise<number> {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
     case 'new': return commandNew(rest);
+    case 'adopt': return commandAdopt(rest);
     case 'expand': return commandExpand(rest);
     case 'launches': return commandLaunches();
     case 'tickets': return commandTickets();
     case 'config': return commandConfig();
     case 'plan': return commandPlan(rest);
     case 'apply': return commandApply(rest);
+    case 'budget': return commandAdjust('budget', rest);
+    case 'bid': return commandAdjust('bid', rest);
     case '--version':
       return commandVersion();
     case undefined:

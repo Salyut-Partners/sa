@@ -81,25 +81,68 @@ still opens in an editor from before it existed.
 
 ### The launches tab
 
-The header's third tab is the buyer's launches as a tree: niche → topic →
-campaigns, with the count of mp4 files in each campaign's folder before
-anything goes up, and the rejected ones counted beside. The niche is the
-`vertical` in `topic.yaml`, which `sa new --vertical` writes; a topic without
-one sits under «без ніші». The tree is the disk and nothing else — it is
-read again every few seconds while the tab is open, so a folder `sa new`
-just made appears on its own, and the state of a campaign on the platform is
-deliberately not drawn on it. Opening a topic asks the server for its plan,
-which is what decides the button on each campaign: «Залити» where there is
-something to create, «Перезалити» where the plan sees a relaunch, and a
-disabled button with the reason where there is nothing to do or the folder
-has errors. Pressing it shows that campaign's plan in the panel — the same
-steps `sa plan <key> --campaign <name>` prints — and only a second press,
-under the words «за живі гроші», starts the apply, which is then a bar, the
-step in flight and a cancel, watched from any tab. The rule for the tree
-is `core/launches-tree.ts`; the plan for one campaign — the topic's steps,
-the campaign's own, and the steps of another campaign it leans on for a
-shared profile or headline, with the other campaigns' errors left out — is
-`narrowPlan` in `core/plan.ts`; both are tested there.
+The header's third tab is the buyer's launches as a table. On the left the
+topics, grouped by niche — the `vertical` in `topic.yaml`, which `sa new
+--vertical` writes; a topic without one sits under «без ніші» — and for the
+chosen topic, source → cabinet → campaigns, grouped from the same
+`topic.yaml` and `campaign.yaml` files the plan reads, with a totals line per
+cabinet, per source and for the topic: campaigns, built, active, rejected,
+without creatives. Every campaign is in exactly three states and nothing
+more. **The disk:** how many mp4 files at the top of `creatives/`, the
+rejected ones beside, whether `script.md` has words, whether the manifest
+reads. **The launch:** not built, built, or «є різниця — треба перезалив»,
+from `state.json` and the plan. **The platform:** the builder's status and
+the campaign's — on review, rejected with the reason in a line, approved,
+active, paused, taken down — with the builder and campaign ids and a link
+into the admin. Spend, ROI and clicks are deliberately not there: the
+platform has them, and two versions of that truth would be one too many.
+
+The platform's side is read once per buyer, never per topic:
+`GET /campaign-builder?user_id=` gives every builder of the buyer across all
+their topics with `status`, `rejection_reasons`, the review bot's verdict per
+creative and the campaigns made, and `GET /v2/campaigns?user_id=` the
+campaigns' statuses (the list honours `user_id`, verified 2026-09-11). The
+server reads both when it starts, every five minutes, after every apply, and
+when a topic is opened — waiting a few seconds for that read and no longer,
+since a slow platform must not hold the table. What is read is matched to
+the folders by the builder id in each campaign's `state.json`, never by
+name; the rule is `platformColumn` in `core/topic-table.ts`. Whose builders
+to read is `platform.user_id` in the config, or, when that is not set, the
+buyer the first topic on the platform belongs to. Below the table are the
+topic's sources, each with «відкрити в редакторі».
+
+The table is read again by itself: the tab polls the disk every few seconds
+and the tree's answer carries the platform status's version, so a folder
+`sa new` made, an export's files, or a rejection that just landed each make
+the table read again, plan and all. There is no «оновити план» button.
+
+Two steps, two words. «**Що буде залито**» — on the topic, for every unbuilt
+campaign the plan has steps for, and on a campaign — opens the plan in the
+panel under «Нічого ще не зроблено. Ось що станеться:» with a box per
+campaign; ticking and unticking changes the steps shown, and the number on
+the one button at the bottom, «**Залити N кампаній — за живі гроші**», which
+is the only thing that sends anything. Where the plan sees a relaunch the
+words are «Що буде перезалито» and «Перезалити N». The apply is then a bar,
+the step in flight and a cancel, watched from any tab, and narrowed on the
+server to the ticked campaigns: `narrowPlan` in `core/plan.ts` takes a list
+and keeps the topic's steps, the campaigns' own, and the steps of other
+campaigns they lean on for a shared profile or headline, and
+`campaignOutline` says per campaign which indexes of the whole plan that is,
+so the panel shows exactly what a tick adds.
+
+Rejects, the minimum. A rejected builder shows «реджект» and the reason in
+its row. The review bot names the creatives it turned down, and the plan
+reads that off the builder (`review_bot_result`, one verdict per creative,
+its id being `<builder>-<creative>-<headline>`): on a relaunch of a rejected
+campaign, a file the bot marked `non_compliant` that is still in the folder
+unchanged is cut — left out of the new builder and named in the plan with
+the bot's reason, so the buyer sees which file to replace rather than
+rebuilding the same rejection; a replaced file is a new upload and is not
+cut; a folder whose every file is cut is refused until something is
+replaced; a rejection the bot put on no file plans nothing and says so.
+Files on disk are not moved and the ticket is not commented — the full
+reject flow is a later ticket. The rule is in `core/campaign-plan.ts`, tested
+there; the table in `core/topic-table.ts`, tested there.
 
 ### Subtitles for a video from elsewhere
 
@@ -143,6 +186,7 @@ silent creatives, and the panel says which key is missing rather than failing.
 
 ```sh
 bin/sa new ai-vadim-sperm-it --name "AI Vadim Sperm IT" --vertical jobs --geo DE,IT
+bin/sa adopt 107567 --key ai-jobs-de-wh --vertical jobs
 echo '{"termgroups": {...}, "articles": {...}, "geos": [...], "defaults": {...}}' | bin/sa expand ai-vadim-sperm-it
 bin/sa expand ai-vadim-sperm-it --file matrix.json
 bin/sa new campaign ai-vadim-sperm-it --termgroup tg-wh --article a-wh --language de --country DE --account main
@@ -153,6 +197,8 @@ bin/sa plan ai-vadim-sperm-it
 bin/sa plan ai-vadim-sperm-it --campaign de-a
 bin/sa apply ai-vadim-sperm-it --confirm
 bin/sa apply ai-vadim-sperm-it --confirm --campaign de-a
+bin/sa budget ai-vadim-sperm-it/de-a 40
+bin/sa bid ai-vadim-sperm-it --all --country DE --status active 0.55 --confirm
 bin/sa --version
 ```
 
@@ -183,10 +229,46 @@ same JSON makes nothing. `sa new campaign` is the one-cell version over folders
 that already exist, and refuses a name that is taken. The rule for all of it
 is `core/matrix.ts`.
 
+`sa adopt <topic-id> --key <launch-key>` is the folder for a topic that was
+made by hand in the admin: the site, topic, keys and articles are there, and
+the campaigns are to start from a matrix. It reads the topic, its
+configurations, term groups, posts and builders — nothing is written to the
+platform — and lays out `topic.yaml` with the name, the internal name, the
+site off the posts, and one cabinet per distinct source, ad account and
+pixel the topic's builders were launched from (`tk-1`, `fb-1`…, the pixel's
+name in a comment; placeholders and a note when the topic has no builders
+yet); `termgroups/<name>/keywords.txt` with the live keys, and a
+`termgroup.yaml` beside it where the platform's name is not a folder name
+(`name: tgHR` in a folder `tghr`), or the weights are not equal shares, or a
+country or language is set; `articles/<slug>/article.md` from each post's
+HTML — the converter in `core/html-markdown.ts` is the inverse of the one in
+`core/article.ts`, small for the same reason — with the pictures fetched into
+`images/`; and `state.json` with the topic, configuration, term group and
+post ids. The launch key is the buyer's to name: it cannot be read off
+`AImobNLtrap`. Existing campaigns of the topic are not taken. The state
+carries a **fingerprint** of each adopted article — the hash the plan
+computes from the converted file with the pictures as they lie on disk — so
+the plan compares the file with that rather than with the platform, and the
+first plan after an adopt is empty; a key edited afterwards is an update of
+the term group, not a twin. A key that is taken, a folder that exists, or a
+topic another folder already names is a refusal in words; what still needs a
+hand — a site the topic's posts disagree on, a group without keys — comes
+back as notes. The ticket is filed by the usual sync. The rule is
+`core/adopt.ts`, tested there.
+
 A topic has no traffic source of its own — the platform's does not either.
 Each cabinet in `topic.yaml` carries `source: tiktok|facebook` beside its
 `ad_account` and `pixel`, a campaign's source is its cabinet's, and the plan
-makes one topic configuration per source the cabinets span.
+makes one topic configuration per source the cabinets span. The directories
+are read per source — `/pixels?traffic_source=`,
+`/facebook/ad-accounts?site_id=&traffic_source=` — and a Facebook campaign's
+creatives, headline, profile and builder all carry `facebook`. What the chain
+does not have yet is the admin's own Facebook forms: every request body was
+taken from TikTok dumps, and a Facebook profile or builder may want fields
+TikTok's do not, so the plan for a campaign on a Facebook cabinet says so in
+a warning and shows the TikTok-shaped bodies for the buyer to read before an
+apply. The forms go in once the dumps of a Facebook profile and builder made
+in the admin are taken (`core/campaign-plan.ts`, where the bodies are built).
 
 The buyer's own settings — `launches_root`, the ClickUp token and list, and
 the platform's Bearer with the organisation id — live in
@@ -247,6 +329,31 @@ Claude outright: the gate is the flag and the deny, not a permission prompt.
 The rule of the queue — timeouts, retries, pauses — is `core/queue.ts`; the
 create-or-update decisions are `core/plan.ts`; both are tested there and only
 obeyed in `server/apply.ts`.
+
+### A budget or a bid on a live campaign
+
+`sa budget <key>/<campaign> 40` and `sa bid <key>/<campaign> 0.55` are the
+one pointed change a launched campaign gets, and only when the buyer asks
+for it — «підніми DE до 40». They go through the same gate as a launch:
+without `--confirm` the answer is the plan, a line per campaign saying what
+it stands at now — off the platform's own campaign list, which carries the
+budget and the bid — and what it would stand at, by campaign id and never
+builder id; with `--confirm` the change goes out, and the campaign's
+`state.json` keeps the new value and the time under `live`, the manifest
+keeping what it was built with. `<key> --all` takes every campaign of the
+topic the platform has made and not taken down, narrowed by `--country DE`
+(the manifest's country) and `--status active` (the platform's), and says
+why each other one was left. A campaign that is not launched, has no
+campaign on the platform yet, or was taken down by the provider is a
+refusal in words; one already at the value is skipped. Nothing of this is
+on the table: changing a live campaign from a table would be the admin
+twice. The rule is `core/adjust.ts`, tested there; `~/sa/.claude/settings.json`
+denies the `--confirm` form to Claude, the flag-less plan is Claude's to run.
+
+The write itself is not wired yet: the admin's campaign-management request
+for a budget change was never in the dumps, so `--confirm` is refused with
+a sentence saying the live call waits for that request — the plan half
+stands on its own until it arrives.
 
 ### Creatives, headline, TSP and the campaign
 
@@ -392,9 +499,16 @@ Three build units and one rule.
   `core/launch.ts` decides what a launch is: the manifests, the key, the tree.
   `core/plan.ts` decides what the platform is asked for — the steps, their
   bodies, create against update — from the folder, a snapshot and the state,
-  and narrows that to one campaign for the tab and `--campaign`;
-  `core/launches-tree.ts` turns the folder structure into the tree the tab
-  draws; `core/matrix.ts` turns a launch matrix into the folders `sa expand`
+  and narrows that to some campaigns for the tab's ticks and `--campaign`;
+  `core/adjust.ts` decides what `sa budget` and `sa bid` would change —
+  which campaigns, from what, to what — and what refuses;
+  `core/adopt.ts` turns a topic read off the platform into the folder
+  `sa adopt` writes and the state it starts from, and `core/html-markdown.ts`
+  the platform's article HTML back into `article.md`;
+  `core/launches-tree.ts` turns the folder structure into the topic list the
+  tab draws, and `core/topic-table.ts` one topic's folders, state files and
+  the buyer's platform status into the table's three states per campaign;
+  `core/matrix.ts` turns a launch matrix into the folders `sa expand`
   and `sa new campaign` write, and decides their names;
   `core/campaign-plan.ts` does the same for a campaign — creatives,
   headline, profile, builder — and pairs uploads with read-backs;
@@ -402,7 +516,9 @@ Three build units and one rule.
   `core/queue.ts` decides what happens to a call that went wrong.
   `server/platform.ts` is the digifor client, thin, answering outcomes rather
   than throwing; `server/apply.ts` runs a plan as a job and is the one writer
-  of `state.json`.
+  of `state.json`; `server/platform-status.ts` keeps the buyer's builders and
+  campaigns as the platform last showed them, on a timer, and hands the
+  table a version number.
 - **`src/server`** — Express, Puppeteer, ffmpeg. Bundles the render target from
   source at startup, so the headless page can never drift from the editor. An
   export is a job in memory: the editor posts a plan, gets an id, and watches it.

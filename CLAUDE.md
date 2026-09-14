@@ -23,6 +23,9 @@ launches/                  заливи байера (поза git; шлях —
 - **Субтитри** — `subs/README.md`; технічні граблі — `subs/technical/README.md`.
 - **Що будуємо і чому** — `creative-factory-search/.scratch/prd-autolaunch.md`,
   тікети поруч у `.scratch/autolaunch/issues/`.
+- **Скіли** — `.claude/skills/`: `matrix` (обговорити матрицю → `sa expand`),
+  `compliance` (вердикт з id `CMP-*` по плейбуку), `launch` (від теки до
+  `sa plan`; `--confirm` лишається байеру). Написані під плейбук, у волт не ходять.
 
 ## Як іде залив
 

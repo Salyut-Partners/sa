@@ -266,14 +266,33 @@ describe('parseKeywords', () => {
 });
 
 describe('parseTermGroupOptions', () => {
-  it('defaults to no weight and All when there is no file', () => {
-    expect(parseTermGroupOptions(null)).toEqual({ ok: true, value: { weight: null, country: 'All', language: 'All' } });
+  it('defaults to no weight, All, and the folder\'s own name when there is no file', () => {
+    expect(parseTermGroupOptions(null)).toEqual({ ok: true, value: { weight: null, country: 'All', language: 'All', name: null } });
   });
 
-  it('reads weight, country and language', () => {
+  it('reads weight, country, language and the platform name', () => {
     expect(parseTermGroupOptions('weight: 60\ncountry: DE\nlanguage: de\n'))
-      .toEqual({ ok: true, value: { weight: 60, country: 'DE', language: 'de' } });
+      .toEqual({ ok: true, value: { weight: 60, country: 'DE', language: 'de', name: null } });
+    expect(parseTermGroupOptions('name: tgHR\n')).toMatchObject({ ok: true, value: { name: 'tgHR' } });
     expect(parseTermGroupOptions('weight: -3').ok).toBe(false);
+    expect(parseTermGroupOptions('name: 3').ok).toBe(false);
+  });
+
+  it('a group with a platform name is found and sent under it, and kept in the state under its folder', () => {
+    const contents = bare();
+    contents.termgroups = [tg('tghr', ['avia sales'], { platformName: 'tgHR' })];
+    const onPlatform = snapshot({
+      topics: [{ id: 106752, name: 'AI Vadim Sperm IT', internal_name: 'AIVadimSpermIT', user_id: 1099 }],
+      configurations: [{ id: 108397, name: 'x', topic_id: 106752, country: 'All', traffic_source: 'tiktok' }],
+      termGroups: [{ id: 200846, name: 'tgHR', terms: ['avia sales'], weight: 100, country: 'All', language: 'All' }],
+    });
+    const state: LaunchState = { ...emptyState(), topic_id: 106752, configurations: { tiktok: 108397 } };
+    const result = plan(contents, onPlatform, state);
+    expect(result.steps.map(s => s.kind)).toEqual([]);
+    expect(result.resolved.termgroups).toEqual({ tghr: 200846 });
+    contents.termgroups = [tg('tghr', ['avia sales', 'new key'], { platformName: 'tgHR' })];
+    const changed = plan(contents, onPlatform, { ...state, termgroups: { tghr: 200846 } });
+    expect(changed.steps[0]).toMatchObject({ kind: 'termgroup.update', name: 'tghr', id: 200846, body: { name: 'tgHR' } });
   });
 });
 
@@ -382,7 +401,7 @@ describe('adoptResolved', () => {
     planned.resolved.campaigns['de-a'] = {
       creatives: {}, headline: null, tsp: null,
       builder: { id: 707000, campaign_id: 1267704, campaign_name: '34-AIVadimSpermIT-tgmain-tk-de-ia-0908-GE01' },
-      history: [],
+      history: [], live: null,
     };
     const adopted = adoptResolved(before, planned);
     expect(adopted.campaigns['de-a']).toMatchObject({

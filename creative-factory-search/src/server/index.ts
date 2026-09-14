@@ -7,13 +7,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isLocaleId } from '../core/locales.ts';
 import { VOICE_MODELS } from '../core/voice.ts';
-import { describePlan, onApplySettled, planLaunch, startApply } from './apply.ts';
+import { describePlan, onApplySettled, planLaunch, readState, startApply, type PlanDescription } from './apply.ts';
+import { parseAdjustValue } from '../core/adjust.ts';
+import { emptyState } from '../core/plan.ts';
+import { startAdjust } from './adjust.ts';
+import { buildTopicTable } from '../core/topic-table.ts';
+import { freshPlatform, platformStatus, platformVersion, refreshPlatform, startPlatformPoll } from './platform-status.ts';
 import { startBatch } from './batch.ts';
 import { campaignCreativesDir, createBatch, listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
 import { clickupState } from './clickup.ts';
 import { configPath, ensureLaunchesRoot, loadConfig } from './config.ts';
-import { createCampaign, createLaunch, existingLaunchKeys, expandLaunch, launchesTree, RefusedError } from './launches.ts';
+import { adoptLaunch, createCampaign, createLaunch, existingLaunchKeys, expandLaunch, launchesTree, readTopicFolder, RefusedError } from './launches.ts';
 import { isTrafficSource } from '../core/launch.ts';
 import { BadRequestError, cancelJob, jobById, outputsOf, statusOf } from './jobs.ts';
 import { PlatformReadError, platformState } from './platform.ts';
@@ -97,7 +102,12 @@ app.get('/api/launches', (_req, res) => {
   res.json({ launches_root: config.launches_root, launches: existingLaunchKeys(config.launches_root) });
 });
 
-/** The launches as a tree — niche, topic, campaigns with their file counts — read off the disk, with what the last ticket sync said of each topic. */
+/**
+ * The launches as a tree — niche, topic, campaigns with their file counts —
+ * read off the disk, with what the last ticket sync said of each topic, and
+ * the platform status's version so the tab knows when a topic's table is
+ * worth reading again.
+ */
 app.get('/api/launches/tree', (_req, res) => {
   try {
     const tree = launchesTree(loadConfig().launches_root);
@@ -107,9 +117,45 @@ app.get('/api/launches/tree', (_req, res) => {
         if (report !== null) topic.ticket = report.ok ? { url: report.url, note: null } : { url: null, note: report.note };
       }
     }
-    res.json(tree);
+    const status = platformStatus();
+    res.json({ ...tree, platform: { version: platformVersion(), at: status.at, note: status.note } });
   } catch (e) {
     answerFailure(res, e, 'tree');
+  }
+});
+
+/**
+ * The topic table: the folder in three states per campaign, with the topic's
+ * plan beside it. The plan is read first — it is what says «не зібрана» from
+ * «є різниця» — and a plan that cannot be read leaves the table standing on
+ * the state files, with the sentence why. The platform status is refreshed
+ * for a topic being opened when the last read is not fresh.
+ */
+app.post('/api/launches/:key/table', async (req, res) => {
+  try {
+    const config = loadConfig();
+    const key = req.params.key;
+    if (!existingLaunchKeys(config.launches_root).includes(key)) throw new RefusedError(`заливу \`${key}\` немає`);
+    const platform = await freshPlatform(config);
+    let plan: PlanDescription | null = null;
+    let planNote = '';
+    try {
+      plan = describePlan(await planLaunch(config, key, null));
+    } catch (e) {
+      if (e instanceof RefusedError || e instanceof PlatformReadError) planNote = e.message;
+      else throw e;
+    }
+    let state = emptyState();
+    let stateNote = '';
+    try {
+      state = readState(path.join(config.launches_root, key));
+    } catch (e) {
+      stateNote = e instanceof RefusedError ? e.message : (e as Error).message;
+    }
+    const table = buildTopicTable(readTopicFolder(config.launches_root, key), state, plan?.outline ?? null, platform);
+    res.json({ table, plan, planNote, stateNote });
+  } catch (e) {
+    answerFailure(res, e, 'table');
   }
 });
 
@@ -155,6 +201,31 @@ app.post('/api/launches', async (req, res) => {
       console.error('launch failed:', (e as Error).message);
       res.status(500).json({ error: (e as Error).message });
     }
+  }
+});
+
+/**
+ * A launch folder from a topic already on the platform: `sa adopt`. Reads
+ * the platform, writes the folder and its state, files the ticket by the
+ * usual sync. Nothing on the platform is written.
+ */
+app.post('/api/launches/adopt', async (req, res) => {
+  const body = (typeof req.body === 'object' && req.body !== null ? req.body : {}) as Record<string, unknown>;
+  const topicId = Number(body['topicId']);
+  if (typeof body['launchKey'] !== 'string') {
+    res.status(400).json({ error: 'у запиті немає launchKey' });
+    return;
+  }
+  try {
+    const config = loadConfig();
+    const made = await adoptLaunch(config, {
+      topicId, launchKey: body['launchKey'],
+      ...(typeof body['vertical'] === 'string' ? { vertical: body['vertical'] } : {}),
+    });
+    const ticket = (await syncTickets(config, made.launchKey))[made.launchKey] ?? { ok: false as const, note: 'звірка тікетів нічого не сказала про цю теку' };
+    res.json({ ...made, ticket });
+  } catch (e) {
+    answerFailure(res, e, 'adopt');
   }
 });
 
@@ -205,20 +276,31 @@ function answerFailure(res: express.Response, e: unknown, what: string): void {
 
 /**
  * A `campaign` in the body narrows the plan or the apply to one campaign of
- * the topic. Anything else under that name is refused rather than widened to
- * the whole topic — an apply that meant one campaign must not do them all.
+ * the topic, `campaigns` to a few. Anything else under those names is refused
+ * rather than widened to the whole topic — an apply that meant one campaign
+ * must not do them all.
  */
-function campaignIn(body: unknown): string | null {
-  const campaign = typeof body === 'object' && body !== null ? (body as { campaign?: unknown }).campaign : undefined;
-  if (campaign === undefined || campaign === null) return null;
-  if (typeof campaign !== 'string' || campaign === '') throw new RefusedError('campaign має бути назвою теки кампанії');
-  return campaign;
+function campaignsIn(body: unknown): string[] | null {
+  const bag = (typeof body === 'object' && body !== null ? body : {}) as { campaign?: unknown; campaigns?: unknown };
+  const list: string[] = [];
+  if (bag.campaign !== undefined && bag.campaign !== null) {
+    if (typeof bag.campaign !== 'string' || bag.campaign === '') throw new RefusedError('campaign має бути назвою теки кампанії');
+    list.push(bag.campaign);
+  }
+  if (bag.campaigns !== undefined && bag.campaigns !== null) {
+    if (!Array.isArray(bag.campaigns) || !bag.campaigns.every(c => typeof c === 'string' && c !== '')) {
+      throw new RefusedError('campaigns має бути списком назв тек кампаній');
+    }
+    for (const c of bag.campaigns) if (!list.includes(c)) list.push(c);
+    if (list.length === 0) throw new RefusedError('campaigns порожній — нема що робити');
+  }
+  return list.length === 0 ? null : list;
 }
 
 /** The plan: reads the folder and the platform, creates nothing, however often it is asked; ids it found by read-back are written to state.json. */
 app.post('/api/launches/:key/plan', async (req, res) => {
   try {
-    res.json(describePlan(await planLaunch(loadConfig(), req.params.key, campaignIn(req.body))));
+    res.json(describePlan(await planLaunch(loadConfig(), req.params.key, campaignsIn(req.body))));
   } catch (e) {
     answerFailure(res, e, 'plan');
   }
@@ -232,9 +314,32 @@ app.post('/api/launches/:key/plan', async (req, res) => {
 app.post('/api/launches/:key/apply', async (req, res) => {
   const body = req.body as { confirm?: unknown } | undefined;
   try {
-    res.json(await startApply(loadConfig(), req.params.key, body?.confirm === true, campaignIn(body)));
+    res.json(await startApply(loadConfig(), req.params.key, body?.confirm === true, campaignsIn(body)));
   } catch (e) {
     answerFailure(res, e, 'apply');
+  }
+});
+
+// ------------------------------------------------------------ bid / budget --
+
+/**
+ * `sa budget` / `sa bid`: the plan of a change to live campaigns, and — under
+ * `confirm` — the change itself, once its request form is known. A field
+ * other than budget or bid, or a value that is not a positive number, is a 400.
+ */
+app.post('/api/launches/:key/adjust', async (req, res) => {
+  const body = (typeof req.body === 'object' && req.body !== null ? req.body : {}) as Record<string, unknown>;
+  try {
+    const field = body['field'];
+    if (field !== 'budget' && field !== 'bid') throw new RefusedError('field має бути budget або bid');
+    const value = parseAdjustValue(field, body['value']);
+    if (!value.ok) throw new RefusedError(value.errors.join('; '));
+    const text = (key: string): string | null => (typeof body[key] === 'string' && body[key] !== '' ? (body[key] as string) : null);
+    const filter = { campaign: text('campaign'), country: text('country'), status: text('status') };
+    if (filter.campaign === null && body['all'] !== true) throw new RefusedError('назвіть кампанію (<key>/<campaign>) або дайте --all');
+    res.json(await startAdjust(loadConfig(), req.params.key, { field, value: value.value, filter }, body['confirm'] === true));
+  } catch (e) {
+    answerFailure(res, e, 'adjust');
   }
 });
 
@@ -390,9 +495,14 @@ const server = app.listen(PORT, () => {
   } catch (e) {
     console.error((e as Error).message);
   }
-  // The tickets: a pass now, every ten minutes, and after every apply.
-  onApplySettled(launchKey => { syncTickets(loadConfig(), launchKey).catch(e => console.error('тікети:', (e as Error).message)); });
+  // The tickets: a pass now, every ten minutes, and after every apply. The
+  // platform status likewise: the builders just made have a status to show.
+  onApplySettled(launchKey => {
+    syncTickets(loadConfig(), launchKey).catch(e => console.error('тікети:', (e as Error).message));
+    void refreshPlatform(loadConfig());
+  });
   startTicketSync(loadConfig);
+  startPlatformPoll(loadConfig);
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

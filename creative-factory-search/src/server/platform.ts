@@ -7,11 +7,11 @@
 // `core/queue.ts` reads outcomes: a timeout is a fact to reason about, not an
 // exception to unwind.
 import type {
-  AdAccount, HeadlineBody, PauseBody, Pixel, PlatformBuilder, PlatformCampaign, PlatformCreative, PlatformTsp, Theme, TspBody,
-  TspFields,
+  AdAccount, HeadlineBody, PauseBody, Pixel, PlatformBuilder, PlatformCampaign, PlatformCreative, PlatformTsp, Rejection, ReviewVerdict,
+  Theme, TspBody, TspFields,
 } from '../core/campaign-plan.ts';
 import type {
-  Country, PlatformConfiguration, PlatformPost, PlatformTermGroup, PlatformTopic, Site, TermGroupBody,
+  Country, PlatformConfiguration, PlatformPost, PlatformPostDetail, PlatformTermGroup, PlatformTopic, Site, TermGroupBody,
 } from '../core/plan.ts';
 import type { PlatformRule, RuleAction, RuleCondition, RuleCreateBody, RuleLimitsBody } from '../core/rules.ts';
 import type { SaConfig } from './config.ts';
@@ -179,6 +179,23 @@ export async function readPosts(client: PlatformClient, topicId: number): Promis
       topic_ids: (Array.isArray(p['topics']) ? p['topics'] : []).map(t => num(bag(t)['id'])),
     };
   }).filter(p => p.topic_ids.includes(topicId));
+}
+
+/** One post whole: the list may carry the description too, but the detail is what the admin's editor opens, and it always does. */
+export async function readPost(client: PlatformClient, id: number): Promise<PlatformPostDetail | null> {
+  const answer = await client.get(`/posts/${id}`);
+  if (answer.status === 'error' && answer.code === 404) return null;
+  const body = bag(need(answer, `GET /posts/${id}`));
+  if (body['post'] === undefined) return null;
+  const p = bag(body['post']);
+  return {
+    id: num(p['id']), title: str(p['title']), status: str(p['status']), site_id: num(p['site_id']),
+    country: Array.isArray(p['country']) ? p['country'].map(str) : [str(p['country'] ?? 'All')],
+    language: str(p['language'] ?? 'All'),
+    topic_ids: (Array.isArray(p['topics']) ? p['topics'] : []).map(t => num(bag(t)['id'])),
+    description: str(p['description'] ?? ''),
+    slug: str(p['slug'] ?? ''),
+  };
 }
 
 export async function readCountries(client: PlatformClient): Promise<Country[]> {
@@ -356,7 +373,35 @@ export const createRule = (client: PlatformClient, body: RuleCreateBody): Promis
 export const updateRuleLimits = (client: PlatformClient, id: number, body: RuleLimitsBody): Promise<Answer> =>
   client.putJson(`/campaign-rules/${id}`, body);
 
-const toBuilder = (raw: unknown): PlatformBuilder => {
+/**
+ * The bot's verdicts as the builder carries them: one entry per creative,
+ * its `id` being `<builder>-<creative_repo_id>-<headline_id>` — the middle
+ * number is the creative the verdict is about.
+ */
+const toReview = (raw: unknown): ReviewVerdict[] => {
+  if (!Array.isArray(raw)) return [];
+  const verdicts: ReviewVerdict[] = [];
+  for (const entry of raw) {
+    const v = bag(entry);
+    const parts = str(v['id']).split('-');
+    const creativeId = parts.length >= 2 ? num(parts[1]) : NaN;
+    if (!Number.isInteger(creativeId)) continue;
+    verdicts.push({
+      creative_id: creativeId,
+      verdict: str(v['verdict']),
+      reasons: Array.isArray(v['reasons']) ? v['reasons'].map(str) : [],
+    });
+  }
+  return verdicts;
+};
+
+const toRejection = (b: Record<string, unknown>): Rejection | null => {
+  const reasons = Array.isArray(b['rejection_reasons']) ? b['rejection_reasons'].map(str) : [];
+  const details = str(b['additional_rejection_reasons'] ?? '');
+  return reasons.length === 0 && details === '' ? null : { reasons, details };
+};
+
+export const toBuilder = (raw: unknown): PlatformBuilder => {
   const b = bag(raw);
   return {
     id: num(b['id']),
@@ -364,27 +409,47 @@ const toBuilder = (raw: unknown): PlatformBuilder => {
     post_id: num(b['post_id']),
     pixel_id: num(b['pixel_id']),
     status: str(b['status']),
+    traffic_source: str(b['traffic_source']),
     creative_ids: (Array.isArray(b['creative_repos']) ? b['creative_repos'] : []).map(c => num(bag(c)['id'])),
     campaigns: (Array.isArray(b['campaigns']) ? b['campaigns'] : []).map(c => {
       const campaign = bag(c);
-      return { id: num(campaign['id']), name: str(campaign['name']), term_group_id: campaign['term_group_id'] == null ? null : num(campaign['term_group_id']) };
+      return {
+        id: num(campaign['id']), name: str(campaign['name']),
+        term_group_id: campaign['term_group_id'] == null ? null : num(campaign['term_group_id']),
+        // `ad_id` is the platform's id of the cabinet the campaign went out from; `ad_account_id` beside it is the source's own.
+        ad_account: campaign['ad_id'] == null ? null : str(campaign['ad_id']),
+      };
     }),
+    rejection: toRejection(b),
+    review: toReview(b['review_bot_result']),
   };
 };
 
 /** The list is paged; a topic scaled to hundreds of campaigns is read page by page until one comes back short. */
 const BUILDER_PAGE = 100;
 
-export async function readBuilders(client: PlatformClient, topicId: number): Promise<PlatformBuilder[]> {
+async function readBuilderPages(client: PlatformClient, query: Record<string, string | number>): Promise<PlatformBuilder[]> {
   const builders: PlatformBuilder[] = [];
   for (let pageId = 0; pageId < 100; pageId++) {
-    const body = need(await client.get('/campaign-builder', { topic_id: topicId, pageId, limit: BUILDER_PAGE }), 'GET /campaign-builder');
+    const body = need(await client.get('/campaign-builder', { ...query, pageId, limit: BUILDER_PAGE }), 'GET /campaign-builder');
     const page = listOf(body, 'campaignBuilders').map(toBuilder);
-    builders.push(...page.filter(b => b.topic_id === topicId));
+    builders.push(...page);
     if (page.length < BUILDER_PAGE) break;
   }
   return builders;
 }
+
+export async function readBuilders(client: PlatformClient, topicId: number): Promise<PlatformBuilder[]> {
+  return (await readBuilderPages(client, { topic_id: topicId })).filter(b => b.topic_id === topicId);
+}
+
+/**
+ * Every builder of one buyer, across all their topics, in one read: status,
+ * rejection, the bot's verdicts and the campaigns made — what the topic table
+ * shows without a request per topic.
+ */
+export const readBuyerBuilders = (client: PlatformClient, userId: number): Promise<PlatformBuilder[]> =>
+  readBuilderPages(client, { user_id: userId });
 
 /**
  * The campaign list is the analytics page: organisation-wide, newest first,
@@ -406,30 +471,52 @@ const money = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+const toCampaign = (raw: unknown): PlatformCampaign => {
+  const c = bag(raw);
+  return {
+    id: num(c['id']),
+    name: str(c['name']),
+    status: str(c['status']),
+    published: c['campaign_id'] != null && str(c['campaign_id']) !== '',
+    revenue: money(c['revenue']) ?? 0,
+    // The list carries no spend today; null until the platform sends one, and revenue is the sign of the first cent meanwhile.
+    spend: money(c['spend']),
+    budget: money(c['budget']),
+    bid: money(c['bid']),
+  };
+};
+
+const campaignWindow = (): Record<string, string> => {
+  const to = new Date();
+  const from = new Date(to.getTime() - CAMPAIGN_WINDOW_DAYS * 86_400_000);
+  return { date_type: 'last7days', date_formatted: `${usDate(from)}-${usDate(to)}` };
+};
+
+/** Every campaign of one buyer the list shows in the window — the list honours `user_id`, verified 2026-09-11 — with its status, budget and bid. */
+export async function readBuyerCampaigns(client: PlatformClient, userId: number): Promise<PlatformCampaign[]> {
+  const found: PlatformCampaign[] = [];
+  for (let pageId = 0; pageId < CAMPAIGN_PAGES_MAX; pageId++) {
+    const body = need(await client.get('/v2/campaigns', { ...campaignWindow(), user_id: userId, pageId, limit: CAMPAIGN_PAGE }), 'GET /v2/campaigns');
+    const page = listOf(body, 'data');
+    found.push(...page.map(toCampaign));
+    if (page.length < CAMPAIGN_PAGE) break;
+  }
+  return found;
+}
+
 export async function readCampaigns(client: PlatformClient, wanted: readonly number[]): Promise<PlatformCampaign[]> {
   if (wanted.length === 0) return [];
   const left = new Set(wanted);
   const found: PlatformCampaign[] = [];
-  const to = new Date();
-  const from = new Date(to.getTime() - CAMPAIGN_WINDOW_DAYS * 86_400_000);
-  const query = { date_type: 'last7days', date_formatted: `${usDate(from)}-${usDate(to)}` };
+  const query = campaignWindow();
   for (let pageId = 0; pageId < CAMPAIGN_PAGES_MAX && left.size > 0; pageId++) {
     const body = need(await client.get('/v2/campaigns', { ...query, pageId, limit: CAMPAIGN_PAGE }), 'GET /v2/campaigns');
     const page = listOf(body, 'data');
     for (const raw of page) {
-      const c = bag(raw);
-      const id = num(c['id']);
-      if (!left.has(id)) continue;
-      left.delete(id);
-      found.push({
-        id,
-        name: str(c['name']),
-        status: str(c['status']),
-        published: c['campaign_id'] != null && str(c['campaign_id']) !== '',
-        revenue: money(c['revenue']) ?? 0,
-        // The list carries no spend today; null until the platform sends one, and revenue is the sign of the first cent meanwhile.
-        spend: money(c['spend']),
-      });
+      const campaign = toCampaign(raw);
+      if (!left.has(campaign.id)) continue;
+      left.delete(campaign.id);
+      found.push(campaign);
     }
     if (page.length < CAMPAIGN_PAGE) break;
   }

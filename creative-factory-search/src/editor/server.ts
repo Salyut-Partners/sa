@@ -9,7 +9,8 @@ import type { VoiceModel } from '../core/voice.ts';
 // Type-only, and therefore erased: the editor never bundles a line of server
 // code. Naming the server's own types is what stops the two ends of each of
 // these routes drifting apart without anything noticing.
-import type { LaunchesTree } from '../core/launches-tree.ts';
+import type { LaunchesTree as DiskTree } from '../core/launches-tree.ts';
+import type { TopicTable } from '../core/topic-table.ts';
 import type { PlanDescription } from '../server/apply.ts';
 import type { BatchOutput } from '../server/batch.ts';
 import type { JobFailure, JobStatus } from '../server/jobs.ts';
@@ -18,7 +19,20 @@ import type { SubsState } from '../server/subs.ts';
 import type { Translations, TranslatorId } from '../server/translate.ts';
 import type { Voice, VoiceCatalogue as ServerVoices } from '../server/tts.ts';
 
-export type { BatchOutput, JobFailure, JobStatus, LaunchesTree, PlanDescription, SubsState, Voice };
+export type { BatchOutput, JobFailure, JobStatus, PlanDescription, SubsState, TopicTable, Voice };
+
+/** The tree as the route answers it: the disk, plus where the platform status stands, so the tab knows when a table is stale. */
+export interface LaunchesTree extends DiskTree {
+  platform: { version: number; at: string | null; note: string | null };
+}
+
+/** The topic table with the plan it was built from; a plan that could not be read leaves `plan` null and says why. */
+export interface TopicTableRead {
+  table: TopicTable;
+  plan: PlanDescription | null;
+  planNote: string;
+  stateNote: string;
+}
 
 /**
  * The sentence behind a failed response.
@@ -105,17 +119,21 @@ export const fetchCampaigns = (launchKey: string): Promise<CampaignInfo[]> =>
 /** The launches as a tree, read off the disk: niche → topic → campaigns with their file counts. */
 export const fetchLaunchesTree = (): Promise<LaunchesTree> => ask<LaunchesTree>('/api/launches/tree');
 
-/** The plan — what the platform would be asked for — for a topic, or for one campaign of it. Creates nothing. */
-export const fetchPlan = (launchKey: string, campaign: string | null): Promise<PlanDescription> =>
-  ask<PlanDescription>(`/api/launches/${launchKey}/plan`, asJson(campaign === null ? {} : { campaign }));
+/** The plan — what the platform would be asked for — for a topic, or for some campaigns of it. Creates nothing. */
+export const fetchPlan = (launchKey: string, campaigns: readonly string[] | null): Promise<PlanDescription> =>
+  ask<PlanDescription>(`/api/launches/${launchKey}/plan`, asJson(campaigns === null ? {} : { campaigns }));
+
+/** The topic table with its plan: three states per campaign, the totals, the batches. Reads the platform; creates nothing. */
+export const fetchTopicTable = (launchKey: string): Promise<TopicTableRead> =>
+  ask<TopicTableRead>(`/api/launches/${launchKey}/table`, asJson({}));
 
 /**
  * Apply. The `confirm` is the gate the server insists on, and the button that
  * sends it is the one the buyer pressed after reading the plan. A null id
  * means there was nothing to do.
  */
-export const startApply = (launchKey: string, campaign: string | null): Promise<{ id: string | null; steps: number }> =>
-  ask<{ id: string | null; steps: number }>(`/api/launches/${launchKey}/apply`, asJson({ confirm: true, ...(campaign === null ? {} : { campaign }) }));
+export const startApply = (launchKey: string, campaigns: readonly string[] | null): Promise<{ id: string | null; steps: number }> =>
+  ask<{ id: string | null; steps: number }>(`/api/launches/${launchKey}/apply`, asJson({ confirm: true, ...(campaigns === null ? {} : { campaigns }) }));
 
 export const fetchBatches = (launchKey: string): Promise<string[]> =>
   ask<{ batches: string[] }>(`/api/launches/${launchKey}/batches`).then(r => r.batches);

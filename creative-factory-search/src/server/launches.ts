@@ -4,9 +4,17 @@
 // somewhere to work, and the answer says which half happened.
 import fs from 'node:fs';
 import path from 'node:path';
-import { checkNewLaunch, newLaunchTree, parseTopicManifest, type LaunchCreated, type TopicManifest, type TrafficSource } from '../core/launch.ts';
+import { adoptTopic, articleFingerprint, checkAdopt } from '../core/adopt.ts';
+import { type ImageReader } from '../core/article.ts';
+import { mimeFor } from '../core/batch-folder.ts';
+import { checkNewLaunch, isTrafficSource, newLaunchTree, parseTopicManifest, type LaunchCreated, type TopicManifest, type TrafficSource } from '../core/launch.ts';
+import { parseState, type PlatformPostDetail } from '../core/plan.ts';
+import { writeState } from './apply.ts';
+import { PlatformClient, platformState, readBuilders, readConfigurations, readPixels, readPost, readPosts, readTermGroups, readTopic } from './platform.ts';
 import { expandMatrix, parseMatrix, singleCampaignMatrix, type Existing, type Expansion, type SingleCampaign } from '../core/matrix.ts';
+import { SOURCES_DIR } from '../core/batch-folder.ts';
 import { buildLaunchesTree, type LaunchesTree, type LaunchFolderListing } from '../core/launches-tree.ts';
+import type { TopicFolder } from '../core/topic-table.ts';
 import { ensureLaunchesRoot, type SaConfig } from './config.ts';
 
 /** A request the buyer got wrong: the message is for them, and nothing was made. */
@@ -56,6 +64,28 @@ export function listLaunchFolders(root: string): LaunchFolderListing[] {
 
 export const launchesTree = (root: string): LaunchesTree => buildLaunchesTree(listLaunchFolders(root));
 
+/** One launch folder as the topic table reads it: the listing, every campaign's manifest and whether its script has words, the batches. */
+export function readTopicFolder(root: string, key: string): TopicFolder {
+  const folder = path.join(root, key);
+  const manifest = path.join(folder, 'topic.yaml');
+  const paths = listPaths(folder);
+  const manifests: Record<string, string> = {};
+  const scripts: Record<string, boolean> = {};
+  for (const name of folderNames(folder, 'campaigns')) {
+    const own = path.join(folder, 'campaigns', name);
+    const yaml = path.join(own, 'campaign.yaml');
+    if (fs.existsSync(yaml)) manifests[name] = fs.readFileSync(yaml, 'utf8');
+    const script = path.join(own, 'script.md');
+    scripts[name] = fs.existsSync(script) && fs.readFileSync(script, 'utf8').trim() !== '';
+  }
+  const sources = path.join(folder, SOURCES_DIR);
+  const batches = !fs.existsSync(sources) ? [] : fs.readdirSync(sources, { withFileTypes: true })
+    .filter(d => d.isDirectory() && !d.name.startsWith('.') && fs.existsSync(path.join(sources, d.name, 'project.json')))
+    .map(d => d.name)
+    .sort();
+  return { key, topicYaml: fs.existsSync(manifest) ? fs.readFileSync(manifest, 'utf8') : null, paths, manifests, scripts, batches };
+}
+
 /** The folder made: what `LaunchCreated` is before the ticket sync has had its say. */
 export type FolderMade = Omit<LaunchCreated, 'ticket'>;
 
@@ -88,6 +118,121 @@ export function createLaunch(config: SaConfig, request: NewLaunchRequest): Folde
   }
 
   return { launchKey: request.launchKey, folder, files: tree.files.map(f => f.path) };
+}
+
+// -------------------------------------------------------------- adopt --
+
+/** The topic ids the launch folders under the root already name in their state files. */
+function adoptedTopicIds(root: string): number[] {
+  const ids: number[] = [];
+  for (const key of existingLaunchKeys(root)) {
+    const file = path.join(root, key, 'state.json');
+    if (!fs.existsSync(file)) continue;
+    const parsed = parseState(fs.readFileSync(file, 'utf8'));
+    if (parsed.ok && parsed.value.topic_id !== null) ids.push(parsed.value.topic_id);
+  }
+  return ids;
+}
+
+/** Bytes for a picture the article HTML pointed at: decoded from a data URL, or fetched from the platform's static host. */
+async function pictureBytes(src: string): Promise<Buffer> {
+  const data = /^data:[^;]+;base64,(.*)$/s.exec(src);
+  if (data !== null) return Buffer.from(data[1]!, 'base64');
+  const response = await fetch(src, { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new Error(`${response.status} на ${src}`);
+  return Buffer.from(await response.arrayBuffer());
+}
+
+export interface AdoptRequest {
+  topicId: number;
+  launchKey: string;
+  vertical?: string;
+}
+
+/** What `sa adopt` answers before the ticket sync has had its say. */
+export interface AdoptedFolder extends FolderMade {
+  topicId: number;
+  termgroups: string[];
+  articles: string[];
+  notes: string[];
+}
+
+/**
+ * A launch folder from a topic that already exists on the platform: the
+ * topic, its configurations, term groups, posts and builders are read, and
+ * `core/adopt.ts` decides the files; pictures the articles link are fetched
+ * into `images/`, and each article's fingerprint is taken again once they
+ * are there, so the first plan finds nothing to send. Nothing is written to
+ * the platform.
+ */
+export async function adoptLaunch(config: SaConfig, request: AdoptRequest): Promise<AdoptedFolder> {
+  const root = ensureLaunchesRoot(config);
+  const refusal = checkAdopt(existingLaunchKeys(root), adoptedTopicIds(root), request.launchKey, request.topicId);
+  if (refusal !== null) throw new RefusedError(refusal);
+  const ready = platformState(config);
+  if (!ready.ready) throw new RefusedError(ready.note);
+  const api = new PlatformClient(ready);
+
+  const topic = await readTopic(api, request.topicId);
+  if (topic === null) throw new RefusedError(`топіка ${request.topicId} на платформі немає`);
+  const [configurations, termGroups, postList, builders] = await Promise.all([
+    readConfigurations(api, topic.id), readTermGroups(api, topic.id), readPosts(api, topic.id), readBuilders(api, topic.id),
+  ]);
+  const posts: PlatformPostDetail[] = [];
+  for (const summary of postList) {
+    const detail = await readPost(api, summary.id);
+    if (detail !== null) posts.push(detail);
+  }
+  const sources = [...new Set(builders.map(b => b.traffic_source).filter(isTrafficSource))];
+  const pixels = (await Promise.all(sources.map(source => readPixels(api, source)))).flat();
+
+  const adopted = adoptTopic({
+    launchKey: request.launchKey, topic, configurations, termGroups, posts, builders, pixels,
+    vertical: request.vertical?.trim() || null,
+  });
+
+  const folder = path.join(root, request.launchKey);
+  try {
+    fs.mkdirSync(folder);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'EEXIST') throw new RefusedError(`залив \`${request.launchKey}\` уже є — тека існує`);
+    throw e;
+  }
+  for (const dir of adopted.tree.dirs) fs.mkdirSync(path.join(folder, dir), { recursive: true });
+  for (const file of adopted.tree.files) {
+    const target = path.join(folder, file.path);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, file.content, { flag: 'wx' });
+  }
+  const notes = [...adopted.notes];
+  for (const { folder: article, picture } of adopted.pictures) {
+    try {
+      fs.writeFileSync(path.join(folder, article, picture.path), await pictureBytes(picture.src), { flag: 'wx' });
+    } catch (e) {
+      notes.push(`${article}/${picture.path}: картинку не вдалось забрати (${(e as Error).message}) — покладіть її руками, plan запропонує оновити статтю`);
+    }
+  }
+  // The fingerprints again, with the pictures as they now lie on disk — what the plan will hash.
+  const state = adopted.state;
+  const site = parseTopicManifest(adopted.tree.files.find(f => f.path === 'topic.yaml')!.content);
+  for (const [name, entry] of Object.entries(state.articles)) {
+    const own = path.join(folder, 'articles', name);
+    const readImage: ImageReader = ref => {
+      const target = path.resolve(own, ref);
+      if (!target.startsWith(own + path.sep) || !fs.existsSync(target)) return null;
+      return { mime: mimeFor(path.extname(target)), base64: fs.readFileSync(target).toString('base64') };
+    };
+    const countries = posts.find(p => p.id === entry.id)?.country ?? ['All'];
+    const hash = articleFingerprint(fs.readFileSync(path.join(own, 'article.md'), 'utf8'), readImage, site.ok ? site.value.site : '', countries);
+    state.articles[name] = { id: entry.id, hash: hash ?? '' };
+  }
+  writeState(folder, state);
+
+  return {
+    launchKey: request.launchKey, folder, topicId: topic.id,
+    files: adopted.tree.files.map(f => f.path),
+    termgroups: Object.keys(state.termgroups), articles: Object.keys(state.articles), notes,
+  };
 }
 
 // ------------------------------------------------------------- expand --

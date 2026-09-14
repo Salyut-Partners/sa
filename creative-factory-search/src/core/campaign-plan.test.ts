@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseArticle } from './article.ts';
 import {
-  emptyCampaignState, headlineHtml, headlineText, matchUploads, parseCampaignState, sameTsp, tspFieldsOf,
+  describeRejection, emptyCampaignState, FACEBOOK_UNVERIFIED, headlineHtml, headlineText, matchUploads, parseCampaignState, sameTsp, tspFieldsOf,
   type CampaignSource, type CampaignState, type PlatformBuilder, type PlatformCampaign, type PlatformCreative, type PlatformTsp,
 } from './campaign-plan.ts';
 import { parseCampaignManifest, parseTopicManifest, type TopicManifest } from './launch.ts';
@@ -130,8 +130,8 @@ const tspOnPlatform = (id: number, over: Partial<PlatformTsp['fields']> = {}): P
 });
 
 const builderOnPlatform = (id: number, creativeIds: number[], over: Partial<PlatformBuilder> = {}): PlatformBuilder => ({
-  id, topic_id: 106752, post_id: 130892, pixel_id: 35967, status: 'APPROVED', creative_ids: creativeIds,
-  campaigns: [{ id: 1267704, name: '34-AIVadimSpermIT-tgmain-tk-de-ia-0908-GE01', term_group_id: 211532 }], ...over,
+  id, topic_id: 106752, post_id: 130892, pixel_id: 35967, status: 'APPROVED', traffic_source: 'tiktok', creative_ids: creativeIds,
+  campaigns: [{ id: 1267704, name: '34-AIVadimSpermIT-tgmain-tk-de-ia-0908-GE01', term_group_id: 211532 }], rejection: null, review: [], ...over,
 });
 
 /** The state after a full apply of `de-a`, matching the snapshot below. */
@@ -142,6 +142,7 @@ const DONE_CAMPAIGN = (): CampaignState => ({
   builder: { id: 707000, campaign_id: 1267704, campaign_name: '34-AIVadimSpermIT-tgmain-tk-de-ia-0908-GE01' },
   pending: null,
   history: [],
+  live: null,
 });
 
 const DONE_SNAPSHOT = () => snapshot({
@@ -172,6 +173,16 @@ describe('a campaign planned for the first time', () => {
     // the sibling on the TikTok cabinet is untouched by it
     const tk = plan({ ...contents(campaign('de-a')), topic: fb }, snapshot(), topicState());
     expect(tk.steps.find(s => s.kind === 'builder.create')).toMatchObject({ body: { traffic_source: 'tiktok' } });
+  });
+
+  it('says on a Facebook campaign that its profile and builder forms were never taken from dumps', () => {
+    const fbTopic = { ...topic(), accounts: { ...topic().accounts, other: { source: 'facebook' as const, ad_account: '53561', pixel: '35968' } } };
+    const fb = campaign('de-fb', { yaml: CAMPAIGN.replace('account: main', 'account: other') });
+    const result = plan({ ...contents(fb), topic: fbTopic }, snapshot(), topicState());
+    expect(result.warnings.filter(w => w.startsWith('campaigns/de-fb'))).toEqual([`campaigns/de-fb: ${FACEBOOK_UNVERIFIED}`]);
+    expect(result.errors).toEqual([]);
+    const tk = plan({ ...contents(campaign('de-a')), topic: fbTopic }, snapshot(), topicState());
+    expect(tk.warnings.join()).not.toMatch(/Facebook/);
   });
 
   it('uploads a file the same in two campaigns of the topic once, the second campaign pointing at the first\'s upload', () => {
@@ -363,7 +374,7 @@ describe('a campaign already on the platform', () => {
 
 describe('a relaunch: the campaign was built and a creative in the folder changed', () => {
   const live = (over: Partial<PlatformCampaign> = {}): PlatformCampaign => ({
-    id: 1267704, name: '34-AIVadimSpermIT-tgmain-tk-de-ia-0908-GE01', status: 'ACTIVE', published: true, revenue: 1.2, spend: null, ...over,
+    id: 1267704, name: '34-AIVadimSpermIT-tgmain-tk-de-ia-0908-GE01', status: 'ACTIVE', published: true, revenue: 1.2, spend: null, budget: 20, bid: 0.45, ...over,
   });
   const remade = () => {
     const c = campaign('de-a');
@@ -508,6 +519,70 @@ describe('a relaunch: the campaign was built and a creative in the folder change
   });
 });
 
+describe('a rejected campaign: the builder was turned down', () => {
+  const rejected = (review: PlatformBuilder['review'], over: Partial<PlatformBuilder> = {}) => snapshot({
+    ...DONE_SNAPSHOT(),
+    builders: [builderOnPlatform(707000, [1503646, 1001, 1002], {
+      status: 'NOT_APPROVED', campaigns: [],
+      rejection: { reasons: ['Policy Violation'], details: 'Video script promises specific pay.\nSecond line.' },
+      review, ...over,
+    })],
+  });
+  const nonCompliant = (creativeId: number): PlatformBuilder['review'][number] =>
+    ({ creative_id: creativeId, verdict: 'non_compliant', reasons: ['Specific hourly pay figures.'] });
+
+  it('cuts the files the bot marked non_compliant from the relaunch, names them with the reason, and builds from the rest', () => {
+    const result = plan(contents(campaign('de-a')), rejected([{ creative_id: 1001, verdict: 'compliant', reasons: [] }, nonCompliant(1002)]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(result.errors).toEqual([]);
+    expect(kinds(result)).toEqual(['builder.create']);
+    expect(result.steps[0]).toMatchObject({
+      kind: 'builder.create',
+      body: { creative_repo_ids: [1503646, 1001] },
+      cut: [{ file: '02.mp4', reasons: ['Specific hourly pay figures.'] }],
+      retires: { builder: { id: 707000 }, fate: 'unpublished' },
+    });
+    expect(result.steps[0]!.label).toMatch(/1 креативів, 1 вирізано/);
+    expect(result.warnings.join('\n')).toMatch(/`02\.mp4` вирізано — бот платформи позначив non_compliant: Specific hourly pay figures\. — замініть файл/);
+    expect(kinds(result)).not.toContain('campaign.pause');
+  });
+
+  it('uploads a replaced file and does not cut it — the verdict was on the old bytes', () => {
+    const replaced = campaign('de-a');
+    replaced.creatives[1] = { name: '02.mp4', hash: 'h-remade' };
+    const result = plan(contents(replaced), rejected([nonCompliant(1002)]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(kinds(result)).toEqual(['creatives.upload', 'builder.create']);
+    expect(result.steps[0]).toMatchObject({ kind: 'creatives.upload', files: ['02.mp4'] });
+    expect(result.steps[1]).toMatchObject({ cut: [] });
+  });
+
+  it('refuses when every file of the folder is cut, and says to replace them', () => {
+    const result = plan(contents(campaign('de-a')), rejected([nonCompliant(1001), nonCompliant(1002)]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(kinds(result)).toEqual([]);
+    expect(result.errors.join()).toMatch(/усі креативи вирізані ботом платформи \(01\.mp4, 02\.mp4\)/);
+  });
+
+  it('plans nothing for a rejection the bot put on no file, and says the reason and what to change', () => {
+    const result = plan(contents(campaign('de-a')), rejected([]), topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(kinds(result)).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings.join()).toMatch(/кампанію 707000 відхилено: Policy Violation — Video script promises specific pay\. — бот не назвав файлів/);
+  });
+
+  it('does not cut on an approved builder whatever the bot said about a creative', () => {
+    const approved = snapshot({ ...DONE_SNAPSHOT(), builders: [builderOnPlatform(707000, [1503646, 1001, 1002], { review: [nonCompliant(1002)] })] });
+    const result = plan(contents(campaign('de-a')), approved, topicState({ 'de-a': DONE_CAMPAIGN() }));
+    expect(kinds(result)).toEqual([]);
+  });
+});
+
+describe('a rejection in one line', () => {
+  it('is the ticked reasons, then the first line of the reviewer text', () => {
+    expect(describeRejection({ reasons: ['Policy Violation'], details: '\nToo specific.\nMore.' })).toBe('Policy Violation — Too specific.');
+    expect(describeRejection({ reasons: [], details: 'Too specific.' })).toBe('Too specific.');
+    expect(describeRejection({ reasons: ['A', 'B'], details: '' })).toBe('A, B');
+  });
+});
+
 describe('two campaigns in one plan', () => {
   it('share the headline and the TSP when they are the same, and the second references the first', () => {
     const result = plan(contents(campaign('de-a'), campaign('de-b', { files: ['11.mp4'] })), snapshot(), topicState());
@@ -562,10 +637,30 @@ describe('the plan for one campaign', () => {
     broken.manifest = { ...broken.manifest, account: 'ghost' };
     const whole = plan(contents(remade, broken), snapshot({ ...DONE_SNAPSHOT(), campaigns: [] }), topicState({ 'de-a': DONE_CAMPAIGN() }));
     expect(campaignOutline(whole, ['de-a', 'de-b', 'de-c'])).toEqual([
-      { name: 'de-a', steps: 2, relaunch: true, errors: 0 },
-      { name: 'de-b', steps: 0, relaunch: false, errors: 1 },
-      { name: 'de-c', steps: 0, relaunch: false, errors: 0 },
+      { name: 'de-a', steps: 2, kept: [0, 1], relaunch: true, errors: 0 },
+      { name: 'de-b', steps: 0, kept: [], relaunch: false, errors: 1 },
+      { name: 'de-c', steps: 0, kept: [], relaunch: false, errors: 0 },
     ]);
+  });
+
+  it('keeps, per campaign, the indexes of the whole plan a plan for it alone would keep — the topic steps and what it leans on included', () => {
+    const whole = plan(contents(campaign('de-a'), campaign('de-b', { files: ['11.mp4'] })), snapshot(), topicState());
+    const outline = campaignOutline(whole, ['de-a', 'de-b']);
+    // de-b leans on de-a's headline and TSP, so its kept set reaches into de-a's steps; de-a's does not reach into de-b's.
+    const kinds = (kept: number[]) => kept.map(i => `${whole.steps[i]!.kind}@${'campaign' in whole.steps[i]! ? (whole.steps[i] as { campaign: string }).campaign : 'topic'}`);
+    expect(kinds(outline[0]!.kept)).toEqual(['creatives.upload@de-a', 'headline.create@de-a', 'tsp.create@de-a', 'builder.create@de-a']);
+    expect(kinds(outline[1]!.kept)).toEqual(['headline.create@de-a', 'tsp.create@de-a', 'creatives.upload@de-b', 'builder.create@de-b']);
+  });
+
+  it('narrows to several campaigns at once: their steps, what they lean on, and their lines alone', () => {
+    const broken = campaign('de-c', { files: ['21.mp4'] });
+    broken.manifest = { ...broken.manifest, account: 'ghost' };
+    const whole = plan(contents(campaign('de-a'), campaign('de-b', { files: ['11.mp4'] }), broken), snapshot(), topicState());
+    const two = narrowPlan(whole, ['de-a', 'de-b']);
+    expect(two.steps.map(s => s.kind)).toEqual(['creatives.upload', 'headline.create', 'tsp.create', 'builder.create', 'creatives.upload', 'builder.create']);
+    expect(two.errors).toEqual([]);
+    expect(narrowPlan(whole, ['de-c']).errors.join()).toMatch(/ghost/);
+    expect(narrowPlan(whole, 'de-b').steps.map(s => s.kind)).toEqual(['headline.create', 'tsp.create', 'creatives.upload', 'builder.create']);
   });
 
   it('is still a relaunch in the outline when only the pause of the old campaign is left', () => {
@@ -581,9 +676,9 @@ describe('the plan for one campaign', () => {
       ...DONE_SNAPSHOT(),
       creatives: [...DONE_SNAPSHOT().creatives, video(1005, '01.mp4')],
       builders: [builderOnPlatform(707000, [1503646, 1001, 1002]), builderOnPlatform(707001, [1503646, 1005, 1002], { campaigns: [] })],
-      campaigns: [{ id: 1267704, name: 'old', status: 'ACTIVE', published: true, revenue: 1, spend: null }],
+      campaigns: [{ id: 1267704, name: 'old', status: 'ACTIVE', published: true, revenue: 1, spend: null, budget: null, bid: null }],
     });
-    expect(campaignOutline(plan(contents(remade), both, state), ['de-a'])).toEqual([{ name: 'de-a', steps: 1, relaunch: true, errors: 0 }]);
+    expect(campaignOutline(plan(contents(remade), both, state), ['de-a'])).toEqual([{ name: 'de-a', steps: 1, kept: [0], relaunch: true, errors: 0 }]);
   });
 });
 
@@ -707,7 +802,7 @@ describe('campaign state', () => {
     const parsed = parseCampaignState('{"creatives":{"01.mp4":{"id":5,"hash":"x"}},"tsp":{"id":7,"name":"n"}}');
     expect(parsed).toEqual({
       ok: true,
-      value: { creatives: { '01.mp4': { id: 5, hash: 'x' } }, headline: null, tsp: { id: 7, name: 'n' }, builder: null, pending: null, history: [] },
+      value: { creatives: { '01.mp4': { id: 5, hash: 'x' } }, headline: null, tsp: { id: 7, name: 'n' }, builder: null, pending: null, history: [], live: null },
     });
     expect(parseCampaignState('[]').ok).toBe(false);
   });

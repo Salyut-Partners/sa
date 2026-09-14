@@ -377,7 +377,14 @@ export function App() {
       </header>
 
       {tab === 'launches' ? (
-        <LaunchesTab run={applyRun} />
+        <LaunchesTab
+          run={applyRun}
+          onOpenBatch={(launchKey, batch) => {
+            // The batch opens in the editor tab: that is where the pictures are.
+            topic.openIn(launchKey, batch);
+            setTab('creatives');
+          }}
+        />
       ) : tab === 'subtitles' ? (
         <SubtitlesTab queue={subtitles} launchKey={topic.location?.launchKey ?? null} />
       ) : (

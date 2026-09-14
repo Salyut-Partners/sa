@@ -23,6 +23,8 @@ export interface SaConfig {
     token: string | null;
     /** The organisation every call carries in its query. */
     organization_id: number | null;
+    /** The buyer's own user id on the platform, for the buyer-wide reads; learned from a topic of theirs when not set. */
+    user_id: number | null;
     /** Where the admin API lives; overridable for a staging host. */
     base_url: string;
   };
@@ -65,12 +67,14 @@ export function loadConfig(): SaConfig {
   const clickup = section('clickup');
   const platform = section('platform');
   const organization = Number(platform['organization_id']);
+  const userId = Number(platform['user_id']);
   return {
     launches_root: expandHome(asText(raw['launches_root']) ?? DEFAULT_LAUNCHES_ROOT),
     clickup: { token: asText(clickup['token']), list_id: asText(clickup['list_id']), statuses: statusesIn(clickup['statuses']) },
     platform: {
       token: asText(platform['token']),
       organization_id: Number.isInteger(organization) && organization > 0 ? organization : null,
+      user_id: Number.isInteger(userId) && userId > 0 ? userId : null,
       base_url: (asText(platform['base_url']) ?? DEFAULT_PLATFORM_URL).replace(/\/+$/, ''),
     },
   };
