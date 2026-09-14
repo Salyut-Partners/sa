@@ -58,7 +58,9 @@ describe('nextAction after a write', () => {
     }
     const next = nextAction(history);
     expect(next.action).toBe('stop');
-    expect(next.action === 'stop' && next.reason).toMatch(/спроб/);
+    expect(next.action === 'stop' && next.reason).toMatch(/спроб.*не створила сутність/);
+    const update = nextAction(history, DEFAULT_QUEUE, 'update');
+    expect(update.action === 'stop' && update.reason).toMatch(/спроб.*не показала зміну/);
   });
 
   it('starts with a write, so an empty history is asked to send', () => {

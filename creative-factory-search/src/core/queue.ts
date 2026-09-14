@@ -61,12 +61,15 @@ export const DEFAULT_QUEUE: QueueConfig = {
   maxReadBacks: 3,
 };
 
+/** What the write does, for the sentence when it keeps not showing: a create makes an entity, an update changes one. */
+export type WriteKind = 'create' | 'update';
+
 /**
  * The next thing to do with one write, from everything that has happened to
  * it. The history is the attempts in order: the write, the read-backs after
  * it, the next write, and so on.
  */
-export function nextAction(history: readonly Attempt[], config: QueueConfig = DEFAULT_QUEUE): NextAction {
+export function nextAction(history: readonly Attempt[], config: QueueConfig = DEFAULT_QUEUE, kind: WriteKind = 'create'): NextAction {
   const last = history[history.length - 1];
   if (last === undefined) return { action: 'send' };
 
@@ -81,7 +84,8 @@ export function nextAction(history: readonly Attempt[], config: QueueConfig = DE
     if (last.outcome.found === true) return { action: 'done' };
     const writes = history.filter(a => a.kind === 'write').length;
     if (writes > config.maxRetries) {
-      return { action: 'stop', reason: `після ${writes} спроб платформа так і не створила сутність — зупиняюсь` };
+      const what = kind === 'create' ? 'так і не створила сутність' : 'так і не показала зміну';
+      return { action: 'stop', reason: `після ${writes} спроб платформа ${what} — зупиняюсь` };
     }
     return { action: 'retry', delayMs: config.backoffBaseMs * 2 ** (writes - 1) };
   }

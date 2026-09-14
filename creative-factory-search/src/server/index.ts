@@ -324,8 +324,9 @@ app.post('/api/launches/:key/apply', async (req, res) => {
 
 /**
  * `sa budget` / `sa bid`: the plan of a change to live campaigns, and — under
- * `confirm` — the change itself, once its request form is known. A field
- * other than budget or bid, or a value that is not a positive number, is a 400.
+ * `confirm` — the change itself, the admin's campaign-management form per
+ * campaign. A field other than budget or bid, or a value that is not a
+ * positive number, is a 400.
  */
 app.post('/api/launches/:key/adjust', async (req, res) => {
   const body = (typeof req.body === 'object' && req.body !== null ? req.body : {}) as Record<string, unknown>;

@@ -29,12 +29,13 @@ import {
   type PlanPreview, type PlanStep, type RuleRef, type Snapshot, type TermGroupRef, type TermGroupSource, type TopicRef,
 } from '../core/plan.ts';
 import { CREATIVES_DIR } from '../core/placement.ts';
-import { DEFAULT_QUEUE, nextAction, pauseBefore, type Attempt } from '../core/queue.ts';
+import { DEFAULT_QUEUE, pauseBefore, type WriteKind } from '../core/queue.ts';
 import { parseRulePreset, sameRule, type RulePreset } from '../core/rules.ts';
 import { launchFolder } from './batches.ts';
 import type { SaConfig } from './config.ts';
 import { createJob, settleJob, type Job } from './jobs.ts';
 import { RefusedError } from './launches.ts';
+import { PolicyStop, writeUnderPolicy } from './policy.ts';
 import {
   createBuilder, createConfiguration, createdId, createHeadline, createPost, createRule, createTermGroup, createTopic, createTsp,
   pauseCampaigns, PlatformClient, platformState, readAdAccounts, readBuilders, readCampaigns, readConfigurations,
@@ -293,9 +294,16 @@ export interface Planned {
 }
 
 /** The plan for the topic, or — with `campaign` — the part of it one campaign needs. */
-/** Launch keys with an apply in flight: one writer of a state file at a time, not merely one process. */
+/** Launch keys with a writer in flight — an apply, a bid or budget change: one writer of a state file at a time, not merely one process. */
 const applying = new Set<string>();
 export const isApplying = (launchKey: string): boolean => applying.has(launchKey);
+
+/** The folder's writer for a while: refused while another holds it, and released by the function given back. */
+export function claimLaunch(launchKey: string, what: string): () => void {
+  if (applying.has(launchKey)) throw new RefusedError(`на заливі \`${launchKey}\` уже іде ${what} — дочекайтесь, поки та задача закінчиться`);
+  applying.add(launchKey);
+  return () => { applying.delete(launchKey); };
+}
 
 /** Something to do once a run has stopped, whatever way — the ticket sync, so «in progress» does not wait for the timer. */
 let settled: ((launchKey: string) => void) | null = null;
@@ -451,7 +459,7 @@ export async function startApply(
   config: SaConfig, launchKey: string, confirmed: boolean, campaigns: readonly string[] | null = null,
 ): Promise<{ id: string | null; steps: number }> {
   if (!confirmed) throw new RefusedError('apply без явного підтвердження не виконується: sa apply <key> --confirm');
-  if (applying.has(launchKey)) throw new RefusedError(`залив \`${launchKey}\` уже застосовується — дочекайтесь, поки та задача закінчиться`);
+  if (applying.has(launchKey)) throw new RefusedError(`залив \`${launchKey}\` уже застосовується або міняється — дочекайтесь, поки та задача закінчиться`);
   const planned = await planLaunch(config, launchKey, campaigns);
   if (planned.plan.errors.length > 0) throw new RefusedError('план має помилки:\n' + planned.plan.errors.join('\n'));
   const state = adoptResolved(planned.state, planned.plan);
@@ -460,9 +468,9 @@ export async function startApply(
 
   const job = createJob(planned.plan.steps.length, new Map(), 'sa-apply-');
   const run: Run = { api: client(config), launchKey, folder: planned.folder, job, state, contents: planned.contents, termgroups: {}, rules: {} };
-  applying.add(launchKey);
+  const release = claimLaunch(launchKey, 'apply');
   void runSteps(run, planned.plan.steps).finally(() => {
-    applying.delete(launchKey);
+    release();
     settled?.(launchKey);
   });
   return { id: job.id, steps: planned.plan.steps.length };
@@ -525,40 +533,30 @@ function notePending(run: Run, step: PlanStep, seen: number[]): void {
 }
 
 /**
- * One write under the queue policy: send, and on an uncertain answer read
- * the list back before sending again. `find` names the entity in a fresh
- * list; `send` performs the write; `seen` is the list as it was before.
+ * One write under the queue policy — the shared loop in `policy.ts`, with
+ * the run's own pause, which a cancel cuts short, and a cancel between the
+ * pause and the send meaning nothing more goes out; a request already in
+ * flight is let finish. `find` names the entity in a fresh list; `send`
+ * performs the write; `seen` is the list as it was before.
  */
 async function underPolicy(
   run: Run,
+  kind: WriteKind,
   seen: readonly number[],
   send: () => Promise<Answer>,
   find: (before: readonly number[]) => Promise<number | null>,
 ): Promise<{ answer: Answer | null; id: number | null }> {
-  const history: Attempt[] = [];
-  let answer: Answer | null = null;
-  let foundId: number | null = null;
-  for (;;) {
-    const next = nextAction(history);
-    if (next.action === 'done') return { answer, id: foundId };
-    if (next.action === 'stop') throw new StepError(next.reason + (answer?.status === 'error' ? ` (${answer.text})` : ''));
-    if (next.action === 'send' || next.action === 'retry') {
-      // The backoff, then the jitter every write gets; a cancel during either
-      // means nothing more is sent — a request already in flight is let finish.
-      if (next.action === 'retry') await pause(run, next.delayMs);
-      await pause(run, pauseBefore('write', DEFAULT_QUEUE));
-      if (run.job.cancelled) throw new CancelledApply('скасовано');
-      answer = await send();
-      history.push({ kind: 'write', outcome: toOutcome(answer) });
-      continue;
-    }
-    // read-back
-    try {
-      foundId = await find(seen);
-      history.push({ kind: 'read', outcome: { status: 'ok', found: foundId !== null } });
-    } catch {
-      history.push({ kind: 'read', outcome: { status: 'timeout' } });
-    }
+  try {
+    const { answer, found } = await writeUnderPolicy({
+      kind, send,
+      readBack: () => find(seen),
+      pause: ms => pause(run, ms),
+      checkpoint: () => { if (run.job.cancelled) throw new CancelledApply('скасовано'); },
+    });
+    return { answer, id: found };
+  } catch (e) {
+    if (e instanceof PolicyStop) throw new StepError(e.message);
+    throw e;
   }
 }
 
@@ -572,12 +570,9 @@ async function withPolicy(
 ): Promise<{ answer: Answer | null; id: number | null; seen: number[] }> {
   const seen = await before();
   notePending(run, step, seen);
-  const { answer, id } = await underPolicy(run, seen, send, find);
+  const { answer, id } = await underPolicy(run, 'create', seen, send, find);
   return { answer, id, seen };
 }
-
-const toOutcome = (answer: Answer): Attempt['outcome'] =>
-  answer.status === 'ok' ? { status: 'ok' } : answer.status === 'timeout' ? { status: 'timeout' } : { status: 'error', code: answer.code };
 
 async function runStep(run: Run, step: PlanStep): Promise<void> {
   const { api } = run;
@@ -678,7 +673,7 @@ async function runStep(run: Run, step: PlanStep): Promise<void> {
         run.job.active.add(`${step.label} · ${file}`);
         const bytes = fs.readFileSync(path.join(dir, file));
         await underPolicy(
-          run, seen,
+          run, 'create', seen,
           () => uploadCreative(api, fields, { name: file, bytes }),
           async before => matchUploads(before, await videos(), [file]).ids[file] ?? null,
         );
@@ -805,5 +800,6 @@ const freshIn = (list: () => Promise<number[]>) =>
  * simply sent again after a backoff — the read-back has nothing to find.
  */
 async function written(run: Run, step: PlanStep, send: () => Promise<Answer>): Promise<void> {
-  await withPolicy(run, step, async () => [], send, async () => null);
+  notePending(run, step, []);
+  await underPolicy(run, 'update', [], send, async () => null);
 }

@@ -4,7 +4,9 @@
 // the tool cannot answer.
 //
 // Exit codes: 0 done · 1 usage · 2 refused · 3 done in part (folder made, no
-// ticket) · 4 the server could not be reached or started · 5 the server failed.
+// ticket; some campaigns changed, some not) · 4 the server could not be
+// reached or started · 5 the server failed, or the platform took none of
+// the changes asked for.
 //
 // `sa apply` is the one command that spends money. Without `--confirm` it
 // refuses before touching the server, and the mono-repo's Claude settings
@@ -332,7 +334,8 @@ interface AdjustShown {
   skipped: string[];
   warnings: string[];
   errors: string[];
-  note: string;
+  applied: string[];
+  failed: { label: string; reason: string }[];
 }
 
 /**
@@ -365,7 +368,9 @@ async function commandAdjust(field: 'budget' | 'bid', args: string[]): Promise<n
   out(body);
   if (status === 400) return 2;
   if (status !== 200) return 5;
-  return 'errors' in body && body.errors.length > 0 ? 2 : 0;
+  if ('errors' in body && body.errors.length > 0) return 2;
+  if ('failed' in body && body.failed.length > 0) return body.applied.length > 0 ? 3 : 5;
+  return 0;
 }
 
 async function main(): Promise<number> {

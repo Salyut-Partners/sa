@@ -6,6 +6,7 @@
 // Every call answers an `Outcome` rather than throwing, because the policy in
 // `core/queue.ts` reads outcomes: a timeout is a fact to reason about, not an
 // exception to unwind.
+import type { AdjustBody } from '../core/adjust.ts';
 import type {
   AdAccount, HeadlineBody, PauseBody, Pixel, PlatformBuilder, PlatformCampaign, PlatformCreative, PlatformTsp, Rejection, ReviewVerdict,
   Theme, TspBody, TspFields,
@@ -643,3 +644,18 @@ export const createBuilder = (client: PlatformClient, fields: BuilderFields): Pr
 /** The admin's bulk status change: multipart, campaign ids — never builder ids. */
 export const pauseCampaigns = (client: PlatformClient, body: PauseBody): Promise<Answer> =>
   client.postForm('/v2/campaign/bulk-update', { status: body.status, 'campaign_ids[]': body.campaign_ids.map(String) });
+
+/**
+ * The admin's campaign management: one multipart per campaign with the id,
+ * bid, budget and status all together — `core/adjust.ts` fills the parts
+ * that do not change from the list. Answers `{"success":true}`; a 2xx that
+ * says `success: false` is an error answer here, so the policy stops on it
+ * with the platform's words instead of writing a change that did not happen.
+ */
+export async function updateCampaign(client: PlatformClient, body: AdjustBody): Promise<Answer> {
+  const answer = await client.postForm(`/v2/campaign/${body.id}`, { id: body.id, bid: body.bid, budget: body.budget, status: body.status });
+  if (answer.status === 'ok' && bag(answer.body)['success'] === false) {
+    return { status: 'error', code: answer.code, body: answer.body, text: JSON.stringify(answer.body).slice(0, 300) };
+  }
+  return answer;
+}

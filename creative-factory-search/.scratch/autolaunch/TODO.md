@@ -7,12 +7,13 @@ vite build зелені. Робоче дерево: 37 файлів, дивис�
 
 ### Дампи (без них тікети 24 і 25 не закриваються)
 
-- [ ] **Тікет 24.** Дамп запиту campaign management на зміну бюджету живої
-      кампанії (з адмінки, з вичищеним Bearer) — покласти в
-      `search arbitrage resources/api-requests-roots`. З'ясувати, чи бід іде
-      тим самим запитом або оновленням TSP. Після дампа: живий виклик у
-      `server/adjust.ts` (зараз `--confirm` відмовляє словами), запис
-      `live` у `state.json` через `withLive`, тест `core`.
+- [x] **Тікет 24.** Дамп campaign management лежить у
+      `search arbitrage resources/api-requests-roots/campaign-management`
+      (2026-09-14): бід і бюджет одним multipart `POST /v2/campaign/<id>`
+      разом зі статусом. Живий виклик у `server/adjust.ts`, `live` у
+      `state.json`, тести `core` — зроблено. Лишилось наживо: перший
+      `sa budget <key>/<campaign> <value> --confirm` на своїй кампанії, і
+      вичистити Bearer із дампа.
 - [ ] **Тікет 25.** Дампи `POST /traffic-source-profiles` і
       `POST /campaign-builder` для Facebook-кабінету. Після них: різниці тіл
       Facebook/TikTok у `core/campaign-plan.ts` з тестами, зняти попередження

@@ -350,10 +350,22 @@ on the table: changing a live campaign from a table would be the admin
 twice. The rule is `core/adjust.ts`, tested there; `~/sa/.claude/settings.json`
 denies the `--confirm` form to Claude, the flag-less plan is Claude's to run.
 
-The write itself is not wired yet: the admin's campaign-management request
-for a budget change was never in the dumps, so `--confirm` is refused with
-a sentence saying the live call waits for that request — the plan half
-stands on its own until it arrives.
+The write is the admin's campaign management, one multipart per campaign
+to `POST /v2/campaign/<id>` carrying the id, the bid, the budget and the
+status all at once — the admin never sends one of them alone, so a change
+of the bid carries the budget and the status as the platform's list shows
+them, and a campaign the list does not show yet cannot be changed: a named
+one is a refusal, `--all` skips it. Under `--confirm` `server/adjust.ts`
+reads the platform again first, so the numbers it sends back are minutes
+fresh and not a cached list's, then sends the forms in the plan's order
+under the queue policy — an update is safe to send twice, so an uncertain
+answer is read back off the list and sent again when the new value is not
+there; a `success: false` stops with the platform's words — writes each
+success into the campaign's state at once, keeps each failure for the
+answer and tries the next campaign anyway. The answer lists `applied` and
+`failed`; exit code 3 when there are both, 5 when nothing went through.
+The folder is claimed for the while, as an apply claims it, so neither
+runs while the other does.
 
 ### Creatives, headline, TSP and the campaign
 
@@ -515,8 +527,11 @@ Three build units and one rule.
   `core/article.ts` turns `article.md` into the HTML that is sent;
   `core/queue.ts` decides what happens to a call that went wrong.
   `server/platform.ts` is the digifor client, thin, answering outcomes rather
-  than throwing; `server/apply.ts` runs a plan as a job and is the one writer
-  of `state.json`; `server/platform-status.ts` keeps the buyer's builders and
+  than throwing; `server/policy.ts` is the one loop that sends a write the
+  way the queue policy says; `server/apply.ts` runs a plan as a job and owns
+  the writing of `state.json` — `adjust.ts`, `launches.ts` and `tickets.ts`
+  write it through its `writeState`, and a folder being applied or adjusted
+  is claimed so two writers never meet; `server/platform-status.ts` keeps the buyer's builders and
   campaigns as the platform last showed them, on a timer, and hands the
   table a version number.
 - **`src/server`** — Express, Puppeteer, ffmpeg. Bundles the render target from

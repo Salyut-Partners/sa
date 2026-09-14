@@ -50,7 +50,14 @@ describe('a budget or bid change', () => {
     expect(plan.changes).toEqual([{
       campaign: 'de-a', campaignId: 1000, campaignName: '34-X-1000', field: 'budget', from: 20, to: 40,
       label: 'de-a: бюджет 20 → 40 (кампанія 1000 «34-X-1000»)',
+      body: { id: '1000', bid: '0.45', budget: '40', status: 'ACTIVE' },
     }]);
+  });
+
+  it('sends the admin\'s form whole: the other number and the status as the list shows them, the status in the admin\'s capitals', () => {
+    const plan = planAdjust('bid', 0.55, { campaign: 'de-b', country: null, status: null }, folder(), platform({ campaigns: [live(1001, 'paused', 30, 0.2)] }));
+    expect(plan.errors).toEqual([]);
+    expect(plan.changes[0]?.body).toEqual({ id: '1001', bid: '0.55', budget: '30', status: 'PAUSED' });
   });
 
   it('with --all --country DE --status active takes the active DE campaigns of the topic and nothing else, saying why each other was left', () => {
@@ -79,13 +86,21 @@ describe('a budget or bid change', () => {
     expect(at('de-d').changes).toEqual([]);
   });
 
-  it('skips a campaign already at the value, and warns when the list does not show the current one', () => {
+  it('skips a campaign already at the value', () => {
     const same = planAdjust('budget', 20, { campaign: 'de-a', country: null, status: null }, folder(), platform());
     expect(same.changes).toEqual([]);
     expect(same.skipped).toEqual(['campaigns/de-a: бюджет уже 20']);
-    const unseen = planAdjust('budget', 40, { campaign: 'de-a', country: null, status: null }, folder(), platform({ campaigns: [] }));
-    expect(unseen.changes[0]).toMatchObject({ from: null, label: 'de-a: бюджет ? → 40 (кампанія 1000 «34-X-1000»)' });
-    expect(unseen.warnings.join()).toMatch(/поточне значення невідоме/);
+  });
+
+  it('cannot change a campaign the list does not show — the form carries both numbers and the status — so a named one refuses and --all skips it', () => {
+    const named = planAdjust('budget', 40, { campaign: 'de-a', country: null, status: null }, folder(), platform({ campaigns: [] }));
+    expect(named.changes).toEqual([]);
+    expect(named.errors).toEqual(['campaigns/de-a: кампанії 1000 у списку платформи ще не видно — без поточних біда, бюджету й статусу запит не скласти, спробуйте пізніше']);
+    const all = planAdjust('budget', 40, { campaign: null, country: null, status: null }, folder(), platform({ campaigns: [live(1001, 'ACTIVE')] }));
+    expect(all.changes.map(c => c.campaign)).toEqual(['de-b']);
+    expect(all.skipped).toContain('campaigns/de-a: у списку платформи ще не видно');
+    const blank = planAdjust('bid', 0.5, { campaign: 'de-a', country: null, status: null }, folder(), platform({ campaigns: [live(1000, 'ACTIVE', null, 0.45)] }));
+    expect(blank.errors.join()).toMatch(/список платформи не показує бюджет/);
   });
 
   it('takes the campaign id from the state when the builder list has not caught up', () => {

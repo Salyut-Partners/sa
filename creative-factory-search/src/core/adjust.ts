@@ -29,15 +29,33 @@ export interface AdjustCampaign {
   state: CampaignState | undefined;
 }
 
+/**
+ * The admin's campaign-management form, part for part: one multipart to
+ * `POST /v2/campaign/<id>` that carries the id, both numbers and the status
+ * every time — the admin never sends one of them alone — so a change of the
+ * bid carries the budget as the list shows it, and the status as the list
+ * shows it, in the admin's capitals. Taken from the dump of 2026-09-14,
+ * which sent `PAUSED` and was answered `{"success":true}`; that the list's
+ * other words (`ACTIVE`, `PENDING`) go back the same way, uppercased, is
+ * the one assumption here, checked on the first live change.
+ */
+export interface AdjustBody {
+  id: string;
+  bid: string;
+  budget: string;
+  status: string;
+}
+
 export interface AdjustChange {
   campaign: string;
   campaignId: number;
   campaignName: string | null;
   field: AdjustField;
-  /** What the platform's list shows now, or null when the list does not say. */
-  from: number | null;
+  /** What the platform's list shows now. */
+  from: number;
   to: number;
   label: string;
+  body: AdjustBody;
 }
 
 export interface AdjustPlan {
@@ -67,8 +85,10 @@ const fold = (s: string): string => s.trim().toLowerCase();
  * What the change would be. A campaign is touched only when the platform
  * has made it — a folder with no builder, a builder with no campaign, a
  * campaign the provider took down are refusals in words, because there is
- * nothing on the platform to change — and `--all` narrows by the manifest's
- * country and the platform's status, skipping the rest and saying so.
+ * nothing on the platform to change — and only when the list shows it with
+ * both numbers, because the form sends both and the status back. `--all`
+ * narrows by the manifest's country and the platform's status, skipping the
+ * rest and saying so; a named campaign refuses where `--all` skips.
  */
 export function planAdjust(field: AdjustField, value: number, filter: AdjustFilter, campaigns: readonly AdjustCampaign[], platform: PlatformStatus | null): AdjustPlan {
   const plan: AdjustPlan = { field, value, changes: [], skipped: [], warnings: [], errors: [] };
@@ -89,28 +109,31 @@ export function planAdjust(field: AdjustField, value: number, filter: AdjustFilt
     if (chosen.length === 0) plan.errors.push('у campaigns/ немає жодної кампанії');
   }
 
+  // A named campaign refuses where `--all` skips: the same fact, said as an error or as a reason.
+  const named = filter.campaign !== null;
+  const refuse = (at: string, error: string, skip: string): void => {
+    if (named) plan.errors.push(`${at}: ${error}`);
+    else plan.skipped.push(`${at}: ${skip}`);
+  };
+
   for (const c of chosen) {
     const at = `campaigns/${c.name}`;
-    const named = filter.campaign !== null;
     const builder = c.state?.builder ?? null;
     if (builder === null) {
-      if (named) plan.errors.push(`${at}: кампанія не залита — на платформі нема чого міняти`);
-      else plan.skipped.push(`${at}: не залита`);
+      refuse(at, 'кампанія не залита — на платформі нема чого міняти', 'не залита');
       continue;
     }
     const onPlatform = platform.builders.find(b => b.id === builder.id);
     const made = onPlatform?.campaigns[0];
     const campaignId = made?.id ?? builder.campaign_id;
     if (campaignId === null) {
-      if (named) plan.errors.push(`${at}: платформа ще не зробила кампанію з builder ${builder.id} — міняти нема що`);
-      else plan.skipped.push(`${at}: кампанії на платформі ще немає`);
+      refuse(at, `платформа ще не зробила кампанію з builder ${builder.id} — міняти нема що`, 'кампанії на платформі ще немає');
       continue;
     }
     const record = platform.campaigns.find(p => p.id === campaignId);
     const status = record?.status ?? null;
     if (status !== null && status.toUpperCase() === 'DELETED') {
-      if (named) plan.errors.push(`${at}: кампанію ${campaignId} провайдер зняв — міняти нема що`);
-      else plan.skipped.push(`${at}: знята провайдером`);
+      refuse(at, `кампанію ${campaignId} провайдер зняв — міняти нема що`, 'знята провайдером');
       continue;
     }
     if (!named) {
@@ -123,21 +146,35 @@ export function planAdjust(field: AdjustField, value: number, filter: AdjustFilt
         if (fold(status) !== fold(filter.status)) { plan.skipped.push(`${at}: статус ${status}, не ${filter.status}`); continue; }
       }
     }
-    if (record === undefined) plan.warnings.push(`${at}: кампанії ${campaignId} у списку платформи ще не видно — поточне значення невідоме`);
-    const from = record === undefined ? null : record[field];
-    if (from !== null && from === value) {
+    if (record === undefined) {
+      refuse(at, `кампанії ${campaignId} у списку платформи ще не видно — без поточних біда, бюджету й статусу запит не скласти, спробуйте пізніше`, 'у списку платформи ще не видно');
+      continue;
+    }
+    const { budget, bid } = record;
+    if (budget === null || bid === null) {
+      const missing = budget === null ? 'бюджет' : 'бід';
+      refuse(at, `список платформи не показує ${missing} кампанії ${campaignId} — запит без нього не скласти`, `список платформи не показує ${missing}`);
+      continue;
+    }
+    const from = field === 'budget' ? budget : bid;
+    if (from === value) {
       plan.skipped.push(`${at}: ${FIELD_WORD[field]} уже ${value}`);
       continue;
     }
     const campaignName = made?.name ?? builder.campaign_name;
     plan.changes.push({
       campaign: c.name, campaignId, campaignName, field, from, to: value,
-      label: `${c.name}: ${FIELD_WORD[field]} ${from === null ? '?' : from} → ${value} (кампанія ${campaignId}${campaignName === null ? '' : ` «${campaignName}»`})`,
+      label: `${c.name}: ${FIELD_WORD[field]} ${from} → ${value} (кампанія ${campaignId}${campaignName === null ? '' : ` «${campaignName}»`})`,
+      body: adjustBody(campaignId, { budget, bid, [field]: value }, record.status),
     });
   }
   if (plan.changes.length === 0 && plan.errors.length === 0) plan.warnings.push('жодної кампанії під фільтр — нічого не зміниться');
   return plan;
 }
+
+/** The form as the admin fills it: numbers as typed, the status in capitals. */
+const adjustBody = (campaignId: number, values: { budget: number; bid: number }, status: string): AdjustBody =>
+  ({ id: String(campaignId), bid: String(values.bid), budget: String(values.budget), status: status.trim().toUpperCase() });
 
 /** The campaign's state after a change went through: the live values with the time. */
 export function withLive(state: CampaignState, field: AdjustField, value: number, at: Date): CampaignState {
