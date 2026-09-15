@@ -25,6 +25,8 @@ export interface TopicFolder {
   scripts: Record<string, boolean>;
   /** The batches under `sources/`, oldest first. */
   batches: string[];
+  /** Campaign folder → file under `creatives/` → its hash, as the plan computes it; what tells a launched campaign's files changed without the plan. */
+  hashes?: Record<string, Record<string, string>>;
 }
 
 /**
@@ -50,14 +52,18 @@ export interface DiskColumn {
   script: boolean;
   /** Why the manifest is not usable, or null when it is. */
   problem: string | null;
+  /** Whether the files under `creatives/` are not the ones the launched campaign was built with — names or bytes. */
+  changed: boolean;
 }
 
-/** State two: the launch, from `state.json` and the plan. */
+/** State two: the launch, from `state.json`, the disk, and the plan once it is counted. */
 export type LaunchKind =
   /** No creatives yet: the buyer's draft, not offered for launch. */
   | 'draft'
   | 'unbuilt'
   | 'built'
+  /** Built, and the files differ from what it was built with — seen on disk, before any plan. */
+  | 'changed'
   /** Built, and the folder differs: a relaunch is what the plan offers. */
   | 'relaunch'
   /** The plan refuses this campaign; the folder needs fixing. */
@@ -104,11 +110,12 @@ export interface PlatformColumn {
 }
 
 /**
- * The admin. Its routes are a single-page app's and were not in the dumps, so
- * the link is to the admin itself with the builder id shown beside it — not
- * a deep route guessed at.
+ * The admin's campaign builder page. The admin is a single-page app and no
+ * route that opens one builder or one campaign by id is known yet, so every
+ * link goes to this list — the page where a builder's status and rejection
+ * are — with the ids beside it in the tooltip and the copied text.
  */
-export const ADMIN_URL = 'https://admin.digifor.io/';
+export const BUILDER_ADMIN_URL = 'https://admin.digifor.io/acquisition/campaign-builder';
 
 // --------------------------------------------------------------- rows --
 
@@ -116,6 +123,9 @@ export interface TableCampaign {
   name: string;
   language: string | null;
   country: string | null;
+  /** The term group and article folders the manifest names, or null when it does not read. */
+  termgroup: string | null;
+  article: string | null;
   /** The cabinet alias the manifest names, or null when it names none the topic has. */
   account: string | null;
   disk: DiskColumn;
@@ -134,6 +144,8 @@ export interface Totals {
 export interface TableAccount {
   alias: string;
   adAccount: string | null;
+  /** The cabinet's name as the platform lists it, off the buyer's builders; null until a campaign went out from it. */
+  adAccountName: string | null;
   campaigns: TableCampaign[];
   totals: Totals;
 }
@@ -148,6 +160,8 @@ export interface TableSource {
 export interface TopicTable {
   key: string;
   name: string;
+  /** The topic's id on the platform, from the state; null before the first launch. */
+  topicId: number | null;
   /** Why the topic manifest could not be read, or null. */
   problem: string | null;
   sources: TableSource[];
@@ -168,7 +182,7 @@ export const emptyTotals = (): Totals => ({ campaigns: 0, built: 0, active: 0, r
 function totalsOf(campaigns: readonly TableCampaign[]): Totals {
   return {
     campaigns: campaigns.length,
-    built: campaigns.filter(c => c.launch.kind === 'built' || c.launch.kind === 'relaunch').length,
+    built: campaigns.filter(c => c.launch.kind === 'built' || c.launch.kind === 'changed' || c.launch.kind === 'relaunch').length,
     active: campaigns.filter(c => c.platform.kind === 'active').length,
     rejected: campaigns.filter(c => c.platform.kind === 'rejected').length,
     withoutCreatives: campaigns.filter(c => c.disk.creatives === 0).length,
@@ -186,14 +200,25 @@ const sumTotals = (list: readonly Totals[]): Totals => list.reduce((sum, t) => (
  */
 export function launchColumn(disk: DiskColumn, state: CampaignState | undefined, outline: CampaignOutline | undefined): LaunchColumn {
   const built = state?.builder !== null && state?.builder !== undefined;
-  if (disk.creatives === 0) return { kind: 'draft', label: built ? 'зібрана · креативів у теці немає' : 'без креативів', steps: 0, errors: 0 };
-  if (disk.problem !== null) return { kind: 'errors', label: 'campaign.yaml не читається', steps: 0, errors: 1 };
-  if (outline === undefined) return built ? { kind: 'built', label: 'зібрана', steps: 0, errors: 0 } : { kind: 'unbuilt', label: 'не зібрана', steps: 0, errors: 0 };
-  if (outline.errors > 0) return { kind: 'errors', label: `${outline.errors} помилок у плані — виправте теку`, steps: outline.steps, errors: outline.errors };
+  if (disk.creatives === 0) return { kind: 'draft', label: built ? 'залита · креативів у теці немає' : 'без креативів', steps: 0, errors: 0 };
+  if (disk.problem !== null) return { kind: 'errors', label: 'налаштування кампанії не читаються', steps: 0, errors: 1 };
+  if (outline === undefined) {
+    if (!built) return { kind: 'unbuilt', label: 'не залита', steps: 0, errors: 0 };
+    return disk.changed ? { kind: 'changed', label: 'файли змінились після заливу', steps: 0, errors: 0 } : { kind: 'built', label: 'залита', steps: 0, errors: 0 };
+  }
+  if (outline.errors > 0) return { kind: 'errors', label: `${outline.errors} помилок у плані — виправте кампанію`, steps: outline.steps, errors: outline.errors };
   if (outline.relaunch) return { kind: 'relaunch', label: 'є різниця — треба перезалив', steps: outline.steps, errors: 0 };
-  if (built) return { kind: 'built', label: outline.steps > 0 ? `зібрана · ${outline.steps} кроків у плані` : 'зібрана', steps: outline.steps, errors: 0 };
-  if (outline.steps === 0) return { kind: 'unbuilt', label: 'не зібрана · план порожній', steps: 0, errors: 0 };
-  return { kind: 'unbuilt', label: `не зібрана · ${outline.steps} кроків`, steps: outline.steps, errors: 0 };
+  if (built) return { kind: 'built', label: outline.steps > 0 ? `залита · ${outline.steps} кроків у плані` : 'залита', steps: outline.steps, errors: 0 };
+  if (outline.steps === 0) return { kind: 'unbuilt', label: 'не залита · план порожній', steps: 0, errors: 0 };
+  return { kind: 'unbuilt', label: `не залита · ${outline.steps} кроків`, steps: outline.steps, errors: 0 };
+}
+
+/** Whether the files on disk are not the set the launched campaign was built with: a name added or gone, or a remade file. */
+function filesChanged(hashes: Record<string, string> | undefined, state: CampaignState | undefined): boolean {
+  if (hashes === undefined || state?.builder === null || state?.builder === undefined) return false;
+  const known = state.creatives;
+  const names = Object.keys(hashes);
+  return names.length !== Object.keys(known).length || names.some(name => known[name]?.hash !== hashes[name]);
 }
 
 /**
@@ -205,10 +230,10 @@ export function platformColumn(state: CampaignState | undefined, platform: Platf
   const none: PlatformColumn = { kind: 'none', label: 'не залита', reason: null, builderId: null, campaignId: null, campaignName: null, budget: null, bid: null, url: null };
   const builderRef = state?.builder ?? null;
   if (builderRef === null) return none;
-  const own = { builderId: builderRef.id, campaignId: builderRef.campaign_id, campaignName: builderRef.campaign_name, budget: null, bid: null, url: ADMIN_URL };
+  const own = { builderId: builderRef.id, campaignId: builderRef.campaign_id, campaignName: builderRef.campaign_name, budget: null, bid: null, url: BUILDER_ADMIN_URL };
   if (platform === null || platform.at === null) return { ...own, kind: 'unknown', label: 'платформа ще не опитана', reason: null };
   const builder = platform.builders.find(b => b.id === builderRef.id);
-  if (builder === undefined) return { ...own, kind: 'unknown', label: `builder ${builderRef.id} у списку платформи немає`, reason: null };
+  if (builder === undefined) return { ...own, kind: 'unknown', label: 'у списку платформи цієї кампанії не видно', reason: null };
   if (isRejected(builder)) {
     const reason = builder.rejection === null ? null : describeRejection(builder.rejection);
     return { ...own, kind: 'rejected', label: 'реджект', reason };
@@ -244,17 +269,22 @@ function rowOf(folder: TopicFolder, topic: TopicManifest | null, tree: TreeCampa
   let language: string | null = null;
   let country: string | null = null;
   let account: string | null = null;
+  let termgroup: string | null = null;
+  let article: string | null = null;
   if (yaml === undefined) problem = 'немає campaign.yaml';
   else if (topic === null) problem = 'topic.yaml не читається';
   else {
     const parsed = parseCampaignManifest(yaml, topic);
-    if (parsed.ok) ({ language, country, account } = parsed.value);
+    if (parsed.ok) ({ language, country, account, termgroup, article } = parsed.value);
     else problem = parsed.errors.join('; ');
   }
-  const disk: DiskColumn = { creatives: tree.creatives, rejected: tree.rejected, script: folder.scripts[tree.name] === true, problem };
   const own = state.campaigns[tree.name];
+  const disk: DiskColumn = {
+    creatives: tree.creatives, rejected: tree.rejected, script: folder.scripts[tree.name] === true, problem,
+    changed: filesChanged(folder.hashes?.[tree.name], own),
+  };
   const row: TableCampaign = {
-    name: tree.name, language, country, account, disk,
+    name: tree.name, language, country, termgroup, article, account, disk,
     launch: launchColumn(disk, own, outline),
     platform: platformColumn(own, platform),
   };
@@ -287,11 +317,19 @@ export function buildTopicTable(
   const outlines = new Map((outline ?? []).map(o => [o.name, o]));
   const placed = campaignsOf(folder.paths).map(tree => rowOf(folder, topic, tree, state, outlines.get(tree.name), platform));
 
+  // A cabinet's name is on every campaign that went out from it; the buyer's builders carry them all.
+  const cabinetNames = new Map<string, string>();
+  for (const b of platform?.builders ?? []) {
+    for (const c of b.campaigns) {
+      if (c.ad_account != null && c.ad_account_name != null && c.ad_account_name !== '') cabinetNames.set(c.ad_account, c.ad_account_name);
+    }
+  }
   const sources = new Map<TrafficSource | typeof NO_CABINET, Map<string, TableAccount>>();
   const accountOf = (source: TrafficSource | typeof NO_CABINET, alias: string, adAccount: string | null): TableAccount => {
     const bySource = sources.get(source) ?? new Map<string, TableAccount>();
     sources.set(source, bySource);
-    const own = bySource.get(alias) ?? { alias, adAccount, campaigns: [], totals: emptyTotals() };
+    const adAccountName = adAccount === null ? null : cabinetNames.get(adAccount) ?? null;
+    const own = bySource.get(alias) ?? { alias, adAccount, adAccountName, campaigns: [], totals: emptyTotals() };
     bySource.set(alias, own);
     return own;
   };
@@ -307,6 +345,7 @@ export function buildTopicTable(
   return {
     key: folder.key,
     name: topic?.name ?? folder.key,
+    topicId: state.topic_id,
     problem,
     sources: tableSources,
     totals: sumTotals(tableSources.map(s => s.totals)),
@@ -319,3 +358,57 @@ export function buildTopicTable(
 /** The campaigns «Що буде залито» on the topic ticks: not built, with steps and without errors. Relaunches have their own button. */
 export const launchable = (table: TopicTable): string[] =>
   table.sources.flatMap(s => s.accounts.flatMap(a => a.campaigns.filter(c => c.launch.kind === 'unbuilt' && c.launch.steps > 0).map(c => c.name)));
+
+// ---------------------------------------------------------- clipboard --
+
+const topicLine = (table: TopicTable): string =>
+  `Топік: ${table.name} — ${table.key} (${table.topicId === null ? 'на платформі ще немає' : `topic ${table.topicId}`})`;
+
+const cabinetWords = (account: TableAccount | undefined): string => {
+  if (account === undefined || account.adAccount === null) return 'без кабінету';
+  return account.adAccountName === null ? `кабінет ${account.adAccount}` : `кабінет «${account.adAccountName}» (${account.adAccount})`;
+};
+
+const platformWords = (p: PlatformColumn): string => [
+  p.label + (p.reason !== null ? ` — ${p.reason}` : ''),
+  p.builderId !== null ? `builder ${p.builderId}` : null,
+  p.campaignId !== null ? `кампанія ${p.campaignId}${p.campaignName !== null ? ` «${p.campaignName}»` : ''}` : null,
+  p.budget !== null ? `бюджет ${p.budget}` : null,
+  p.bid !== null ? `бід ${p.bid}` : null,
+].filter((part): part is string => part !== null).join(' · ');
+
+const placed = (table: TopicTable): { campaign: TableCampaign; account: TableAccount }[] =>
+  table.sources.flatMap(s => s.accounts.flatMap(account => account.campaigns.map(campaign => ({ campaign, account }))));
+
+const geoWords = (c: TableCampaign): string => `${c.language ?? '?'}-${c.country ?? '?'}`;
+
+/**
+ * A campaign as text to paste into a chat with Claude: which topic, which
+ * folder by its full path, what is in it and what the platform calls it —
+ * enough to find the creatives or the campaign without asking.
+ */
+export function campaignClipboard(table: TopicTable, name: string, topicFolder: string): string {
+  const found = placed(table).find(p => p.campaign.name === name);
+  if (found === undefined) return `${topicLine(table)}\nКампанія: ${name}\nТека: ${topicFolder}/campaigns/${name}`;
+  const { campaign: c, account } = found;
+  const about = [geoWords(c), cabinetWords(account), c.termgroup !== null ? `термгрупа ${c.termgroup}` : null, c.article !== null ? `стаття ${c.article}` : null]
+    .filter((part): part is string => part !== null).join(' · ');
+  return [
+    topicLine(table),
+    `Кампанія: ${c.name} — ${about}`,
+    `Тека: ${topicFolder}/campaigns/${c.name}`,
+    `Креативи: ${c.disk.creatives} mp4 у creatives/${c.disk.rejected > 0 ? `, ${c.disk.rejected} у creatives/rejected/` : ''}`,
+    `Платформа: ${platformWords(c.platform)}`,
+  ].join('\n');
+}
+
+/** A topic as text to paste: its folder and every campaign in a line, with its state on the platform. */
+export function topicClipboard(table: TopicTable, topicFolder: string): string {
+  const rows = placed(table);
+  return [
+    topicLine(table),
+    `Тека: ${topicFolder}`,
+    `Кампанії (${rows.length}):`,
+    ...rows.map(({ campaign: c, account }) => `- ${c.name} — ${geoWords(c)} · ${cabinetWords(account)} · ${c.disk.creatives} mp4 · ${platformWords(c.platform)}`),
+  ].join('\n');
+}

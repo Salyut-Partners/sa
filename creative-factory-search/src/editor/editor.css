@@ -157,8 +157,17 @@ header {
 .topic-table .platform.deleted { color: var(--muted); text-decoration: line-through; }
 .topic-table .platform .reason { color: var(--muted); display: inline-block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .topic-table .act { text-align: right; white-space: nowrap; }
+.topic-table .launch.changed { color: var(--warn); }
+.topic-table .campaign-row.offered { cursor: pointer; }
+.topic-table .campaign-row.offered:hover td { background: var(--well); }
+.topic-table .row-tick { margin: 0 6px 0 0; vertical-align: middle; pointer-events: none; }
+.table-head .copy, .topic-table .copy { font-size: 12px; }
+.topics .import-open { margin-bottom: 10px; }
+.import-view { display: flex; flex-direction: column; gap: 10px; }
+.import-view .row { display: flex; gap: 8px; }
+.import-table input[type=text] { width: 100%; min-width: 160px; }
+.import-view .import-run { align-self: flex-start; padding: 8px 14px; }
 .topic-table .act button { padding: 5px 10px; font-size: 12px; }
-.topic-table .act button.relaunch:not(:disabled) { border-color: var(--warn); color: var(--warn); }
 .topic-table .totals-row td { font-weight: 600; border-bottom: 0; background: var(--well); }
 .topic-table .totals-row td + td { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
 

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { emptyCampaignState, type CampaignState, type PlatformBuilder, type PlatformCampaign } from './campaign-plan.ts';
 import { emptyState, type CampaignOutline, type LaunchState } from './plan.ts';
 import {
-  ADMIN_URL, buildTopicTable, emptyPlatformStatus, launchable, launchColumn, NO_CABINET, platformColumn, type PlatformStatus, type TopicFolder,
+  BUILDER_ADMIN_URL, buildTopicTable, campaignClipboard, emptyPlatformStatus, launchable, launchColumn, NO_CABINET, platformColumn, topicClipboard,
+  type PlatformStatus, type TopicFolder,
 } from './topic-table.ts';
 
 const TOPIC = `
@@ -74,7 +75,7 @@ describe('the topic table', () => {
     ]);
     const first = table.sources[0]!.accounts[0]!.campaigns[1]!;
     expect(first).toMatchObject({ language: 'de', country: 'DE', account: 'main-tk', disk: { creatives: 2, rejected: 1, script: true, problem: null } });
-    expect(table.sources[1]!.accounts[0]!.campaigns[0]!.disk).toEqual({ creatives: 1, rejected: 0, script: false, problem: null });
+    expect(table.sources[1]!.accounts[0]!.campaigns[0]!.disk).toEqual({ creatives: 1, rejected: 0, script: false, problem: null, changed: false });
     expect(table.batches).toEqual(['0911-1432']);
   });
 
@@ -127,24 +128,84 @@ describe('the topic table', () => {
     );
     expect(launchable(table)).toEqual(['de-de-main-tk']);
   });
+
+  it('sees files changed since the launch by their hashes against the state, with no plan and no platform', () => {
+    const launched = { ...built(700), creatives: { '01.mp4': { id: 1, hash: 'h1' }, '02.mp4': { id: 2, hash: 'h2' } } };
+    const read = (hashes: Record<string, string>) => buildTopicTable(
+      folder({ hashes: { 'de-de-main-tk': hashes } }),
+      state({ 'de-de-main-tk': launched }),
+      null,
+      null,
+    ).sources[0]!.accounts[0]!.campaigns.find(c => c.name === 'de-de-main-tk')!.launch;
+    expect(read({ '01.mp4': 'h1', '02.mp4': 'h2' })).toMatchObject({ kind: 'built', label: 'залита' });
+    expect(read({ '01.mp4': 'h1', '02.mp4': 'remade' })).toMatchObject({ kind: 'changed' });
+    expect(read({ '01.mp4': 'h1', '02.mp4': 'h2', '03.mp4': 'new' })).toMatchObject({ kind: 'changed' });
+  });
+
+  it('names a cabinet as the platform does, off the buyer\'s builders, and keeps the id beside it for when it cannot', () => {
+    const table = buildTopicTable(folder(), state(), null, platform({
+      builders: [builder(700, { campaigns: [{ id: 1000, name: 'x', term_group_id: null, ad_account: '53560', ad_account_name: 'GB / Salyut_Partners / Account 16' }] })],
+    }));
+    expect(table.sources.map(s => s.accounts.map(a => [a.alias, a.adAccount, a.adAccountName]))).toEqual([
+      [['main-tk', '53560', 'GB / Salyut_Partners / Account 16']],
+      [['fb-1', '9001', null]],
+    ]);
+  });
+});
+
+describe('what «Копіювати» puts on the clipboard', () => {
+  const read = () => buildTopicTable(
+    folder(),
+    { ...state({ 'de-de-main-tk': built(700, 1000) }), topic_id: 103902 },
+    null,
+    platform({
+      builders: [builder(700, { campaigns: [{ id: 1000, name: '34-AIjobsDE-1000', term_group_id: null, ad_account: '53560', ad_account_name: 'Account 16' }] })],
+      campaigns: [campaign(1000, 'ACTIVE')],
+    }),
+  );
+
+  it('is a campaign with its topic, the folder by full path, the creatives and the platform ids — enough for Claude to find it', () => {
+    expect(campaignClipboard(read(), 'de-de-main-tk', '/Users/b/sa/launches/ai-jobs-de')).toBe([
+      'Топік: AI jobs DE — ai-jobs-de (topic 103902)',
+      'Кампанія: de-de-main-tk — de-DE · кабінет «Account 16» (53560) · термгрупа tg-wh · стаття a-wh',
+      'Тека: /Users/b/sa/launches/ai-jobs-de/campaigns/de-de-main-tk',
+      'Креативи: 2 mp4 у creatives/, 1 у creatives/rejected/',
+      'Платформа: активна · builder 700 · кампанія 1000 «34-AIjobsDE-1000» · бюджет 20 · бід 0.45',
+    ].join('\n'));
+  });
+
+  it('is a topic with its folder and every campaign in a line, and says when the topic is not on the platform yet', () => {
+    const text = topicClipboard(read(), '/Users/b/sa/launches/ai-jobs-de');
+    expect(text.split('\n')).toEqual([
+      'Топік: AI jobs DE — ai-jobs-de (topic 103902)',
+      'Тека: /Users/b/sa/launches/ai-jobs-de',
+      'Кампанії (3):',
+      '- de-at-main-tk — de-AT · кабінет «Account 16» (53560) · 0 mp4 · не залита',
+      '- de-de-main-tk — de-DE · кабінет «Account 16» (53560) · 2 mp4 · активна · builder 700 · кампанія 1000 «34-AIjobsDE-1000» · бюджет 20 · бід 0.45',
+      '- de-de-fb-1 — de-DE · кабінет 9001 · 1 mp4 · не залита',
+    ]);
+    const fresh = buildTopicTable(folder(), state(), null, null);
+    expect(topicClipboard(fresh, '/r/ai-jobs-de').split('\n')[0]).toBe('Топік: AI jobs DE — ai-jobs-de (на платформі ще немає)');
+  });
 });
 
 describe('the launch column', () => {
-  const disk = { creatives: 2, rejected: 0, script: true, problem: null };
-  it('is a draft without creatives, whatever the plan says', () => {
+  const disk = { creatives: 2, rejected: 0, script: true, problem: null, changed: false };
+  it('is a draft without creatives, whatever the plan says — and a launched campaign whose videos stayed on the platform says so', () => {
     expect(launchColumn({ ...disk, creatives: 0 }, undefined, outline('x', { steps: 3 })).kind).toBe('draft');
-    expect(launchColumn({ ...disk, creatives: 0 }, built(1), undefined).label).toMatch(/зібрана/);
+    expect(launchColumn({ ...disk, creatives: 0 }, built(1), undefined)).toMatchObject({ kind: 'draft', label: 'залита · креативів у теці немає' });
   });
-  it('answers built or not from the state alone while the plan is not read', () => {
-    expect(launchColumn(disk, undefined, undefined)).toMatchObject({ kind: 'unbuilt', label: 'не зібрана' });
-    expect(launchColumn(disk, built(1), undefined)).toMatchObject({ kind: 'built', label: 'зібрана' });
+  it('answers from the disk and the state alone while the plan is not counted: not launched, launched, files changed since', () => {
+    expect(launchColumn(disk, undefined, undefined)).toMatchObject({ kind: 'unbuilt', label: 'не залита' });
+    expect(launchColumn(disk, built(1), undefined)).toMatchObject({ kind: 'built', label: 'залита' });
+    expect(launchColumn({ ...disk, changed: true }, built(1), undefined)).toMatchObject({ kind: 'changed', label: 'файли змінились після заливу' });
   });
-  it('reads the plan: errors first, then a relaunch, then steps', () => {
+  it('reads the plan once it is counted: errors first, then a relaunch, then steps', () => {
     expect(launchColumn(disk, built(1), outline('x', { errors: 2, steps: 1, relaunch: true }))).toMatchObject({ kind: 'errors', errors: 2 });
     expect(launchColumn(disk, built(1), outline('x', { steps: 2, relaunch: true }))).toMatchObject({ kind: 'relaunch', steps: 2 });
-    expect(launchColumn(disk, undefined, outline('x', { steps: 4 }))).toMatchObject({ kind: 'unbuilt', label: 'не зібрана · 4 кроків', steps: 4 });
-    expect(launchColumn(disk, undefined, outline('x'))).toMatchObject({ kind: 'unbuilt', label: 'не зібрана · план порожній' });
-    expect(launchColumn(disk, built(1), outline('x'))).toMatchObject({ kind: 'built', label: 'зібрана' });
+    expect(launchColumn(disk, undefined, outline('x', { steps: 4 }))).toMatchObject({ kind: 'unbuilt', label: 'не залита · 4 кроків', steps: 4 });
+    expect(launchColumn(disk, undefined, outline('x'))).toMatchObject({ kind: 'unbuilt', label: 'не залита · план порожній' });
+    expect(launchColumn(disk, built(1), outline('x'))).toMatchObject({ kind: 'built', label: 'залита' });
   });
   it('is errors when the manifest does not read', () => {
     expect(launchColumn({ ...disk, problem: 'x' }, undefined, undefined).kind).toBe('errors');
@@ -160,14 +221,14 @@ describe('the platform column', () => {
   });
 
   it('matches the builder by id, never by name, and says when the list does not show it', () => {
-    expect(platformColumn(built(700), platform({ builders: [builder(701)] }))).toMatchObject({ kind: 'unknown', label: 'builder 700 у списку платформи немає' });
+    expect(platformColumn(built(700), platform({ builders: [builder(701)] }))).toMatchObject({ kind: 'unknown', label: 'у списку платформи цієї кампанії не видно', builderId: 700 });
   });
 
   it('is a rejection with the reason in a line, and a link into the admin', () => {
     const column = platformColumn(built(700), platform({
       builders: [builder(700, { status: 'NOT_APPROVED', rejection: { reasons: ['Policy Violation'], details: 'Video script promises specific pay.\nMore.' } })],
     }));
-    expect(column).toMatchObject({ kind: 'rejected', label: 'реджект', reason: 'Policy Violation — Video script promises specific pay.', url: ADMIN_URL, builderId: 700 });
+    expect(column).toMatchObject({ kind: 'rejected', label: 'реджект', reason: 'Policy Violation — Video script promises specific pay.', url: BUILDER_ADMIN_URL, builderId: 700 });
   });
 
   it('is on review for a builder the platform has not approved yet', () => {

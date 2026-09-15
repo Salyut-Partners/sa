@@ -203,11 +203,21 @@ export interface PlatformBuilder {
   /** Every creative repo entry it was built with, headline included. */
   creative_ids: number[];
   /** The campaigns the platform made from it — empty until it has. `ad_account` is the platform's id of the cabinet, when the list says. */
-  campaigns: { id: number; name: string; term_group_id: number | null; ad_account?: string | null }[];
+  campaigns: { id: number; name: string; term_group_id: number | null; ad_account?: string | null; ad_account_name?: string | null }[];
   /** Why it was turned down, when it was. */
   rejection: Rejection | null;
   /** The bot's verdict per creative, when the bot has run. */
   review: ReviewVerdict[];
+  // What the builder was built with, as the buyer-wide list shows it — read by
+  // an import, which lays a campaign folder out of it. Absent in reads that do not carry them.
+  /** The platform's country name (`Germany`) or `All`. */
+  country?: string;
+  language?: string;
+  rsoc_count?: number;
+  keyword_rotation?: boolean;
+  /** The theme id. */
+  theme?: string | null;
+  topic_name?: string;
 }
 
 /** Whether the builder was turned down. */

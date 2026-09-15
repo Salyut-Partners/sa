@@ -10,7 +10,6 @@ import {
 import { templateMoves } from '../core/templates.ts';
 import type { Project } from '../core/types.ts';
 import { BUTTON_STYLES, FONTS } from '../renderer/index.ts';
-import { BatchPanel } from './BatchPanel.tsx';
 import type { ExportRun } from './export.ts';
 import { ExportPanel } from './ExportPanel.tsx';
 import { FilePicker } from './FilePicker.tsx';
@@ -93,8 +92,6 @@ export function SidePanel(props: Props) {
 
   return (
     <aside className="side">
-      <BatchPanel topic={props.topic} />
-
       <div className="group">
         <div className="lab">Фото</div>
         {/* Dropping is handled for the whole window, not just this target — so

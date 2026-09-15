@@ -11,7 +11,9 @@ import type { VoiceModel } from '../core/voice.ts';
 // these routes drifting apart without anything noticing.
 import type { LaunchesTree as DiskTree } from '../core/launches-tree.ts';
 import type { TopicTable } from '../core/topic-table.ts';
+import type { ImportableTopic } from '../core/adopt.ts';
 import type { PlanDescription } from '../server/apply.ts';
+import type { AdoptedFolder } from '../server/launches.ts';
 import type { BatchOutput } from '../server/batch.ts';
 import type { JobFailure, JobStatus } from '../server/jobs.ts';
 import type { BatchRead, BatchWritten } from '../server/batches.ts';
@@ -26,12 +28,21 @@ export interface LaunchesTree extends DiskTree {
   platform: { version: number; at: string | null; note: string | null };
 }
 
-/** The topic table with the plan it was built from; a plan that could not be read leaves `plan` null and says why. */
+/** The topic table, and the plan when it was asked for; a plan that could not be read leaves `plan` null and says why. */
 export interface TopicTableRead {
   table: TopicTable;
   plan: PlanDescription | null;
   planNote: string;
   stateNote: string;
+  /** The topic folder's full path, for the text «Копіювати» puts on the clipboard. */
+  folder: string;
+}
+
+/** The import dialog's list: the buyer's topics no folder has yet, or — for a buyer not known yet — the ask for one topic id. */
+export interface ImportableRead {
+  topics: (ImportableTopic & { launchKey: string })[];
+  needsTopic: boolean;
+  note?: string | null;
 }
 
 /**
@@ -112,6 +123,10 @@ export const translate = (
 export const fetchLaunches = (): Promise<string[]> =>
   ask<{ launches: string[] }>('/api/launches').then(r => r.launches);
 
+/** The launches by key and topic name, off the tree — what the export panel offers the buyer to pick from. */
+export const fetchLaunchNames = (): Promise<{ key: string; name: string }[]> =>
+  ask<LaunchesTree>('/api/launches/tree').then(t => t.niches.flatMap(n => n.topics.map(topic => ({ key: topic.key, name: topic.name }))));
+
 /** The campaign folders of a launch, each with the language its manifest names. */
 export const fetchCampaigns = (launchKey: string): Promise<CampaignInfo[]> =>
   ask<{ campaigns: CampaignInfo[] }>(`/api/launches/${launchKey}/campaigns`).then(r => r.campaigns);
@@ -123,9 +138,17 @@ export const fetchLaunchesTree = (): Promise<LaunchesTree> => ask<LaunchesTree>(
 export const fetchPlan = (launchKey: string, campaigns: readonly string[] | null): Promise<PlanDescription> =>
   ask<PlanDescription>(`/api/launches/${launchKey}/plan`, asJson(campaigns === null ? {} : { campaigns }));
 
-/** The topic table with its plan: three states per campaign, the totals, the batches. Reads the platform; creates nothing. */
-export const fetchTopicTable = (launchKey: string): Promise<TopicTableRead> =>
-  ask<TopicTableRead>(`/api/launches/${launchKey}/table`, asJson({}));
+/** The topic table: three states per campaign, the totals, the batches — and with `plan` the topic's plan counted. Reads the platform; creates nothing. */
+export const fetchTopicTable = (launchKey: string, plan = false, refresh = false): Promise<TopicTableRead> =>
+  ask<TopicTableRead>(`/api/launches/${launchKey}/table`, asJson({ plan, refresh }));
+
+/** The topics the buyer can import; `topicId` names one of theirs when the server does not know the buyer yet. */
+export const fetchImportable = (topicId?: number): Promise<ImportableRead> =>
+  ask<ImportableRead>('/api/launches/importable' + (topicId === undefined ? '' : `?topicId=${topicId}`));
+
+/** Import one topic with its campaigns into a new folder. Reads the platform; writes nothing to it. */
+export const importTopic = (topicId: number, launchKey: string): Promise<AdoptedFolder> =>
+  ask<AdoptedFolder>('/api/launches/import', asJson({ topicId, launchKey }));
 
 /**
  * Apply. The `confirm` is the gate the server insists on, and the button that
@@ -134,9 +157,6 @@ export const fetchTopicTable = (launchKey: string): Promise<TopicTableRead> =>
  */
 export const startApply = (launchKey: string, campaigns: readonly string[] | null): Promise<{ id: string | null; steps: number }> =>
   ask<{ id: string | null; steps: number }>(`/api/launches/${launchKey}/apply`, asJson({ confirm: true, ...(campaigns === null ? {} : { campaigns }) }));
-
-export const fetchBatches = (launchKey: string): Promise<string[]> =>
-  ask<{ batches: string[] }>(`/api/launches/${launchKey}/batches`).then(r => r.batches);
 
 /** The batch as the server read it: pictures back inside, and which files were gone. */
 export const readBatch = (launchKey: string, batch: string): Promise<BatchRead> =>

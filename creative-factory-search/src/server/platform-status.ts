@@ -74,6 +74,25 @@ async function read(config: SaConfig): Promise<PlatformStatus> {
   return { builders, campaigns, at: new Date().toISOString(), note: null };
 }
 
+/**
+ * Learn the buyer from one topic of theirs — for a buyer with no launch
+ * folder yet, who has nothing else to learn it from — and read the platform
+ * again as them. Answers the user id, or null when the topic is not there.
+ */
+export async function learnBuyer(config: SaConfig, topicId: number): Promise<number | null> {
+  const ready = platformState(config);
+  if (!ready.ready) return null;
+  const topic = await readTopic(new PlatformClient(ready), topicId);
+  if (topic === null || topic.user_id <= 0) return null;
+  learnedUserId = topic.user_id;
+  readAt = 0;
+  await refreshPlatform(config);
+  return learnedUserId;
+}
+
+/** Whether the buyer is known — from the config, or learned. */
+export const buyerKnown = (config: SaConfig): boolean => config.platform.user_id !== null || learnedUserId !== null;
+
 /** One read now, shared with anyone else asking meanwhile. A failure keeps the last status and becomes its note. */
 export function refreshPlatform(config: SaConfig): Promise<PlatformStatus> {
   if (inFlight !== null) return inFlight;

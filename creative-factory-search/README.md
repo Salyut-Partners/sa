@@ -93,9 +93,21 @@ rejected ones beside, whether `script.md` has words, whether the manifest
 reads. **The launch:** not built, built, or «є різниця — треба перезалив»,
 from `state.json` and the plan. **The platform:** the builder's status and
 the campaign's — on review, rejected with the reason in a line, approved,
-active, paused, taken down — with the builder and campaign ids and a link
-into the admin. Spend, ROI and clicks are deliberately not there: the
-platform has them, and two versions of that truth would be one too many.
+active, paused, taken down — with a link into the admin's campaign builder
+page. Spend, ROI and clicks are deliberately not there: the platform has
+them, and two versions of that truth would be one too many.
+
+Names, not ids. The buyer reads the topic's name, the cabinet's name as the
+platform lists it (off the buyer's builders, `ad_account_name`), and a
+launched campaign's platform name; the launch key, the folder names and every
+id are in the tooltips and in what «Копіювати» copies. That button is on the
+topic and on every campaign: a block of text for a chat with Claude — topic
+name, key and id, the folder's full path, the creatives, the platform's
+state, builder and campaign ids, budget and bid — enough to find the thing
+without asking (`campaignClipboard` and `topicClipboard` in
+`core/topic-table.ts`). The address keeps the place: `#/launches/<key>`,
+`#/creatives`, `#/subtitles` (`core/route.ts`), so a reload opens the same
+topic and Back walks between tabs; the plan panel is not in it.
 
 The platform's side is read once per buyer, never per topic:
 `GET /campaign-builder?user_id=` gives every builder of the buyer across all
@@ -111,18 +123,45 @@ to read is `platform.user_id` in the config, or, when that is not set, the
 buyer the first topic on the platform belongs to. Below the table are the
 topic's sources, each with «відкрити в редакторі».
 
-The table is read again by itself: the tab polls the disk every few seconds
-and the tree's answer carries the platform status's version, so a folder
-`sa new` made, an export's files, or a rejection that just landed each make
-the table read again, plan and all. There is no «оновити план» button.
+Opening a topic is the disk and those two buyer-wide reads, and no plan —
+the plan is a dozen and a half reads per topic, and switching topics must
+not pay for it. Without the plan the launch column says what the disk and
+the state can: «не залита», «залита», or «файли змінились після заливу» when
+the mp4 files under `creatives/` are not the ones the state recorded, by
+name and hash (`launchColumn`). The table is read again by itself: the tab
+polls the disk every few seconds and the tree's answer carries the platform
+status's version, so a folder, an export's files, or a rejection that just
+landed each make the table read again.
 
-Two steps, two words. «**Що буде залито**» — on the topic, for every unbuilt
-campaign the plan has steps for, and on a campaign — opens the plan in the
-panel under «Нічого ще не зроблено. Ось що станеться:» with a box per
-campaign; ticking and unticking changes the steps shown, and the number on
-the one button at the bottom, «**Залити N кампаній — за живі гроші**», which
-is the only thing that sends anything. Where the plan sees a relaunch the
-words are «Що буде перезалито» and «Перезалити N». The apply is then a bar,
+Two steps, two buttons. «**Оновити план**» on the topic reads the platform
+again and counts the topic's plan; the panel beside the table opens under
+«Нічого ще не зроблено. Ось що станеться:» with a box per campaign the plan
+would launch or relaunch — new launches ticked, relaunches not, since a
+relaunch pauses the old campaign — and a click on a row ticks it too. While
+the panel is open the table is read with the plan. Ticking changes the steps
+shown, and the number on the one button at the bottom, «**Залити N кампаній —
+за живі гроші**», which is the only thing that sends anything. The panel
+speaks the buyer's words: the plan's lines go through `core/wording.ts`,
+which turns `campaign.yaml`, `sa plan` and the like into what they are; the
+CLI, Claude and the copied text keep the technical line.
+
+**Import from the platform.** «Імпортувати з платформи» at the top of the
+topic list lists the buyer's topics that no folder has yet — read off the
+buyer's builders, each of which names its topic — with the set-ups each runs,
+how many are live and rejected, and a launch key to start from. The ticked
+ones are imported as `sa adopt` imports: topic, keys, articles, and every
+campaign. Builders are grouped by set-up — article, term group, source,
+cabinet, pixel, country — since a relaunch is a new builder of the same
+set-up and a buyer never runs two live campaigns on one; the newest builder
+is the folder's current one, the older ones its history with the fate the
+platform shows, and a set-up whose newest campaign was taken down is not
+imported. The manifest comes from the newest builder and its profile (read
+off `GET /campaign-builder/<id>`), the script from its videos. Videos are not
+downloaded: the state names them without a hash, so the plan leaves the
+folder alone until the buyer puts files into it, and then it is a relaunch.
+A buyer the server does not know yet — no `platform.user_id`, no folder —
+is asked for the id of one topic of theirs, and the buyer is learned from it.
+The rule is `core/adopt.ts`, tested there. The apply is then a bar,
 the step in flight and a cancel, watched from any tab, and narrowed on the
 server to the ticked campaigns: `narrowPlan` in `core/plan.ts` takes a list
 and keeps the topic's steps, the campaigns' own, and the steps of other
@@ -455,22 +494,22 @@ topic's own. The preset-to-request-body conversion and all of this is
 
 ### Sources in the topic folder
 
-Nothing is chosen up front: the buyer drops photos and works. The export
-panel's «Куди» picks the topic — or none, for a download as before — and
-the first export into its campaigns saves the batch under
-`launches/<key>/sources/<MMDD-HHmm>/`, named by the server's clock, and binds
-the project to it; from then on ⌘S and the header's Save write there, and a
-second export of the same session writes into the same batch. `project.json`
+Nothing is chosen up front and nothing is saved into a folder by hand: the
+buyer drops photos and works, and the autosave keeps the session. The export
+panel's «Куди» picks the topic — or none, for a download as before — and an
+export into its campaigns writes the sources under
+`launches/<key>/sources/<MMDD-HHmm>/`, named by the server's clock. A second
+export of the session into the same topic writes into the same batch; an
+export into another topic starts that topic's own; «Новий» forgets the
+binding (`batchForExport` in `core/batch-folder.ts`). The header's Save and
+⌘S save the project file through the browser. `project.json`
 lies beside the pictures, flat, referenced by name rather than embedded. The
 split happens on the server, in `core/batch-folder.ts`; the editor sends and
 receives the same file it would download, so a `creatives.json` saved through
 the browser opens from the sources chooser too and comes out as files on the
 next save. A photo whose file has gone is left out on open and named, rather
-than opened blank. Pictures are only ever written, never removed. The
-«Ісходники» group in the side panel says where the batch is, lets an older
-one be opened again to regenerate a creative or two, and lets the binding go
-so the next export starts a new batch. A batch bound to one topic will not
-export into another — one export is one topic — until it is unbound.
+than opened blank. Pictures are only ever written, never removed. An older
+batch is opened again from the topic's table in the launches tab.
 
 Since the matrix, one language is several campaigns. The «Куди» rows show a
 box per campaign that speaks the language, all ticked, with the rest of the
@@ -482,11 +521,9 @@ plan pays for the copies once — the same bytes under one name in two
 campaigns of a topic is one creative, uploaded by the first campaign and
 referenced by the rest (`core/campaign-plan.ts`).
 
-Two stores, one source. The autosave in IndexedDB is the browser's memory of
-the session; the folder is the batch. The header says which it is looking at
-— `key/sources/batch · у теці` or `· не збережено в теку` — and after a
-reload it reads the folder back and compares before saying either. The
-`.json` button beside Save is the old path and stays as the fallback.
+The editor's tools — undo, open, save, new, the photo count — are in the
+header of the creatives tab only; the launches and subtitles tabs keep the
+theme switch and nothing else.
 
 ## Shape of the code
 
@@ -514,12 +551,16 @@ Three build units and one rule.
   and narrows that to some campaigns for the tab's ticks and `--campaign`;
   `core/adjust.ts` decides what `sa budget` and `sa bid` would change —
   which campaigns, from what, to what — and what refuses;
-  `core/adopt.ts` turns a topic read off the platform into the folder
-  `sa adopt` writes and the state it starts from, and `core/html-markdown.ts`
+  `core/adopt.ts` turns a topic read off the platform — with its campaigns,
+  grouped by set-up — into the folder `sa adopt` and the import write and the
+  state it starts from, and lists the topics an import can take;
+  `core/html-markdown.ts`
   the platform's article HTML back into `article.md`;
   `core/launches-tree.ts` turns the folder structure into the topic list the
   tab draws, and `core/topic-table.ts` one topic's folders, state files and
-  the buyer's platform status into the table's three states per campaign;
+  the buyer's platform status into the table's three states per campaign
+  and the text «Копіювати» copies; `core/wording.ts` the plan's lines into
+  the buyer's words; `core/route.ts` the address into a tab and a topic;
   `core/matrix.ts` turns a launch matrix into the folders `sa expand`
   and `sa new campaign` write, and decides their names;
   `core/campaign-plan.ts` does the same for a campaign — creatives,

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { adoptTopic, articleFingerprint, checkAdopt, folderNameFor, type AdoptInput } from './adopt.ts';
+import { adoptTopic, articleFingerprint, checkAdopt, folderNameFor, importableTopics, suggestLaunchKey, type AdoptInput, type CampaignImport } from './adopt.ts';
 import { parseArticle } from './article.ts';
-import type { PlatformBuilder } from './campaign-plan.ts';
-import { parseTopicManifest } from './launch.ts';
+import { parseCampaignState, type PlatformBuilder, type PlatformCampaign, type PlatformTsp } from './campaign-plan.ts';
+import { parseCampaignManifest, parseTopicManifest } from './launch.ts';
 import { articleHash, parseKeywords, parseTermGroupOptions, type PlatformPostDetail } from './plan.ts';
 
 const builder = (id: number, over: Partial<PlatformBuilder> = {}): PlatformBuilder => ({
@@ -169,5 +169,142 @@ describe('folderNameFor', () => {
     expect(folderNameFor('.hidden', 'tg-1')).toBe('hidden');
     expect(folderNameFor('x'.repeat(80), 'a')).toHaveLength(60);
     expect(folderNameFor('niet-de-rollator-maar-dit-de-hulpmiddelen-en-diensten-waar-mensen-in-2026-op-overstappen', 'a')).toBe('niet-de-rollator-maar-dit-de-hulpmiddelen-en-diensten-waar');
+  });
+});
+
+describe('adopting a topic with the campaigns it already runs', () => {
+  const ARTICLE = 'warehouse-jobs-in-germany-2026-shifts';
+  const FOLDER = `de-de-tk-1-tg-wh-${ARTICLE}`;
+  const tsp = (id: number, over: Partial<PlatformTsp['fields']> = {}): PlatformTsp => ({
+    id, name: 'AIjobsDEwh-tk-DE-db-20', topic_id: 107567,
+    fields: { budget: 20, bid: 0.5, location: ['Germany'], language: 'All', gender: 'All', age: ['All'], devices: ['All'], os: [], launch_tomorrow: false, end_date: null, scheduled: false, ...over },
+  });
+  const live = (id: number, status: string): PlatformCampaign => ({ id, name: `34-AIjobsDEwh-${id}`, status, published: true, revenue: 1, spend: null, budget: 20, bid: 0.5 });
+  const launched = (id: number, campaignId: number | null, over: Partial<PlatformBuilder> = {}): PlatformBuilder => builder(id, {
+    country: 'Germany', language: 'All', rsoc_count: 5, keyword_rotation: false, theme: '768', creative_ids: [601, 501, 502],
+    campaigns: campaignId === null ? [] : [{ id: campaignId, name: `34-AIjobsDEwh-${campaignId}`, term_group_id: 213642, ad_account: '53560' }],
+    ...over,
+  });
+  const importing = (over: Partial<CampaignImport> = {}): CampaignImport => ({
+    creatives: [
+      { id: 501, media_type: 'Video', original_filename: '01.mp4', headline: null, status: 'Approved', ad_script: 'Lagerjobs in Deutschland.' },
+      { id: 502, media_type: 'Video', original_filename: '02.mp4', headline: null, status: 'Approved', ad_script: 'Lagerjobs in Deutschland.' },
+      { id: 503, media_type: 'Video', original_filename: '03.mp4', headline: null, status: 'Approved', ad_script: 'Old.' },
+      { id: 601, media_type: 'Headline', original_filename: null, headline: '<p><strong>Learn more</strong></p>', status: 'Approved', ad_script: null },
+    ],
+    tsps: [tsp(141653)],
+    links: { 716806: { tsp: 141653, term_group: 213642, ad_account: '53560' } },
+    campaigns: [live(1279494, 'ACTIVE')],
+    countries: [{ name: 'Germany', code: 'DE' }, { name: 'Italy', code: 'IT' }],
+    ...over,
+  });
+  const adopt = (builders: PlatformBuilder[], over: Partial<CampaignImport> = {}) =>
+    adoptTopic(input({ builders: [...builders], campaigns: importing(over) }));
+
+  it('gives each campaign a folder named as sa expand names one, a campaign.yaml that parses, the script, and no videos', () => {
+    const adopted = adopt([launched(716806, 1279494)]);
+    const topic = parseTopicManifest(fileOf(adopted, 'topic.yaml'));
+    if (!topic.ok) throw new Error(topic.errors.join());
+    const manifest = parseCampaignManifest(fileOf(adopted, `campaigns/${FOLDER}/campaign.yaml`), topic.value);
+    expect(manifest.ok && manifest.value).toEqual({
+      termgroup: 'tg-wh', article: ARTICLE, language: 'de', country: 'DE', account: 'tk-1', theme: '768', rsoc_count: 5, keyword_rotation: false,
+      headline: 'Learn more',
+      tsp: { budget: 20, bid: 0.5, launch_tomorrow: false, end_date: null, age: ['All'], gender: 'All', devices: ['All'], os: ['All'], schedule: [], language: 'All' },
+    });
+    expect(fileOf(adopted, `campaigns/${FOLDER}/script.md`)).toBe('Lagerjobs in Deutschland.\n');
+    expect(adopted.tree.dirs).toContain(`campaigns/${FOLDER}/creatives`);
+    expect(adopted.tree.files.some(f => f.path.endsWith('.mp4'))).toBe(false);
+  });
+
+  it('writes the state of a launched campaign: builder, campaign, the creatives by name without hashes, the headline and the profile', () => {
+    const own = adopt([launched(716806, 1279494)]).state.campaigns[FOLDER];
+    expect(own).toEqual({
+      builder: { id: 716806, campaign_id: 1279494, campaign_name: '34-AIjobsDEwh-1279494' },
+      creatives: { '01.mp4': { id: 501, hash: '' }, '02.mp4': { id: 502, hash: '' } },
+      headline: { id: 601, text: 'Learn more' },
+      tsp: { id: 141653, name: 'AIjobsDEwh-tk-DE-db-20' },
+      pending: null, history: [], live: null,
+    });
+    expect(parseCampaignState(JSON.stringify(own)).ok).toBe(true);
+  });
+
+  it('folds the relaunches of one set-up into one folder: the newest builder is current, the older ones are its history with their fate', () => {
+    const adopted = adopt(
+      [launched(716806, 1279494, { creative_ids: [601, 503] }), launched(720000, 1290000)],
+      { campaigns: [live(1279494, 'PAUSED'), live(1290000, 'ACTIVE')], links: { 720000: { tsp: 141653, term_group: 213642, ad_account: '53560' } } },
+    );
+    expect(Object.keys(adopted.state.campaigns)).toEqual([FOLDER]);
+    const own = adopted.state.campaigns[FOLDER]!;
+    expect(own.builder).toEqual({ id: 720000, campaign_id: 1290000, campaign_name: '34-AIjobsDEwh-1290000' });
+    expect(own.history).toEqual([
+      { builder: { id: 716806, campaign_id: 1279494, campaign_name: '34-AIjobsDEwh-1279494' }, creatives: { '03.mp4': { id: 503, hash: '' } }, fate: 'paused' },
+    ]);
+  });
+
+  it('keeps apart what differs in article, term group, cabinet or country', () => {
+    const adopted = adopt(
+      [launched(716806, 1279494), launched(716900, 1279600, { country: 'Italy' })],
+      { campaigns: [live(1279494, 'ACTIVE'), live(1279600, 'ACTIVE')] },
+    );
+    expect(Object.keys(adopted.state.campaigns).sort()).toEqual([FOLDER, `it-it-tk-1-tg-wh-${ARTICLE}`]);
+  });
+
+  it('takes a rejected builder, whose set-up is read off its own links, and leaves out a set-up whose newest campaign was taken down', () => {
+    const adopted = adopt(
+      [
+        launched(716806, 1279494),
+        launched(716950, null, { status: 'NOT_APPROVED', country: 'Italy', rejection: { reasons: ['Policy Violation'], details: '' } }),
+      ],
+      { campaigns: [live(1279494, 'DELETED')], links: { 716950: { tsp: 141653, term_group: 213642, ad_account: '53560' } } },
+    );
+    expect(Object.keys(adopted.state.campaigns)).toEqual([`it-it-tk-1-tg-wh-${ARTICLE}`]);
+    expect(adopted.state.campaigns[`it-it-tk-1-tg-wh-${ARTICLE}`]!.builder).toEqual({ id: 716950, campaign_id: null, campaign_name: null });
+    expect(adopted.notes.join('\n')).toMatch(/знято/);
+  });
+
+  it('takes the country off the profile when the builder targets All and the profile one country', () => {
+    const adopted = adopt([launched(716806, 1279494, { country: 'All' })]);
+    expect(Object.keys(adopted.state.campaigns)).toEqual([FOLDER]);
+    expect(fileOf(adopted, `campaigns/${FOLDER}/campaign.yaml`)).toMatch(/country: DE/);
+  });
+
+  it('falls back to the budget and bid the campaign list shows when the profile is not found, and says so', () => {
+    const adopted = adopt([launched(716806, 1279494)], { links: {}, tsps: [] });
+    const topic = parseTopicManifest(fileOf(adopted, 'topic.yaml'));
+    const manifest = topic.ok ? parseCampaignManifest(fileOf(adopted, `campaigns/${FOLDER}/campaign.yaml`), topic.value) : null;
+    expect(manifest?.ok && manifest.value.tsp).toMatchObject({ budget: 20, bid: 0.5 });
+    expect(adopted.state.campaigns[FOLDER]!.tsp).toBeNull();
+    expect(adopted.notes.join('\n')).toMatch(/TSP/);
+  });
+});
+
+describe('the topics a buyer can import', () => {
+  const named = (id: number, topicId: number, name: string, campaignId: number | null, over: Partial<PlatformBuilder> = {}): PlatformBuilder => builder(id, {
+    topic_id: topicId, topic_name: name, country: 'Germany',
+    campaigns: campaignId === null ? [] : [{ id: campaignId, name: 'x', term_group_id: 1, ad_account: '53560' }], ...over,
+  });
+  const listed = (id: number, status: string): PlatformCampaign => ({ id, name: 'x', status, published: true, revenue: 0, spend: null, budget: 20, bid: 0.5 });
+
+  it('is every topic the buyer\'s builders name that no folder has yet, with its campaigns counted as set-ups, active and rejected', () => {
+    const topics = importableTopics(
+      [
+        named(1, 107567, 'AI jobs DE wh', 10), named(2, 107567, 'AI jobs DE wh', 11),
+        named(3, 107567, 'AI jobs DE wh', null, { country: 'Italy', status: 'NOT_APPROVED' }),
+        named(4, 103196, 'AI avia DE hr', 12),
+        named(5, 99999, 'Old topic', 13),
+      ],
+      [listed(10, 'PAUSED'), listed(11, 'ACTIVE'), listed(12, 'DELETED'), listed(13, 'ACTIVE')],
+      [99999],
+    );
+    expect(topics).toEqual([
+      { topicId: 103196, name: 'AI avia DE hr', campaigns: 0, active: 0, rejected: 0 },
+      { topicId: 107567, name: 'AI jobs DE wh', campaigns: 2, active: 1, rejected: 1 },
+    ]);
+  });
+
+  it('suggests a launch key from the topic name, free of the keys already taken', () => {
+    expect(suggestLaunchKey('AI jobs DE wh', [])).toBe('ai-jobs-de-wh');
+    expect(suggestLaunchKey('AI jobs DE wh', ['ai-jobs-de-wh'])).toBe('ai-jobs-de-wh-2');
+    expect(suggestLaunchKey('Jobs', [])).toBe('jobs-topic');
   });
 });

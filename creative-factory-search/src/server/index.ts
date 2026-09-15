@@ -12,13 +12,13 @@ import { parseAdjustValue } from '../core/adjust.ts';
 import { emptyState } from '../core/plan.ts';
 import { startAdjust } from './adjust.ts';
 import { buildTopicTable } from '../core/topic-table.ts';
-import { freshPlatform, platformStatus, platformVersion, refreshPlatform, startPlatformPoll } from './platform-status.ts';
+import { buyerKnown, freshPlatform, learnBuyer, platformStatus, platformVersion, refreshPlatform, startPlatformPoll } from './platform-status.ts';
 import { startBatch } from './batch.ts';
 import { campaignCreativesDir, createBatch, listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
 import { clickupState } from './clickup.ts';
 import { configPath, ensureLaunchesRoot, loadConfig } from './config.ts';
-import { adoptLaunch, createCampaign, createLaunch, existingLaunchKeys, expandLaunch, launchesTree, readTopicFolder, RefusedError } from './launches.ts';
+import { adoptLaunch, createCampaign, createLaunch, existingLaunchKeys, expandLaunch, importList, launchesTree, readTopicFolder, RefusedError } from './launches.ts';
 import { isTrafficSource } from '../core/launch.ts';
 import { BadRequestError, cancelJob, jobById, outputsOf, statusOf } from './jobs.ts';
 import { PlatformReadError, platformState } from './platform.ts';
@@ -125,25 +125,32 @@ app.get('/api/launches/tree', (_req, res) => {
 });
 
 /**
- * The topic table: the folder in three states per campaign, with the topic's
- * plan beside it. The plan is read first — it is what says «не зібрана» from
- * «є різниця» — and a plan that cannot be read leaves the table standing on
- * the state files, with the sentence why. The platform status is refreshed
- * for a topic being opened when the last read is not fresh.
+ * The topic table: the folder in three states per campaign. Opening a topic
+ * reads the disk and the buyer's platform status — two reads for every topic
+ * at once, refreshed when not fresh — and no plan: the launch column comes
+ * from the state and the files' hashes. With `plan: true` in the body the
+ * topic's plan is counted too, and with `refresh: true` the platform is read
+ * again first — what «Оновити план» asks for; a plan
+ * that cannot be read leaves the table standing, with the sentence why.
  */
 app.post('/api/launches/:key/table', async (req, res) => {
   try {
     const config = loadConfig();
     const key = req.params.key;
     if (!existingLaunchKeys(config.launches_root).includes(key)) throw new RefusedError(`заливу \`${key}\` немає`);
-    const platform = await freshPlatform(config);
+    const body = (req.body ?? {}) as { plan?: unknown; refresh?: unknown };
+    const withPlan = body.plan === true;
+    // «Оновити план» asks for the platform read again; the table's own re-reads take a fresh-enough status.
+    const platform = body.refresh === true ? await refreshPlatform(config) : await freshPlatform(config);
     let plan: PlanDescription | null = null;
     let planNote = '';
-    try {
-      plan = describePlan(await planLaunch(config, key, null));
-    } catch (e) {
-      if (e instanceof RefusedError || e instanceof PlatformReadError) planNote = e.message;
-      else throw e;
+    if (withPlan) {
+      try {
+        plan = describePlan(await planLaunch(config, key, null));
+      } catch (e) {
+        if (e instanceof RefusedError || e instanceof PlatformReadError) planNote = e.message;
+        else throw e;
+      }
     }
     let state = emptyState();
     let stateNote = '';
@@ -153,7 +160,7 @@ app.post('/api/launches/:key/table', async (req, res) => {
       stateNote = e instanceof RefusedError ? e.message : (e as Error).message;
     }
     const table = buildTopicTable(readTopicFolder(config.launches_root, key), state, plan?.outline ?? null, platform);
-    res.json({ table, plan, planNote, stateNote });
+    res.json({ table, plan, planNote, stateNote, folder: path.join(config.launches_root, key) });
   } catch (e) {
     answerFailure(res, e, 'table');
   }
@@ -226,6 +233,55 @@ app.post('/api/launches/adopt', async (req, res) => {
     res.json({ ...made, ticket });
   } catch (e) {
     answerFailure(res, e, 'adopt');
+  }
+});
+
+/**
+ * The topics the buyer can import: off the buyer's builders, which the
+ * platform status already holds. A buyer the server does not know yet —
+ * no user id in the config, no launch folder to learn it from — can name one
+ * topic of theirs as `?topicId=`, and the buyer is learned from it.
+ */
+app.get('/api/launches/importable', async (req, res) => {
+  try {
+    const config = loadConfig();
+    const ready = platformState(config);
+    if (!ready.ready) throw new RefusedError(ready.note);
+    const topicId = Number(req.query['topicId']);
+    if (Number.isInteger(topicId) && topicId > 0 && (await learnBuyer(config, topicId)) === null) {
+      throw new RefusedError(`топіка ${topicId} на платформі немає — перевірте id`);
+    }
+    if (!buyerKnown(config) && platformStatus().at === null) {
+      res.json({ topics: [], needsTopic: true });
+      return;
+    }
+    const platform = await freshPlatform(config);
+    res.json({ ...importList(config, platform), needsTopic: false, note: platform.note });
+  } catch (e) {
+    answerFailure(res, e, 'importable');
+  }
+});
+
+/**
+ * Import a topic with its campaigns into a folder — the launches tab's button,
+ * `sa adopt` by another door. Reads the platform, writes nothing to it; the
+ * ticket is filed by the usual sync, and the platform status is read again so
+ * the new folder's campaigns show their state straight away.
+ */
+app.post('/api/launches/import', async (req, res) => {
+  const body = (typeof req.body === 'object' && req.body !== null ? req.body : {}) as Record<string, unknown>;
+  if (typeof body['launchKey'] !== 'string') {
+    res.status(400).json({ error: 'у запиті немає launchKey' });
+    return;
+  }
+  try {
+    const config = loadConfig();
+    const made = await adoptLaunch(config, { topicId: Number(body['topicId']), launchKey: body['launchKey'] });
+    const ticket = (await syncTickets(config, made.launchKey))[made.launchKey] ?? { ok: false as const, note: 'звірка тікетів нічого не сказала про цю теку' };
+    void refreshPlatform(config);
+    res.json({ ...made, ticket });
+  } catch (e) {
+    answerFailure(res, e, 'import');
   }
 });
 

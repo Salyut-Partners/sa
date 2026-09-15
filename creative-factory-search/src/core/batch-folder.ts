@@ -170,3 +170,13 @@ export function joinPhotos(data: unknown, read: (path: string) => string | null)
   }
   return { file: { ...(data as object), photos }, missing };
 }
+
+/**
+ * The batch an export writes its sources into: the one the session already
+ * has under that topic, or null for a new one the server names by the clock.
+ * An export into another topic is not refused — it starts that topic's own
+ * batch — and «Новий» in the editor forgets the binding, so the next export
+ * starts afresh.
+ */
+export const batchForExport = (bound: { launchKey: string; batch: string } | null, launchKey: string): string | null =>
+  bound !== null && bound.launchKey === launchKey ? bound.batch : null;

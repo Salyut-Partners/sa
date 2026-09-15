@@ -7,6 +7,7 @@
 // `core/queue.ts` reads outcomes: a timeout is a fact to reason about, not an
 // exception to unwind.
 import type { AdjustBody } from '../core/adjust.ts';
+import type { BuilderLinks } from '../core/adopt.ts';
 import type {
   AdAccount, HeadlineBody, PauseBody, Pixel, PlatformBuilder, PlatformCampaign, PlatformCreative, PlatformTsp, Rejection, ReviewVerdict,
   Theme, TspBody, TspFields,
@@ -419,10 +420,17 @@ export const toBuilder = (raw: unknown): PlatformBuilder => {
         term_group_id: campaign['term_group_id'] == null ? null : num(campaign['term_group_id']),
         // `ad_id` is the platform's id of the cabinet the campaign went out from; `ad_account_id` beside it is the source's own.
         ad_account: campaign['ad_id'] == null ? null : str(campaign['ad_id']),
+        ad_account_name: campaign['ad_account_name'] == null ? null : str(campaign['ad_account_name']),
       };
     }),
     rejection: toRejection(b),
     review: toReview(b['review_bot_result']),
+    country: str(b['country'] ?? 'All'),
+    language: str(b['language'] ?? 'All'),
+    rsoc_count: num(b['rsoc_count'] ?? 5),
+    keyword_rotation: b['use_keyword_rotation'] === true || num(b['use_keyword_rotation'] ?? 0) === 1,
+    theme: Array.isArray(b['themes']) && b['themes'].length > 0 ? str(b['themes'][0]) : null,
+    topic_name: str(b['topic_name'] ?? bag(b['topic'])['name'] ?? ''),
   };
 };
 
@@ -442,6 +450,24 @@ async function readBuilderPages(client: PlatformClient, query: Record<string, st
 
 export async function readBuilders(client: PlatformClient, topicId: number): Promise<PlatformBuilder[]> {
   return (await readBuilderPages(client, { topic_id: topicId })).filter(b => b.topic_id === topicId);
+}
+
+/**
+ * What one builder was linked to, off its own page (`GET /campaign-builder/<id>`):
+ * the profile, and the term group and cabinet — which the list only says once
+ * a campaign was made. What an import needs and the list does not carry.
+ */
+export async function readBuilderLinks(client: PlatformClient, id: number): Promise<BuilderLinks> {
+  const body = bag(bag(need(await client.get(`/campaign-builder/${id}`), `GET /campaign-builder/${id}`))['campaignBuilder']);
+  const first = (key: string): Record<string, unknown> | null => (Array.isArray(body[key]) && body[key].length > 0 ? bag(body[key][0]) : null);
+  const tsp = first('traffic_source_profiles');
+  const group = first('term_groups');
+  const cabinet = first('ad_accounts');
+  return {
+    tsp: tsp === null ? null : num(tsp['id']),
+    term_group: group === null ? null : num(group['id']),
+    ad_account: cabinet === null ? null : str(cabinet['id']),
+  };
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  decodeDataUrl, isFolderName, isPhotoRef, joinPhotos, mimeFor, sameProjectFile, splitPhotos,
+  batchForExport, decodeDataUrl, isFolderName, isPhotoRef, joinPhotos, mimeFor, sameProjectFile, splitPhotos,
 } from './batch-folder.ts';
 import { apply, createProject } from './project.ts';
 import { fromFile, toFile, type ProjectFile } from './serialize.ts';
@@ -166,5 +166,16 @@ describe('joinPhotos', () => {
   it('hands anything that is not a project through untouched, for fromFile to refuse', () => {
     expect(joinPhotos({ hello: 'world' }, () => null)).toEqual({ file: { hello: 'world' }, missing: [] });
     expect(joinPhotos(null, () => null).missing).toEqual([]);
+  });
+});
+
+describe('batchForExport', () => {
+  it('writes an export into the same topic back into the batch the session already has there', () => {
+    expect(batchForExport({ launchKey: 'ai-jobs-de-wh', batch: '0914-2055' }, 'ai-jobs-de-wh')).toBe('0914-2055');
+  });
+
+  it('starts a new batch for a first export, and for an export into another topic — no refusal', () => {
+    expect(batchForExport(null, 'ai-jobs-de-wh')).toBeNull();
+    expect(batchForExport({ launchKey: 'ai-jobs-de-wh', batch: '0914-2055' }, 'ai-avia-de-hr')).toBeNull();
   });
 });

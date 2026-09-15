@@ -2,15 +2,20 @@
 // are made here and the ticket by the sync in `tickets.ts`, which the route
 // calls right after — so a missing token still leaves the buyer with
 // somewhere to work, and the answer says which half happened.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { adoptTopic, articleFingerprint, checkAdopt } from '../core/adopt.ts';
+import { adoptTopic, articleFingerprint, checkAdopt, importableTopics, newestOfSetUps, suggestLaunchKey, type BuilderLinks, type ImportableTopic } from '../core/adopt.ts';
 import { type ImageReader } from '../core/article.ts';
 import { mimeFor } from '../core/batch-folder.ts';
 import { checkNewLaunch, isTrafficSource, newLaunchTree, parseTopicManifest, type LaunchCreated, type TopicManifest, type TrafficSource } from '../core/launch.ts';
 import { parseState, type PlatformPostDetail } from '../core/plan.ts';
 import { writeState } from './apply.ts';
-import { PlatformClient, platformState, readBuilders, readConfigurations, readPixels, readPost, readPosts, readTermGroups, readTopic } from './platform.ts';
+import {
+  PlatformClient, platformState, readBuilderLinks, readBuilders, readCampaigns, readConfigurations, readCountries, readCreatives, readPixels, readPost, readPosts,
+  readTermGroups, readTopic, readTsps,
+} from './platform.ts';
+import type { PlatformStatus } from '../core/topic-table.ts';
 import { expandMatrix, parseMatrix, singleCampaignMatrix, type Existing, type Expansion, type SingleCampaign } from '../core/matrix.ts';
 import { SOURCES_DIR } from '../core/batch-folder.ts';
 import { buildLaunchesTree, type LaunchesTree, type LaunchFolderListing } from '../core/launches-tree.ts';
@@ -78,12 +83,35 @@ export function readTopicFolder(root: string, key: string): TopicFolder {
     const script = path.join(own, 'script.md');
     scripts[name] = fs.existsSync(script) && fs.readFileSync(script, 'utf8').trim() !== '';
   }
+  const hashes: Record<string, Record<string, string>> = {};
+  for (const name of folderNames(folder, 'campaigns')) {
+    const creatives = path.join(folder, 'campaigns', name, 'creatives');
+    if (!fs.existsSync(creatives)) continue;
+    hashes[name] = {};
+    for (const entry of fs.readdirSync(creatives, { withFileTypes: true })) {
+      if (entry.isFile() && /\.mp4$/i.test(entry.name) && !entry.name.startsWith('.')) hashes[name][entry.name] = fileHash(path.join(creatives, entry.name));
+    }
+  }
   const sources = path.join(folder, SOURCES_DIR);
   const batches = !fs.existsSync(sources) ? [] : fs.readdirSync(sources, { withFileTypes: true })
     .filter(d => d.isDirectory() && !d.name.startsWith('.') && fs.existsSync(path.join(sources, d.name, 'project.json')))
     .map(d => d.name)
     .sort();
-  return { key, topicYaml: fs.existsSync(manifest) ? fs.readFileSync(manifest, 'utf8') : null, paths, manifests, scripts, batches };
+  return { key, topicYaml: fs.existsSync(manifest) ? fs.readFileSync(manifest, 'utf8') : null, paths, manifests, scripts, batches, hashes };
+}
+
+/**
+ * A file's digest, the plan's own — kept by path while its size and time are
+ * the same, so a table read every few seconds does not reread every video.
+ */
+const hashCache = new Map<string, { size: number; mtimeMs: number; hash: string }>();
+function fileHash(file: string): string {
+  const stat = fs.statSync(file);
+  const known = hashCache.get(file);
+  if (known !== undefined && known.size === stat.size && known.mtimeMs === stat.mtimeMs) return known.hash;
+  const hash = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  hashCache.set(file, { size: stat.size, mtimeMs: stat.mtimeMs, hash });
+  return hash;
 }
 
 /** The folder made: what `LaunchCreated` is before the ticket sync has had its say. */
@@ -123,7 +151,7 @@ export function createLaunch(config: SaConfig, request: NewLaunchRequest): Folde
 // -------------------------------------------------------------- adopt --
 
 /** The topic ids the launch folders under the root already name in their state files. */
-function adoptedTopicIds(root: string): number[] {
+export function adoptedTopicIds(root: string): number[] {
   const ids: number[] = [];
   for (const key of existingLaunchKeys(root)) {
     const file = path.join(root, key, 'state.json');
@@ -154,6 +182,7 @@ export interface AdoptedFolder extends FolderMade {
   topicId: number;
   termgroups: string[];
   articles: string[];
+  campaigns: string[];
   notes: string[];
 }
 
@@ -184,11 +213,24 @@ export async function adoptLaunch(config: SaConfig, request: AdoptRequest): Prom
     if (detail !== null) posts.push(detail);
   }
   const sources = [...new Set(builders.map(b => b.traffic_source).filter(isTrafficSource))];
-  const pixels = (await Promise.all(sources.map(source => readPixels(api, source)))).flat();
+  const [pixelLists, creatives, tsps, countries, campaigns] = await Promise.all([
+    Promise.all(sources.map(source => readPixels(api, source))),
+    readCreatives(api, topic.id),
+    readTsps(api, topic.id, topic.user_id),
+    readCountries(api),
+    readCampaigns(api, builders.flatMap(b => b.campaigns.map(c => c.id))),
+  ]);
+  const pixels = pixelLists.flat();
+  // Links in two passes: a builder with no campaign yet is placed in its
+  // set-up only through its own page; then the newest of each set-up, for its profile.
+  const links: Record<number, BuilderLinks> = {};
+  await readLinks(api, builders.filter(b => b.campaigns.length === 0).map(b => b.id), links);
+  await readLinks(api, newestOfSetUps(builders, links).filter(id => links[id] === undefined), links);
 
   const adopted = adoptTopic({
     launchKey: request.launchKey, topic, configurations, termGroups, posts, builders, pixels,
     vertical: request.vertical?.trim() || null,
+    campaigns: { creatives, tsps, links, campaigns, countries },
   });
 
   const folder = path.join(root, request.launchKey);
@@ -231,7 +273,35 @@ export async function adoptLaunch(config: SaConfig, request: AdoptRequest): Prom
   return {
     launchKey: request.launchKey, folder, topicId: topic.id,
     files: adopted.tree.files.map(f => f.path),
-    termgroups: Object.keys(state.termgroups), articles: Object.keys(state.articles), notes,
+    termgroups: Object.keys(state.termgroups), articles: Object.keys(state.articles), campaigns: Object.keys(state.campaigns), notes,
+  };
+}
+
+/** A few builder pages at a time: an import of a scaled topic reads dozens, and the platform is one buyer's to share. */
+async function readLinks(api: PlatformClient, ids: readonly number[], into: Record<number, BuilderLinks>): Promise<void> {
+  for (let i = 0; i < ids.length; i += 5) {
+    const chunk = ids.slice(i, i + 5);
+    const read = await Promise.all(chunk.map(id => readBuilderLinks(api, id)));
+    chunk.forEach((id, n) => { into[id] = read[n]!; });
+  }
+}
+
+/** What the import dialog lists: the buyer's topics no folder has yet, each with a launch key to start from. */
+export interface ImportList {
+  topics: (ImportableTopic & { launchKey: string })[];
+}
+
+export function importList(config: SaConfig, platform: PlatformStatus): ImportList {
+  const root = config.launches_root;
+  const taken = existingLaunchKeys(root);
+  const topics = importableTopics(platform.builders, platform.campaigns, adoptedTopicIds(root));
+  const keys: string[] = [...taken];
+  return {
+    topics: topics.map(t => {
+      const launchKey = suggestLaunchKey(t.name, keys);
+      keys.push(launchKey);
+      return { ...t, launchKey };
+    }),
   };
 }
 

@@ -32,17 +32,15 @@ const NO_STYLE = ' none';
  * across seven languages is not something to start by accident.
  *
  * With a topic chosen, the files go to its campaign folders — every campaign
- * of the language, ticked by default — and the sources are saved under the
- * topic on the way, which is what binds the batch to it. With none, the
- * export is a download, as it was. A batch already bound stays with its
- * topic: one export is one topic.
+ * of the language, ticked by default — and the sources are written under the
+ * topic on the way: into the batch this session already has there, or a new
+ * one. With none, the export is a download, as it was.
  */
 export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Props) {
   // Counted, not planned: the plan is built at the press. See `batchSize`.
   const { photos, locales, total } = batchSize(project);
   const { status } = run;
-  const bound = topic.location?.launchKey ?? null;
-  const launchKey = bound ?? (topic.launchKey === '' ? null : topic.launchKey);
+  const launchKey = topic.launchKey === '' ? null : topic.launchKey;
 
   const [campaigns, setCampaigns] = useState<CampaignInfo[] | null>(null);
   const [campaignsNote, setCampaignsNote] = useState('');
@@ -165,26 +163,24 @@ export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Prop
       <div className="group">
         <div className="lab">
           Куди
-          <span className="val">{launchKey ?? 'у завантаження'}</span>
+          <span className="val">{launchKey === null ? 'у завантаження' : topic.launches.find(l => l.key === launchKey)?.name ?? launchKey}</span>
         </div>
-        {bound === null ? (
-          <select
-            value={topic.launchKey}
-            onChange={e => topic.browse(e.target.value)}
-            disabled={run.running || topic.busy}
-          >
-            <option value="">— завантажити файлом —</option>
-            {topic.launches.map(key => <option key={key} value={key}>{key}</option>)}
-          </select>
-        ) : null}
-        {topic.offline !== '' && bound === null ? <div className="warn">{topic.offline}</div> : null}
+        <select
+          value={topic.launchKey}
+          onChange={e => topic.browse(e.target.value)}
+          disabled={run.running || topic.busy}
+        >
+          <option value="">— завантажити файлом —</option>
+          {topic.launches.map(l => <option key={l.key} value={l.key}>{l.name}</option>)}
+        </select>
+        {topic.offline !== '' ? <div className="warn">{topic.offline}</div> : null}
         {launchKey === null ? (
-          <div className="note">Оберіть топік — файли ляжуть у його кампанії, а ісходники в його теку.</div>
+          <div className="note">Оберіть топік — креативи ляжуть у його кампанії, а ісходники в його теку.</div>
         ) : null}
         {launchKey !== null && campaigns === null ? <div className="note">Читаю кампанії…</div> : null}
         {campaignsNote !== '' ? <div className="error">{campaignsNote}</div> : null}
         {launchKey !== null && campaigns !== null && campaigns.length === 0 && campaignsNote === '' ? (
-          <div className="warn">У {launchKey}/campaigns немає жодної кампанії — файли нікуди класти. Кампанії створює <code>sa expand</code>.</div>
+          <div className="warn">У цьому топіку ще немає кампаній — креативи нікуди класти. Попросіть Claude створити кампанії під цей топік.</div>
         ) : null}
         {launchKey === null || campaigns === null || campaigns.length === 0 ? null : release.map(id => (
           <LocaleRow
@@ -274,6 +270,9 @@ export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Prop
 
       {run.note === '' ? null : (
         <div className={run.failed ? 'error' : 'note'}>{run.note}</div>
+      )}
+      {topic.note === '' ? null : (
+        <div className={topic.failed ? 'error' : 'note'}>{topic.note}</div>
       )}
     </>
   );
