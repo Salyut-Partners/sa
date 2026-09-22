@@ -7,6 +7,7 @@
 
 set -u
 cd "$(dirname "$0")" || exit 1
+ROOT="$(pwd)"
 
 ok()   { printf "  \033[32m✓\033[0m %s\n" "$1"; }
 info() { printf "  \033[34m→\033[0m %s\n" "$1"; }
@@ -64,7 +65,9 @@ fi
 
 # 6. Конфігурація байера — поза git, бо `~/sa` це git і `.env` у ньому рано чи
 #    пізно закомітять. Файл, що вже є, не перезаписується — тільки підказка;
-#    його відсутність дістає шаблон із плейсхолдерами, щоб було що заповнити.
+#    його відсутність дістає шаблон: спільні id команди вже вписані, особисті
+#    токени — плейсхолдери. launches_root — тека поруч із цим клоном, де б він
+#    не лежав.
 echo
 CONFIG="${SA_CONFIG:-$HOME/.config/sa/config.json}"
 if [ -f "$CONFIG" ]; then
@@ -72,20 +75,31 @@ if [ -f "$CONFIG" ]; then
 else
   info "пишу шаблон конфігурації: $CONFIG"
   mkdir -p "$(dirname "$CONFIG")"
-  cat > "$CONFIG" <<'EOF1'
+  cat > "$CONFIG" <<EOF1
 {
-  "launches_root": "~/sa/launches",
+  "launches_root": "$ROOT/launches",
   "clickup": {
     "token": "REPLACE_CLICKUP_TOKEN",
-    "list_id": "REPLACE_LIST_ID"
+    "list_id": "901219549743"
   },
   "platform": {
     "token": "REPLACE_PLATFORM_BEARER",
-    "organization_id": 0
+    "organization_id": 121
   }
 }
 EOF1
+  chmod 600 "$CONFIG"
   ok "шаблон записано — заповни токени перед першим \`sa plan\`"
+fi
+
+# 6b. Ключі редактора — спільні командні (озвучка ElevenLabs, переклад DeepL).
+#     Лежать у creative-factory-search/.env, який .gitignore не пускає в git.
+ENV_FILE="creative-factory-search/.env"
+if [ -f "$ENV_FILE" ]; then
+  ok "ключі редактора вже стоять: $ENV_FILE"
+else
+  cp creative-factory-search/.env.example "$ENV_FILE" && chmod 600 "$ENV_FILE"
+  ok "шаблон ключів редактора записано: $ENV_FILE"
 fi
 
 # 7. launchd-агент: тримає сервер живим для погодинної звірки тікетів, навіть
@@ -94,7 +108,12 @@ fi
 echo
 AGENT_LABEL="io.sa.tickets"
 AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
-SA_BIN="$(cd "$(dirname "$0")/creative-factory-search" && pwd)/bin/sa"
+SA_BIN="$ROOT/creative-factory-search/bin/sa"
+# Агент, що дивиться на інший клон (репо переїхало), знімається й ставиться знову.
+if launchctl list "$AGENT_LABEL" >/dev/null 2>&1 && ! grep -qF "$SA_BIN" "$AGENT_PLIST" 2>/dev/null; then
+  info "launchd-агент дивиться на інший клон — переставляю"
+  launchctl unload "$AGENT_PLIST" 2>/dev/null
+fi
 if launchctl list "$AGENT_LABEL" >/dev/null 2>&1; then
   ok "launchd-агент $AGENT_LABEL вже стоїть"
 else
@@ -134,6 +153,11 @@ if grep -q REPLACE_CLICKUP_TOKEN "$CONFIG" 2>/dev/null; then
   printf "  \033[33m!\033[0m %s\n" "clickup.token не заповнено — sa new робить лише теку, без тікета"
 else
   ok "clickup.token заповнено"
+fi
+if grep -qE '^ELEVENLABS_API_KEY=.+' "$ENV_FILE" 2>/dev/null; then
+  ok "ELEVENLABS_API_KEY заповнено"
+else
+  printf "  \033[33m!\033[0m %s\n" "ELEVENLABS_API_KEY не заповнено — редактор не озвучуватиме (ключ у тімліда)"
 fi
 
 cat <<EOF2

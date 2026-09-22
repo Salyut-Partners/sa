@@ -6,9 +6,13 @@
 ## 1. Встановлення
 
 ```sh
-git clone <repo> ~/sa
-cd ~/sa && ./setup.sh
+git clone https://github.com/Salyut-Partners/sa.git ~/sa
+cd ~/sa && claude
 ```
+
+і напиши Claude: **«встанови все необхідне»**. Скіл `setup` сам запустить
+`./setup.sh`, попросить токени (розділ 2), впише їх і перевірить живцем.
+Без Claude — те саме руками: `./setup.sh`, потім розділ 2.
 
 Один скрипт ставить усе: Node, ffmpeg, залежності редактора, субтитри (другий
 ffmpeg, Python 3.11, шрифт), шаблон конфігурації й `launchd`-агент, що раз на
@@ -22,26 +26,30 @@ ClickUp.
 
 ## 2. Токени
 
-Скрипт уже поклав шаблон у `~/.config/sa/config.json`. Відкрий і заповни три
-поля:
+Скрипт уже поклав шаблон у `~/.config/sa/config.json` зі спільними id
+команди (`organization_id` і `list_id` уже вписані). Заповни два особисті
+токени:
 
 ```json
 {
-  "launches_root": "~/sa/launches",
-  "clickup": { "token": "pk_…", "list_id": "…" },
-  "platform": { "token": "…", "organization_id": … }
+  "launches_root": "/Users/<ти>/sa/launches",
+  "clickup": { "token": "pk_…", "list_id": "901219549743" },
+  "platform": { "token": "…", "organization_id": 121 }
 }
 ```
 
 - **`clickup.token`** — особистий токен із ClickUp (Settings → Apps), щоб
-  тікети йшли під твоїм іменем. `clickup.list_id` — лист «Заливи» твоєї
-  команди; запитай тімліда.
-- **`platform.token`** і **`platform.organization_id`** — Bearer і id
-  організації на платформі digifor. Теж своє, особисте — виклики йдуть з
-  твого акаунта і твого IP. Необов'язково **`platform.user_id`** — твій id
+  тікети йшли під твоїм іменем.
+- **`platform.token`** — Bearer на платформі digifor (DevTools на
+  admin.digifor.io → Network → заголовок `Authorization`). Теж своє,
+  особисте — виклики йдуть з твого акаунта і твого IP. Необов'язково **`platform.user_id`** — твій id
   користувача на платформі, за яким таба заливів читає статуси всіх твоїх
   кампаній одним запитом; без нього сервер бере id із першого твого топіка,
   що вже є на платформі.
+
+Ключі редактора — спільні командні, у тімліда: `ELEVENLABS_API_KEY`
+(озвучка) і необов'язковий `DEEPL_API_KEY` (переклад скрипту) у
+`creative-factory-search/.env`; шаблон поклав той самий скрипт.
 
 Без цього файлу або без котрогось токена нічого не ламається: редактор і
 `sa new` працюють, а `sa plan`/`sa apply` і синхронізація тікетів скажуть,

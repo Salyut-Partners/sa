@@ -4,7 +4,7 @@
 (`creative-factory-search`), плейбук байера (`playbook`), автосубтитри (`subs`).
 
 ```sh
-git clone <repo> ~/sa
+git clone https://github.com/Salyut-Partners/sa.git ~/sa
 cd ~/sa && ./setup.sh                                   # усе одразу: Node, ffmpeg, субтитри
 cd creative-factory-search && npm run dev               # редактор на 5181, сервер на 5180
 creative-factory-search/bin/sa new <launch-key>         # новий залив
@@ -17,7 +17,9 @@ creative-factory-search/bin/sa new <launch-key>         # новий залив
 навіть коли редактор не відкривали. Його можна ганяти повторно: кожен крок
 пропускає те, що вже стоїть.
 
-Оновлення: `git pull && ./setup.sh`. З чого почати новому байеру —
+Найпростіше — відкрити Claude Code у `~/sa` і написати «встанови все
+необхідне»: скіл `setup` прожене `setup.sh`, попросить токени й ключі і
+перевірить їх. Оновлення: `git pull && ./setup.sh`. З чого почати новому байеру —
 [`ONBOARDING.md`](ONBOARDING.md). Куди що класти й де що читати — `CLAUDE.md`.
 
 Субтитри працюють двома входами до одного пайплайна: таба «Субтитри» в
