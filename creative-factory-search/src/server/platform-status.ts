@@ -5,6 +5,7 @@
 // opened; the topic table reads it, and the tree carries a version number so
 // the tab knows when to look again. What the answer means is
 // `core/topic-table`'s decision.
+import { buyerIdFromToken } from '../core/platform-token.ts';
 import { emptyPlatformStatus, type PlatformStatus } from '../core/topic-table.ts';
 import { readState } from './apply.ts';
 import type { SaConfig } from './config.ts';
@@ -38,13 +39,19 @@ function remember(next: PlatformStatus): void {
 }
 
 /**
- * Whose builders to read. The config may say; otherwise the first launch
- * folder with a topic on the platform says — the topic carries its buyer —
- * and the answer is kept for the server's life.
+ * Whose builders to read. The config may say; otherwise the token says — its
+ * `sub` is the buyer it was issued to — and only when it does not does a launch
+ * folder's topic have to say, the topic carrying its buyer. The answer is kept
+ * for the server's life.
  */
 async function buyerId(config: SaConfig, api: PlatformClient): Promise<number | null> {
   if (config.platform.user_id !== null) return config.platform.user_id;
   if (learnedUserId !== null) return learnedUserId;
+  const fromToken = buyerIdFromToken(config.platform.token);
+  if (fromToken !== null) {
+    learnedUserId = fromToken;
+    return learnedUserId;
+  }
   for (const key of existingLaunchKeys(config.launches_root)) {
     let topicId: number | null;
     try {
@@ -90,8 +97,9 @@ export async function learnBuyer(config: SaConfig, topicId: number): Promise<num
   return learnedUserId;
 }
 
-/** Whether the buyer is known — from the config, or learned. */
-export const buyerKnown = (config: SaConfig): boolean => config.platform.user_id !== null || learnedUserId !== null;
+/** Whether the buyer is known — from the config, from the token, or learned from a topic. */
+export const buyerKnown = (config: SaConfig): boolean =>
+  config.platform.user_id !== null || learnedUserId !== null || buyerIdFromToken(config.platform.token) !== null;
 
 /** One read now, shared with anyone else asking meanwhile. A failure keeps the last status and becomes its note. */
 export function refreshPlatform(config: SaConfig): Promise<PlatformStatus> {

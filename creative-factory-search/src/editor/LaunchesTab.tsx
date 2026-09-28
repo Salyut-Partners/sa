@@ -288,6 +288,8 @@ function ImportView({ onClose, onImported }: ImportViewProps) {
   const [note, setNote] = useState('');
   const [topicId, setTopicId] = useState('');
   const [keys, setKeys] = useState<Record<number, string>>({});
+  /** The niche each topic goes in under: the guess to start with, the buyer's pick after. */
+  const [niches, setNiches] = useState<Record<number, string>>({});
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const [working, setWorking] = useState(false);
   const [report, setReport] = useState<{ text: string; bad: boolean }[]>([]);
@@ -298,6 +300,7 @@ function ImportView({ onClose, onImported }: ImportViewProps) {
       .then(read => {
         setList(read);
         setKeys(Object.fromEntries(read.topics.map(t => [t.topicId, t.launchKey])));
+        setNiches(Object.fromEntries(read.topics.map(t => [t.topicId, t.niche ?? ''])));
       })
       .catch(e => setNote((e as Error).message));
   }, []);
@@ -311,8 +314,9 @@ function ImportView({ onClose, onImported }: ImportViewProps) {
     let first: string | null = null;
     for (const topic of list.topics.filter(t => ticked.has(t.topicId))) {
       const launchKey = (keys[topic.topicId] ?? topic.launchKey).trim();
+      const niche = (niches[topic.topicId] ?? '').trim();
       try {
-        const made = await importTopic(topic.topicId, launchKey);
+        const made = await importTopic(topic.topicId, launchKey, niche === '' ? null : niche);
         first ??= made.launchKey;
         setReport(r => [...r, {
           text: `${topic.name}: імпортовано, кампаній ${made.campaigns.length}${made.notes.length > 0 ? ` · зауваження: ${made.notes.map(forBuyer).join('; ')}` : ''}`,
@@ -355,7 +359,7 @@ function ImportView({ onClose, onImported }: ImportViewProps) {
       {list !== null && !list.needsTopic && list.topics.length === 0 ? <div className="note">Усі ваші топіки вже є в заливах.</div> : null}
       {list !== null && list.topics.length > 0 ? (
         <table className="topic-table import-table">
-          <thead><tr><th /><th>Топік</th><th>Кампанії</th><th>Тека</th></tr></thead>
+          <thead><tr><th /><th>Топік</th><th>Кампанії</th><th>Ніша</th><th>Тека</th></tr></thead>
           <tbody>
             {list.topics.map(t => (
               <tr key={t.topicId} className={'campaign-row' + (ticked.has(t.topicId) ? ' ticked' : '')}>
@@ -369,6 +373,20 @@ function ImportView({ onClose, onImported }: ImportViewProps) {
                 </td>
                 <td title={`topic ${t.topicId}`}><span className="nm">{t.name}</span></td>
                 <td className="disk">{t.campaigns} · активних {t.active} · реджектів {t.rejected}</td>
+                <td>
+                  {list.niches.length === 0 ? (
+                    <span className="note" title="ніші беруться з поля `vertical` у списку ClickUp">—</span>
+                  ) : (
+                    <select
+                      value={niches[t.topicId] ?? ''}
+                      disabled={working}
+                      onChange={e => setNiches(n => ({ ...n, [t.topicId]: e.target.value }))}
+                    >
+                      <option value="">— без ніші —</option>
+                      {list.niches.map(niche => <option key={niche} value={niche}>{niche}</option>)}
+                    </select>
+                  )}
+                </td>
                 <td>
                   <input type="text" value={keys[t.topicId] ?? t.launchKey} disabled={working} onChange={e => setKeys(k => ({ ...k, [t.topicId]: e.target.value }))} />
                 </td>

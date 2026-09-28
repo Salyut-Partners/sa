@@ -19,6 +19,7 @@ import type { PlatformStatus } from '../core/topic-table.ts';
 import { expandMatrix, parseMatrix, singleCampaignMatrix, type Existing, type Expansion, type SingleCampaign } from '../core/matrix.ts';
 import { SOURCES_DIR } from '../core/batch-folder.ts';
 import { buildLaunchesTree, type LaunchesTree, type LaunchFolderListing } from '../core/launches-tree.ts';
+import { guessNiche } from '../core/niche.ts';
 import type { TopicFolder } from '../core/topic-table.ts';
 import { ensureLaunchesRoot, type SaConfig } from './config.ts';
 
@@ -286,12 +287,17 @@ async function readLinks(api: PlatformClient, ids: readonly number[], into: Reco
   }
 }
 
-/** What the import dialog lists: the buyer's topics no folder has yet, each with a launch key to start from. */
+/**
+ * What the import dialog lists: the buyer's topics no folder has yet, each with
+ * a launch key to start from and the niche its name points at. The niche is a
+ * suggestion and nothing more — the platform has no such field, so an import
+ * with none sits under «без ніші» until the buyer picks one in the dialog.
+ */
 export interface ImportList {
-  topics: (ImportableTopic & { launchKey: string })[];
+  topics: (ImportableTopic & { launchKey: string; niche: string | null })[];
 }
 
-export function importList(config: SaConfig, platform: PlatformStatus): ImportList {
+export function importList(config: SaConfig, platform: PlatformStatus, niches: readonly string[] = []): ImportList {
   const root = config.launches_root;
   const taken = existingLaunchKeys(root);
   const topics = importableTopics(platform.builders, platform.campaigns, adoptedTopicIds(root));
@@ -300,7 +306,7 @@ export function importList(config: SaConfig, platform: PlatformStatus): ImportLi
     topics: topics.map(t => {
       const launchKey = suggestLaunchKey(t.name, keys);
       keys.push(launchKey);
-      return { ...t, launchKey };
+      return { ...t, launchKey, niche: guessNiche(t.name, niches) };
     }),
   };
 }

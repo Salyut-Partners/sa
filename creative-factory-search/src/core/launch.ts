@@ -476,3 +476,14 @@ export function resolveTicketFields(defs: readonly TicketFieldDef[], values: Tic
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, value: fields };
 }
+
+/**
+ * The words the list's `vertical` dropdown offers, in the order it has them —
+ * what the import dialog lets the buyer pick a niche from. The board is the one
+ * list of niches there is: a niche the ticket cannot carry is a niche that
+ * would fail on the first sync, so nothing is offered that ClickUp does not.
+ */
+export function verticalOptions(defs: readonly TicketFieldDef[]): string[] {
+  const def = defs.find(d => sameName(d.name, TICKET_FIELD_NAMES.vertical));
+  return (def?.type_config?.options ?? []).map(o => (o.name ?? o.label ?? '').trim()).filter(o => o !== '');
+}

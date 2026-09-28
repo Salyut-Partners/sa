@@ -69,14 +69,26 @@ export async function setTaskStatus(state: ClickUpReady, taskId: string, status:
   await call(state.token, `${API}/task/${taskId}`, { method: 'PUT', body: JSON.stringify({ status }) });
 }
 
+/**
+ * Whose token this is. Each buyer pastes their own, so the task a machine files
+ * is assigned to the person sitting at it — nothing has to be configured, and a
+ * ticket never lands in the list with nobody on it.
+ */
+export async function me(state: ClickUpReady): Promise<number | null> {
+  const body = await call<{ user?: { id?: number } }>(state.token, `${API}/user`);
+  const id = body.user?.id;
+  return typeof id === 'number' && Number.isInteger(id) ? id : null;
+}
+
 export async function createTask(
   state: ClickUpReady,
   name: string,
   fields: TicketField[],
+  assignees: readonly number[] = [],
 ): Promise<Ticket> {
   const body = await call<{ id: string; url: string }>(state.token, `${API}/list/${state.listId}/task`, {
     method: 'POST',
-    body: JSON.stringify({ name, custom_fields: fields }),
+    body: JSON.stringify({ name, custom_fields: fields, ...(assignees.length > 0 ? { assignees: [...assignees] } : {}) }),
   });
   return { id: body.id, url: body.url };
 }

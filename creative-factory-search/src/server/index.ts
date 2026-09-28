@@ -24,7 +24,7 @@ import { BadRequestError, cancelJob, jobById, outputsOf, statusOf } from './jobs
 import { PlatformReadError, platformState } from './platform.ts';
 import { closeBrowser } from './render.ts';
 import { startSubtitles, subsState, SUBS_OUTPUT } from './subs.ts';
-import { startTicketSync, syncTickets, ticketReport } from './tickets.ts';
+import { nicheOptions, startTicketSync, syncTickets, ticketReport } from './tickets.ts';
 import { listVoices } from './tts.ts';
 import { NoTranslatorError, translateAll, translator } from './translate.ts';
 
@@ -252,11 +252,11 @@ app.get('/api/launches/importable', async (req, res) => {
       throw new RefusedError(`топіка ${topicId} на платформі немає — перевірте id`);
     }
     if (!buyerKnown(config) && platformStatus().at === null) {
-      res.json({ topics: [], needsTopic: true });
+      res.json({ topics: [], needsTopic: true, niches: [] });
       return;
     }
-    const platform = await freshPlatform(config);
-    res.json({ ...importList(config, platform), needsTopic: false, note: platform.note });
+    const [platform, niches] = await Promise.all([freshPlatform(config), nicheOptions(config)]);
+    res.json({ ...importList(config, platform, niches), niches, needsTopic: false, note: platform.note });
   } catch (e) {
     answerFailure(res, e, 'importable');
   }
@@ -276,7 +276,12 @@ app.post('/api/launches/import', async (req, res) => {
   }
   try {
     const config = loadConfig();
-    const made = await adoptLaunch(config, { topicId: Number(body['topicId']), launchKey: body['launchKey'] });
+    // The niche the dialog guessed or the buyer picked: the platform has no such
+    // field, so without it every import would sit under «без ніші».
+    const vertical = typeof body['vertical'] === 'string' && body['vertical'].trim() !== '' ? body['vertical'].trim() : undefined;
+    const made = await adoptLaunch(config, {
+      topicId: Number(body['topicId']), launchKey: body['launchKey'], ...(vertical !== undefined ? { vertical } : {}),
+    });
     const ticket = (await syncTickets(config, made.launchKey))[made.launchKey] ?? { ok: false as const, note: 'звірка тікетів нічого не сказала про цю теку' };
     void refreshPlatform(config);
     res.json({ ...made, ticket });

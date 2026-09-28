@@ -40,8 +40,10 @@ export interface TopicTableRead {
 
 /** The import dialog's list: the buyer's topics no folder has yet, or — for a buyer not known yet — the ask for one topic id. */
 export interface ImportableRead {
-  topics: (ImportableTopic & { launchKey: string })[];
+  topics: (ImportableTopic & { launchKey: string; niche: string | null })[];
   needsTopic: boolean;
+  /** The niches the ticket board offers; empty when ClickUp is not set up, and then nothing is picked. */
+  niches: string[];
   note?: string | null;
 }
 
@@ -146,9 +148,9 @@ export const fetchTopicTable = (launchKey: string, plan = false, refresh = false
 export const fetchImportable = (topicId?: number): Promise<ImportableRead> =>
   ask<ImportableRead>('/api/launches/importable' + (topicId === undefined ? '' : `?topicId=${topicId}`));
 
-/** Import one topic with its campaigns into a new folder. Reads the platform; writes nothing to it. */
-export const importTopic = (topicId: number, launchKey: string): Promise<AdoptedFolder> =>
-  ask<AdoptedFolder>('/api/launches/import', asJson({ topicId, launchKey }));
+/** Import one topic with its campaigns into a new folder, under the niche picked for it. Reads the platform; writes nothing to it. */
+export const importTopic = (topicId: number, launchKey: string, vertical: string | null): Promise<AdoptedFolder> =>
+  ask<AdoptedFolder>('/api/launches/import', asJson({ topicId, launchKey, ...(vertical === null ? {} : { vertical }) }));
 
 /**
  * Apply. The `confirm` is the gate the server insists on, and the button that

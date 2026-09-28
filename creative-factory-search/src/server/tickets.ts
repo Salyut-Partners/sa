@@ -10,7 +10,8 @@ import path from 'node:path';
 import { NAME_PLACEHOLDER, parseTopicManifest, resolveTicketFields, type TopicManifest } from '../core/launch.ts';
 import { builtOf, checkStatuses, planTicketSync, type FolderTicketFacts, type TicketRef } from '../core/ticket-sync.ts';
 import { isApplying, readState, writeState } from './apply.ts';
-import { ClickUpError, clickupState, createTask, listFields, listStatuses, listTasks, setTaskStatus } from './clickup.ts';
+import { ClickUpError, type ClickUpReady, clickupState, createTask, listFields, listStatuses, listTasks, me, setTaskStatus } from './clickup.ts';
+import { verticalOptions } from '../core/launch.ts';
 import type { SaConfig } from './config.ts';
 import { existingLaunchKeys, RefusedError } from './launches.ts';
 
@@ -22,6 +23,42 @@ export const TICKET_SYNC_MS = 10 * 60 * 1000;
 
 const reports = new Map<string, TicketReport>();
 export const ticketReport = (launchKey: string): TicketReport | null => reports.get(launchKey) ?? null;
+
+/**
+ * The buyer's own ClickUp id, asked once for the server's life: every ticket
+ * this machine files is theirs, because the token that files it is theirs. A
+ * `/user` that will not answer is not worth failing a ticket over — the task is
+ * made unassigned, as it was before, and the next server start asks again.
+ */
+let assignee: number | null = null;
+let assigneeAsked = false;
+async function buyerAssignee(clickup: ClickUpReady): Promise<number[]> {
+  if (!assigneeAsked) {
+    assigneeAsked = true;
+    try {
+      assignee = await me(clickup);
+    } catch (e) {
+      console.error(`тікети: чий токен — не спитати: ${(e as Error).message}`);
+    }
+  }
+  return assignee === null ? [] : [assignee];
+}
+
+/**
+ * The niches the board offers, for the import dialog to let the buyer pick one.
+ * ClickUp is the only list of niches there is: a word the ticket cannot carry
+ * would fail on the first sync. Empty when ClickUp is not set up or will not
+ * answer — the dialog then simply has nothing to offer.
+ */
+export async function nicheOptions(config: SaConfig): Promise<string[]> {
+  const clickup = clickupState(config);
+  if (!clickup.ready) return [];
+  try {
+    return verticalOptions(await listFields(clickup));
+  } catch {
+    return [];
+  }
+}
 
 /** Said once per wording, not once per pass: a missing token is the same news ten minutes later. */
 let lastSaid = '';
@@ -113,7 +150,7 @@ async function run(config: SaConfig, only: string | null): Promise<Record<string
             ...(folder.topic.geo.length > 0 ? { geo: folder.topic.geo } : {}),
           });
           if (!fields.ok) { reports.set(folder.launchKey, { ok: false, note: fields.errors.join('; ') + ' — тікет не створено' }); continue; }
-          const ticket = await createTask(clickup, folder.launchKey, fields.value);
+          const ticket = await createTask(clickup, folder.launchKey, fields.value, await buyerAssignee(clickup));
           rememberTicket(folder, ticket);
           if (folder.built && statusNote === null) await setTaskStatus(clickup, ticket.id, config.clickup.statuses.inProgress);
           reports.set(folder.launchKey, { ok: true, ...ticket });

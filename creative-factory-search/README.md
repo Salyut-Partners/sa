@@ -159,9 +159,19 @@ imported. The manifest comes from the newest builder and its profile (read
 off `GET /campaign-builder/<id>`), the script from its videos. Videos are not
 downloaded: the state names them without a hash, so the plan leaves the
 folder alone until the buyer puts files into it, and then it is a relaunch.
-A buyer the server does not know yet — no `platform.user_id`, no folder —
-is asked for the id of one topic of theirs, and the buyer is learned from it.
-The rule is `core/adopt.ts`, tested there. The apply is then a bar,
+Whose topics to list is the token's own answer: the platform's Bearer is a
+JWT whose `sub` is the buyer it was issued to, which `core/platform-token.ts`
+reads, so a fresh install with nothing but a token in the config already knows
+its buyer. The order is `platform.user_id`, the token, then a topic of a launch
+folder; a buyer none of the three answers for is still asked for the id of one
+topic of theirs, and the buyer is learned from it. Each row also carries the
+niche the topic goes in under — the platform has no such field, so without one
+an import would sit under «без ніші». The words offered are the ClickUp list's
+`vertical` dropdown and nothing else, since a niche the ticket cannot carry
+fails on the first sync; `core/niche.ts` guesses one from the topic's name
+(`NewEraVadimJobsEU` is jobs), answers only an option it was given, and leaves
+a name that says two niches to the buyer. The rule is `core/adopt.ts`, tested
+there. The apply is then a bar,
 the step in flight and a cancel, watched from any tab, and narrowed on the
 server to the ticked campaigns: `narrowPlan` in `core/plan.ts` takes a list
 and keeps the topic's steps, the campaigns' own, and the steps of other
@@ -322,8 +332,12 @@ every ten minutes after, right after every apply, and for the folder `sa new`
 just made, and holds each folder against the ClickUp list: a folder with a
 `topic.yaml` and no ticket gets one — found by name first, the launch key
 being the task's name, so a lost `state.json` finds its own ticket rather than
-making a twin — with `topic`, `vertical` and `geo` filled from the manifest;
-a folder with a built campaign has its ticket raised to «in progress». The
+making a twin — with `topic`, `vertical` and `geo` filled from the manifest
+and the buyer themselves on it: the token that files the task is the buyer's
+own, so `GET /user` says who to assign it to, asked once for the server's life
+and skipped without complaint when it will not answer — an unassigned ticket
+beats no ticket. A folder with a built campaign has its ticket raised to
+«in progress». The
 rule, in `core/ticket-sync.ts`, only ever raises: a ticket the buyer moved
 forward by hand stands, and «complete» is theirs alone. The ticket's id and
 url go into the folder's `state.json`; the tab shows the link under the
