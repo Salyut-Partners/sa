@@ -9,6 +9,7 @@ import {
 import type { Command } from '../core/project.ts';
 import type { LocaleId, Project } from '../core/types.ts';
 import type { ExportRun } from './export.ts';
+import type { Translator } from './translate.ts';
 import { fetchCampaigns, fetchSubtitles, type BatchOutput, type SubsState } from './server.ts';
 import type { TopicBatch } from './topic-batch.ts';
 
@@ -16,13 +17,17 @@ interface Props {
   project: Project;
   dispatch: (command: Command) => void;
   run: ExportRun;
-  /** The plan for one creative — the quick check, before committing to a batch. */
-  onExportOne: () => BatchPlan | null;
+  /** The plan for one creative of the project given — the quick check, before committing to a batch. */
+  onExportOne: (project: Project) => BatchPlan | null;
   topic: TopicBatch;
+  /** Translates the script into the languages going out before anything renders. */
+  translator: Translator;
 }
 
 /** The style select's value for "no subtitles" — a select cannot hold null. */
 const NO_STYLE = ' none';
+/** «Куди»'s value for a download; an empty value is nothing chosen yet, and nothing exports until something is. */
+const DOWNLOAD = ' download';
 
 /**
  * The export, and what it is doing.
@@ -31,16 +36,18 @@ const NO_STYLE = ' none';
  * release are different acts with different costs, and a batch of twelve photos
  * across seven languages is not something to start by accident.
  *
- * With a topic chosen, the files go to its campaign folders — every campaign
- * of the language, ticked by default — and the sources are written under the
- * topic on the way: into the batch this session already has there, or a new
- * one. With none, the export is a download, as it was.
+ * «Куди» has to be said before anything exports: a topic, or the download.
+ * With a topic, the files go to its campaign folders — every campaign of the
+ * language, ticked by default, each by the name the platform gave it once
+ * launched — and the sources are written under the topic on the way: into
+ * the batch this session already has there, or a new one.
  */
-export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Props) {
+export function ExportPanel({ project, dispatch, run, onExportOne, topic, translator }: Props) {
   // Counted, not planned: the plan is built at the press. See `batchSize`.
-  const { photos, locales, total } = batchSize(project);
+  const { total } = batchSize(project);
   const { status } = run;
-  const launchKey = topic.launchKey === '' ? null : topic.launchKey;
+  const whereChosen = topic.launchKey !== '';
+  const launchKey = !whereChosen || topic.launchKey === DOWNLOAD ? null : topic.launchKey;
 
   const [campaigns, setCampaigns] = useState<CampaignInfo[] | null>(null);
   const [campaignsNote, setCampaignsNote] = useState('');
@@ -83,20 +90,27 @@ export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Prop
   const burned = subtitleCount(project, launchKey === null ? null : layout);
 
   /**
-   * Start a plan: laid into folders when a topic is chosen, as a download when
-   * not. The sources are saved first — the batch has to be in the topic's
-   * folder before its creatives are in the topic's campaigns.
+   * Start an export: the script translated first into every language going
+   * out that lacks one — a forgotten translation is a mute video — then the
+   * plan, made from the project as the translation left it, laid into folders
+   * when a topic is chosen or as a download when not. The sources are saved
+   * before the render — the batch has to be in the topic's folder before its
+   * creatives are in the topic's campaigns.
    */
-  const go = (plan: BatchPlan): void => {
-    if (launchKey === null) {
-      run.start(plan, project.duration, project.fitToVoice);
-      return;
-    }
-    const laid = placePlan(plan, layout);
-    const output: BatchOutput = { launchKey, destinations: laid.destinations };
-    topic.ensureSaved(launchKey)
-      .then(() => run.start(laid.plan, project.duration, project.fitToVoice, output))
-      .catch(() => undefined);
+  const go = (planOf: (project: Project) => BatchPlan | null): void => {
+    void translator.beforeExport().then(async translated => {
+      if (translated === null) return;
+      const plan = planOf(translated);
+      if (plan === null) return;
+      if (launchKey === null) {
+        run.start(plan, translated.duration, translated.fitToVoice);
+        return;
+      }
+      const laid = placePlan(plan, layout);
+      const output: BatchOutput = { launchKey, destinations: laid.destinations };
+      await topic.ensureSaved(launchKey);
+      run.start(laid.plan, translated.duration, translated.fitToVoice, output);
+    }).catch(() => undefined);
   };
 
   return (
@@ -163,19 +177,20 @@ export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Prop
       <div className="group">
         <div className="lab">
           Куди
-          <span className="val">{launchKey === null ? 'у завантаження' : topic.launches.find(l => l.key === launchKey)?.name ?? launchKey}</span>
+          <span className="val">{!whereChosen ? 'не обрано' : launchKey === null ? 'у завантаження' : topic.launches.find(l => l.key === launchKey)?.name ?? launchKey}</span>
         </div>
         <select
           value={topic.launchKey}
           onChange={e => topic.browse(e.target.value)}
           disabled={run.running || topic.busy}
         >
-          <option value="">— завантажити файлом —</option>
+          <option value="" disabled>— оберіть, куди —</option>
+          <option value={DOWNLOAD}>Завантаження — файлом</option>
           {topic.launches.map(l => <option key={l.key} value={l.key}>{l.name}</option>)}
         </select>
         {topic.offline !== '' ? <div className="warn">{topic.offline}</div> : null}
-        {launchKey === null ? (
-          <div className="note">Оберіть топік — креативи ляжуть у його кампанії, а ісходники в його теку.</div>
+        {!whereChosen ? (
+          <div className="warn">Оберіть, куди: топік — креативи ляжуть у його кампанії, а ісходники в його теку; або «Завантаження».</div>
         ) : null}
         {launchKey !== null && campaigns === null ? <div className="note">Читаю кампанії…</div> : null}
         {campaignsNote !== '' ? <div className="error">{campaignsNote}</div> : null}
@@ -203,32 +218,35 @@ export function ExportPanel({ project, dispatch, run, onExportOne, topic }: Prop
       <div className="group">
         <button
           className="wide"
-          disabled={run.running || project.activeId === null}
-          onClick={() => {
-            const one = onExportOne();
-            if (one !== null) go(one);
-          }}
+          disabled={run.running || translator.busy || !whereChosen || project.activeId === null}
+          title={whereChosen ? 'Креатив, на якому стоїть курсор, — усіма мовами в експорт' : 'Спершу оберіть, куди'}
+          onClick={() => go(onExportOne)}
         >
-          Експортувати цей креатив
+          Лише цей креатив
         </button>
 
         <button
           className="primary"
           style={{ marginTop: 8 }}
-          disabled={run.running || total === 0 || (placed !== null && placed.total === 0)}
-          onClick={() => go(planBatch(project))}
+          disabled={run.running || translator.busy || !whereChosen || total === 0 || (placed !== null && placed.total === 0)}
+          title={whereChosen ? '' : 'Спершу оберіть, куди'}
+          onClick={() => go(planBatch)}
         >
           {placed === null
-            ? `Експортувати ${photos} × ${locales} = ${total}`
-            : `Експортувати в теки: ${placed.total}${placed.copies > placed.total ? ` (${placed.copies} файлів)` : ''}`}
+            ? `Експортувати всі (${total} ${creativesWord(total)} → ${total} ${filesWord(total)})`
+            : `Експортувати всі (${placed.total} ${creativesWord(placed.total)} → ${placed.copies} ${filesWord(placed.copies)})`}
         </button>
 
+        {/* The translation's progress and failure by the button that started it; its success is said by the voice panel. */}
+        {translator.busy || translator.failed ? (
+          <div className={translator.failed ? 'error' : 'note'}>{translator.note}</div>
+        ) : null}
         <div className="note">
           {total === 0
             ? 'Оберіть фото і хоча б одну мову в експорт.'
             : placed !== null && placed.copies > placed.total
-              ? `${photos} фото × ${locales} мов; файл копіюється в кожну кампанію своєї мови. Однакові відеоряди рендеряться один раз.`
-              : `${photos} фото × ${locales} мов. Однакові відеоряди рендеряться один раз.`}
+              ? 'Файл копіюється в кожну кампанію своєї мови. Однакові відеоряди рендеряться один раз.'
+              : 'Однакові відеоряди рендеряться один раз.'}
         </div>
       </div>
 
@@ -289,8 +307,43 @@ interface RowProps {
   onPhotosAsRow: () => void;
 }
 
-const campaignLabel = (c: CampaignInfo): string =>
-  c.language === null ? c.name : `${c.name} · ${c.language}${c.country ? '/' + c.country : ''}`;
+/** «креатив», «креативи», «креативів» after a number. */
+function creativesWord(n: number): string {
+  return plural(n, 'креатив', 'креативи', 'креативів');
+}
+
+/** «файл», «файли», «файлів» after a number. */
+function filesWord(n: number): string {
+  return plural(n, 'файл', 'файли', 'файлів');
+}
+
+function plural(n: number, one: string, few: string, many: string): string {
+  const last = n % 10;
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 14) return many;
+  if (last === 1) return one;
+  if (last >= 2 && last <= 4) return few;
+  return many;
+}
+
+const geo = (c: CampaignInfo): string => (c.language === null ? '' : ` · ${c.language}${c.country ? '/' + c.country : ''}`);
+
+/** A campaign by the name the buyer knows: the platform's once launched, with the folder small beside it; the folder alone before. */
+function CampaignName({ c }: { c: CampaignInfo }) {
+  if (c.platformName == null || c.platformName === '') return <span>{c.name}{geo(c)}</span>;
+  return (
+    <span title={`тека ${c.name}`}>
+      {c.platformName}{geo(c)}
+      <span className="dest-folder">{c.name}</span>
+    </span>
+  );
+}
+
+/** A campaign in a line of text: the platform's name once launched, else the folder. */
+const campaignWords = (campaigns: readonly CampaignInfo[], name: string): string => {
+  const found = campaigns.find(c => c.name === name);
+  return found?.platformName != null && found.platformName !== '' ? found.platformName : name;
+};
 
 /**
  * One language: the campaigns it goes to, a box each — the ones that speak
@@ -307,7 +360,7 @@ function LocaleRow({ id, project, layout, campaigns, selectedAll, onRow, onPhoto
   const others = campaigns.filter(c => !own.includes(c.name));
   const said = selectionTarget(layout, project.selection, id);
   const chosen = said === 'inherit' ? null : said === 'mixed' ? 'mixed' : new Set(said);
-  const label = (target: string | null): string => target ?? 'не експортувати';
+  const label = (target: string | null): string => (target === null ? 'не експортувати' : campaignWords(campaigns, target));
 
   const boxes = (list: readonly CampaignInfo[], has: (name: string) => boolean, onTick: (name: string, on: boolean) => void, indeterminate = false) =>
     list.map(c => (
@@ -318,7 +371,7 @@ function LocaleRow({ id, project, layout, campaigns, selectedAll, onRow, onPhoto
           ref={el => { if (el !== null) el.indeterminate = indeterminate; }}
           onChange={e => onTick(c.name, e.target.checked)}
         />
-        {campaignLabel(c)}
+        <CampaignName c={c} />
       </label>
     ));
 
@@ -351,7 +404,7 @@ function LocaleRow({ id, project, layout, campaigns, selectedAll, onRow, onPhoto
       )}
       {shares.length > 1 || shares.some(s => s.campaign === null || !home.has(s.campaign)) ? (
         <div className="note dest-note">
-          {shares.map(s => `${s.count} → ${label(s.campaign)}`).join(' · ')}
+          {shares.map(s => `${s.count} фото → ${label(s.campaign)}`).join(' · ')}
         </div>
       ) : null}
     </div>

@@ -588,7 +588,8 @@ Three build units and one rule.
   write it through its `writeState`, and a folder being applied or adjusted
   is claimed so two writers never meet; `server/platform-status.ts` keeps the buyer's builders and
   campaigns as the platform last showed them, on a timer, and hands the
-  table a version number.
+  table a version number; `server/plans.ts` counts a topic's plan in the
+  background, so «Оновити план» outlives the tab that pressed it.
 - **`src/server`** — Express, Puppeteer, ffmpeg. Bundles the render target from
   source at startup, so the headless page can never drift from the editor. An
   export is a job in memory: the editor posts a plan, gets an id, and watches it.

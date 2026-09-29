@@ -28,18 +28,25 @@ type TableState =
   | { kind: 'read'; read: TopicTableRead }
   | { kind: 'failed'; note: string; previous: TopicTableRead | null };
 
-/** The plan panel: open for a topic, the campaigns ticked in it. While it is open the table is read with the plan. */
+/** The plan panel: open for a topic, the campaigns ticked in it. While it is open a change of the folder counts the plan again. */
 interface Panel {
   launchKey: string;
   ticked: Set<string>;
+  /** Whether the ticks were set from a counted plan yet — once, so what the buyer unticks stays unticked. */
+  seeded: boolean;
 }
+
+/** How often the table is read again while the server counts the plan. */
+const COUNTING_POLL_MS = 1500;
 
 /**
  * The launches as a table the buyer works from instead of a terminal. On the
  * left the topics; for the chosen one, source → cabinet → campaigns, each in
  * three states — the folder, the launch, the platform — and a totals row.
- * Opening a topic reads the disk and the buyer's platform status, never the
- * plan: «Оновити план» counts it, and the panel beside the table offers the
+ * Opening a topic reads the disk and the buyer's platform status, and the
+ * plan only as far as it was counted: «Оновити план» starts a count on the
+ * server, which goes on while the buyer is on another tab, and the panel
+ * beside the table — open again on return — offers the
  * campaigns it would launch or relaunch with a box each. Only «Залити N» at
  * the bottom of it, under the words «за живі гроші», sends anything.
  */
@@ -53,6 +60,8 @@ export function LaunchesTab({ run, chosenKey, onChoose, onOpenBatch }: Props) {
   const readFor = useRef<{ key: string; fingerprint: string } | null>(null);
   /** The latest read asked for: an answer to an older one — a table without the plan landing after one with it — is dropped. */
   const latestRead = useRef(0);
+  /** Topics whose plan panel the buyer closed: a counted plan does not open it again until the next «Оновити план». */
+  const dismissed = useRef(new Set<string>());
 
   const look = useCallback((): void => {
     fetchLaunchesTree()
@@ -66,14 +75,23 @@ export function LaunchesTab({ run, chosenKey, onChoose, onOpenBatch }: Props) {
     return () => clearInterval(timer);
   }, [look]);
 
-  const readTable = useCallback((key: string, fingerprint: string, withPlan: boolean, refresh = false): Promise<TopicTableRead | null> => {
+  /** Read the table; `count` starts counting the plan. `quiet` is the poll while counting — no «Перечитую…» for it. */
+  const readTable = useCallback((key: string, fingerprint: string, count: boolean, refresh = false, quiet = false): Promise<TopicTableRead | null> => {
     readFor.current = { key, fingerprint };
     const asked = ++latestRead.current;
-    setTable(t => ({ kind: 'reading', previous: t === null ? null : t.kind === 'read' ? t.read : t.previous }));
-    return fetchTopicTable(key, withPlan, refresh)
+    if (!quiet) setTable(t => ({ kind: 'reading', previous: t === null ? null : t.kind === 'read' ? t.read : t.previous }));
+    return fetchTopicTable(key, count, refresh)
       .then(read => {
         if (asked !== latestRead.current) return null;
         setTable({ kind: 'read', read });
+        // A plan counting or counted opens its panel — also on return from another tab — and ticks what it would launch, once.
+        if ((read.planCounting || read.plan !== null) && !dismissed.current.has(key)) {
+          setPanel(p => {
+            const own = p !== null && p.launchKey === key ? p : { launchKey: key, ticked: new Set<string>(), seeded: false };
+            if (read.plan === null || own.seeded) return own;
+            return { launchKey: key, ticked: own.ticked.size > 0 ? own.ticked : new Set(launchable(read.table)), seeded: true };
+          });
+        }
         return read;
       })
       .catch(e => {
@@ -118,17 +136,29 @@ export function LaunchesTab({ run, chosenKey, onChoose, onOpenBatch }: Props) {
   }, [run, chosenKey, readTable]);
 
   const read = table?.kind === 'read' ? table.read : table?.kind === 'reading' || table?.kind === 'failed' ? table.previous : null;
+  const counting = read?.planCounting === true;
+
+  // While the server counts, the table is read again every moment or so, quietly, until the plan is there.
+  useEffect(() => {
+    if (!counting || chosen === null || table?.kind !== 'read') return;
+    const key = chosen.key;
+    const timer = setTimeout(() => { void readTable(key, readFor.current?.fingerprint ?? '', false, false, true); }, COUNTING_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [counting, chosen, table, readTable]);
   const outlines = useMemo(() => new Map((read?.plan?.outline ?? []).map(o => [o.name, o])), [read]);
 
-  /** «Оновити план»: the platform read again and the topic's plan counted; the panel opens with the new launches ticked. */
+  /** «Оновити план»: the platform read again and the topic's plan counted on the server; the panel opens and ticks the new launches once the plan is there. */
   const refreshPlan = (): void => {
     if (chosen === null || tree === null) return;
     const key = chosen.key;
-    setPanel(p => (p !== null && p.launchKey === key ? p : { launchKey: key, ticked: new Set() }));
-    void readTable(key, fingerprintOf(chosen, tree), true, true).then(next => {
-      if (next === null) return;
-      setPanel(p => (p === null || p.launchKey !== key || p.ticked.size > 0 ? p : { launchKey: key, ticked: new Set(launchable(next.table)) }));
-    });
+    dismissed.current.delete(key);
+    setPanel(p => (p !== null && p.launchKey === key ? { ...p, seeded: p.ticked.size > 0 } : { launchKey: key, ticked: new Set(), seeded: false }));
+    void readTable(key, fingerprintOf(chosen, tree), true, true);
+  };
+
+  const closePanel = (): void => {
+    if (panel !== null) dismissed.current.add(panel.launchKey);
+    setPanel(null);
   };
 
   const tick = (campaign: string, on: boolean): void => {
@@ -219,12 +249,12 @@ export function LaunchesTab({ run, chosenKey, onChoose, onOpenBatch }: Props) {
             panel={panel!}
             topicName={chosen?.name ?? panel!.launchKey}
             read={read}
-            reading={table?.kind === 'reading'}
+            counting={counting || (table?.kind === 'reading' && read.plan === null)}
             outlines={outlines}
             run={run}
             onTick={tick}
             onApply={apply}
-            onClose={() => setPanel(null)}
+            onClose={closePanel}
           />
         )}
       </aside>
@@ -422,6 +452,7 @@ interface TopicViewProps {
 function TopicView({ topic, table, read, outlines, busy, panel, onRefreshPlan, onRow, onOpenBatch }: TopicViewProps) {
   const t = read?.table ?? null;
   const reading = table === null || table.kind === 'reading';
+  const counting = read?.planCounting === true;
   return (
     <>
       <div className="table-head">
@@ -434,8 +465,8 @@ function TopicView({ topic, table, read, outlines, busy, panel, onRefreshPlan, o
               : <span className="why">тікет: {topic.ticket.note}</span>}
           </div>
         ) : null}
-        <button className="show" disabled={busy || read === null || (reading && panel !== null)} onClick={onRefreshPlan} title="Перечитати платформу й порахувати, що буде створено">
-          {reading && panel !== null ? 'Рахую план…' : 'Оновити план'}
+        <button className="show" disabled={busy || read === null || counting} onClick={onRefreshPlan} title="Перечитати платформу й порахувати, що буде створено; рахується у фоні — можна йти на інші вкладки">
+          {counting ? 'Рахую план…' : 'Оновити план'}
         </button>
       </div>
       {reading ? <div className="note">{read === null ? 'Читаю топік і статуси з платформи…' : 'Перечитую…'}</div> : null}
@@ -574,7 +605,8 @@ interface PlanPanelProps {
   panel: Panel;
   topicName: string;
   read: TopicTableRead;
-  reading: boolean;
+  /** Whether the plan is still being counted. */
+  counting: boolean;
   outlines: Map<string, CampaignOutline>;
   run: ApplyRun;
   onTick: (campaign: string, on: boolean) => void;
@@ -583,7 +615,7 @@ interface PlanPanelProps {
 }
 
 /** The plan with a box per campaign, the steps the ticked ones add up to, and the one button that sends them. */
-function PlanPanel({ panel, topicName, read, reading, outlines, run, onTick, onApply, onClose }: PlanPanelProps) {
+function PlanPanel({ panel, topicName, read, counting, outlines, run, onTick, onApply, onClose }: PlanPanelProps) {
   const plan: PlanDescription | null = read.plan;
   const mine = run.target?.launchKey === panel.launchKey;
   const status = mine ? run.status : null;
@@ -606,7 +638,7 @@ function PlanPanel({ panel, topicName, read, reading, outlines, run, onTick, onA
     <>
       <div className="group">
         <div className="lab">План <span className="val">{topicName}</span></div>
-        {plan === null && reading ? <div className="note">Рахую план: питаю платформу…</div>
+        {plan === null && counting ? <div className="note">Рахую план: питаю платформу… Можна йти на інші вкладки — план дорахується.</div>
           : <div className="note nothing-yet">Нічого ще не зроблено. Ось що станеться:</div>}
         <button className="link" onClick={onClose} disabled={running}>закрити план</button>
       </div>
@@ -656,9 +688,11 @@ function PlanPanel({ panel, topicName, read, reading, outlines, run, onTick, onA
             </div>
           ) : null}
         </>
-      ) : !reading ? (
+      ) : counting ? null : read.planNote !== '' ? (
         <div className="group"><div className="error">План не порахувався: {forBuyer(read.planNote)}</div></div>
-      ) : null}
+      ) : (
+        <div className="group"><div className="note">Тека змінилась після підрахунку — натисніть «Оновити план».</div></div>
+      )}
 
       <div className="group">
         {running ? (

@@ -7,8 +7,8 @@
 // "translate my edits" drifting into two behaviours.
 import { useCallback, useRef, useState } from 'react';
 import { fromText, toText } from '../core/fields.ts';
-import { activeLocale } from '../core/locales.ts';
-import type { Command, LocaleWrite } from '../core/project.ts';
+import { activeLocale, LOCALE_NAMES, pendingTranslation } from '../core/locales.ts';
+import { apply, type Command, type LocaleWrite } from '../core/project.ts';
 import type { FieldValue, LocaleId, Project } from '../core/types.ts';
 import { translate, type TranslationResult } from './server.ts';
 
@@ -20,6 +20,13 @@ export interface Translator {
   failed: boolean;
   translateScript: () => void;
   translateFields: () => void;
+  /**
+   * Before an export: the script into every language going out that has
+   * none, or a stale translation. Answers the project as it is after —
+   * what the export plans from — or null when the translation failed, and
+   * then nothing should render.
+   */
+  beforeExport: () => Promise<Project | null>;
 }
 
 export function useTranslator(
@@ -68,15 +75,53 @@ export function useTranslator(
   );
 
   const translateScript = useCallback(() => {
-    const script = activeLocale(latest.current).script.trim();
+    const current = latest.current;
+    const script = activeLocale(current).script.trim();
+    const from = { id: current.activeLocale, script };
     void run(
       script === '' ? [] : [script],
       (result, targets) => targets
-        .map(id => ({ id, script: result.out[id]?.[0] }))
-        .filter((w): w is { id: LocaleId; script: string } => w.script !== undefined),
+        .map(id => ({ id, script: result.out[id]?.[0], translatedFrom: from }))
+        .filter((w): w is { id: LocaleId; script: string; translatedFrom: typeof from } => w.script !== undefined),
       'Спершу впишіть скрипт для цієї мови.',
     );
   }, [run]);
+
+  const beforeExport = useCallback(async (): Promise<Project | null> => {
+    const current = latest.current;
+    const pending = pendingTranslation(current);
+    if (pending === null) return current;
+    const names = pending.targets.map(id => LOCALE_NAMES[id]).join(', ');
+    setBusy(true);
+    setFailed(false);
+    setNote(`Перекладаю скрипт перед експортом: ${names}…`);
+    try {
+      const result = await translate([pending.script], pending.targets);
+      const from = { id: pending.source, script: pending.script };
+      const writes: LocaleWrite[] = [];
+      const missing: LocaleId[] = [];
+      for (const id of pending.targets) {
+        const script = result.out[id]?.[0];
+        if (script === undefined || script.trim() === '') missing.push(id);
+        else writes.push({ id, script, translatedFrom: from });
+      }
+      if (missing.length > 0) {
+        setFailed(true);
+        setNote(`Переклад не повернувся для: ${missing.map(id => LOCALE_NAMES[id]).join(', ')} — експорт не почато.`);
+        return null;
+      }
+      const command: Command = { type: 'locale/write', writes };
+      dispatch(command);
+      setNote(`Перед експортом перекладено: ${names} · ${describe(result, pending.source, writes.length)}`);
+      return apply(current, command);
+    } catch (e) {
+      setFailed(true);
+      setNote(`Скрипт не перекладено — експорт не почато: ${(e as Error).message}`);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }, [dispatch]);
 
   const translateFields = useCallback(() => {
     // Only the fields written by hand. Everything else follows the dictionary,
@@ -103,7 +148,7 @@ export function useTranslator(
     );
   }, [run]);
 
-  return { busy, note, failed, translateScript, translateFields };
+  return { busy, note, failed, translateScript, translateFields, beforeExport };
 }
 
 /**

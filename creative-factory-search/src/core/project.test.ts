@@ -631,6 +631,16 @@ describe('locale commands', () => {
     expect(p.locales[0]).toMatchObject({ script: 'Привіт', voiceId: 'lily', include: false });
   });
 
+  it('keeps where a translated script came from, until the buyer types over it', () => {
+    let p = apply(createProject(), { type: 'locale/add', id: 'de' });
+    p = apply(p, { type: 'locale/write', writes: [{ id: 'de', script: 'Hallo', translatedFrom: { id: 'en', script: 'Hi' } }] });
+    expect(p.locales[1]!.translatedFrom).toEqual({ id: 'en', script: 'Hi' });
+    p = apply(p, { type: 'locale/patch', id: 'de', patch: { include: false } });
+    expect(p.locales[1]!.translatedFrom).toEqual({ id: 'en', script: 'Hi' });
+    p = apply(p, { type: 'locale/patch', id: 'de', patch: { script: 'Hallo!' } });
+    expect(p.locales[1]!.translatedFrom).toBeNull();
+  });
+
   it('gives the same project back when a patch changes nothing', () => {
     const before = apply(createProject(), { type: 'locale/patch', id: 'en', patch: { script: 'x' } });
     expect(apply(before, { type: 'locale/patch', id: 'en', patch: { script: 'x' } })).toBe(before);

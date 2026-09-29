@@ -31,7 +31,10 @@ export interface LaunchesTree extends DiskTree {
 /** The topic table, and the plan when it was asked for; a plan that could not be read leaves `plan` null and says why. */
 export interface TopicTableRead {
   table: TopicTable;
+  /** The plan as far as the server counted it for the folder as it is now; null while counting, before the first count, or when the folder changed since. */
   plan: PlanDescription | null;
+  /** Whether a count is on — started by «Оновити план», going on whatever the editor does meanwhile. */
+  planCounting: boolean;
   planNote: string;
   stateNote: string;
   /** The topic folder's full path, for the text «Копіювати» puts on the clipboard. */
@@ -141,8 +144,9 @@ export const fetchPlan = (launchKey: string, campaigns: readonly string[] | null
   ask<PlanDescription>(`/api/launches/${launchKey}/plan`, asJson(campaigns === null ? {} : { campaigns }));
 
 /** The topic table: three states per campaign, the totals, the batches — and with `plan` the topic's plan counted. Reads the platform; creates nothing. */
-export const fetchTopicTable = (launchKey: string, plan = false, refresh = false): Promise<TopicTableRead> =>
-  ask<TopicTableRead>(`/api/launches/${launchKey}/table`, asJson({ plan, refresh }));
+/** The topic's table; `count` starts counting its plan in the background, `refresh` reads the platform again first. */
+export const fetchTopicTable = (launchKey: string, count = false, refresh = false): Promise<TopicTableRead> =>
+  ask<TopicTableRead>(`/api/launches/${launchKey}/table`, asJson({ count, refresh }));
 
 /** The topics the buyer can import; `topicId` names one of theirs when the server does not know the buyer yet. */
 export const fetchImportable = (topicId?: number): Promise<ImportableRead> =>

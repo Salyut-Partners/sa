@@ -2,7 +2,7 @@
 // project's list is read. The phrase book next door says what each one *says*;
 // this file is about the language as a thing the user adds and removes.
 import { FLAGS } from './phrasebook.ts';
-import type { Locale, LocaleId, Project } from './types.ts';
+import type { Locale, LocaleId, Project, TranslatedFrom } from './types.ts';
 
 /** Every language the phrase book is written for, in the order the bar shows them. */
 export const LOCALE_IDS: readonly LocaleId[] =
@@ -97,6 +97,34 @@ export const editedFieldCount = (project: Project): number =>
 /** The languages this export will produce, in the order they were added. */
 export const releaseLocales = (project: Project): Locale[] =>
   project.locales.filter(l => l.include);
+
+/**
+ * What the export translates before it renders: the script the buyer wrote,
+ * and the languages going out whose script is empty or was translated from
+ * words that have changed since. The source is the language the translations
+ * already came from, while it is still written by hand — so correcting one
+ * translation does not make it the source of the rest — else the language on
+ * screen, else the first written by hand. A script written or corrected by
+ * hand is the buyer's and is never sent over. Null when there is nothing to
+ * translate.
+ */
+export function pendingTranslation(project: Project): { source: LocaleId; script: string; targets: LocaleId[] } | null {
+  const written = (l: Locale): boolean => l.script.trim() !== '' && (l.translatedFrom ?? null) === null;
+  const origins = project.locales.flatMap(l => (l.translatedFrom == null ? [] : [l.translatedFrom.id]));
+  const origin = project.locales
+    .filter(l => written(l) && origins.includes(l.id))
+    .sort((a, b) => origins.filter(id => id === b.id).length - origins.filter(id => id === a.id).length)[0];
+  const active = project.locales.find(l => l.id === project.activeLocale);
+  const source = origin ?? (active !== undefined && written(active) ? active : project.locales.find(written));
+  if (source === undefined) return null;
+  const script = source.script.trim();
+  const stale = (from: TranslatedFrom | null | undefined): boolean =>
+    from != null && (from.id !== source.id || from.script !== script);
+  const targets = releaseLocales(project)
+    .filter(l => l.id !== source.id && (l.script.trim() === '' || stale(l.translatedFrom)))
+    .map(l => l.id);
+  return targets.length === 0 ? null : { source: source.id, script, targets };
+}
 
 /** Which languages could still be added — the bar offers these and no others. */
 export const availableLocales = (project: Project): LocaleId[] => {

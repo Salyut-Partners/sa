@@ -7,7 +7,7 @@ import { DEFAULT_CANVAS, DEFAULT_DURATION, DEFAULT_FPS, MAX_PHOTOS } from './pro
 import { DEFAULT_MODEL_ID } from './voice.ts';
 import type {
   ButtonLayer, CanvasSize, FieldValue, Locale, LocaleId, Photo, Project, Rect,
-  TemplateLayer, Timing,
+  TemplateLayer, Timing, TranslatedFrom,
 } from './types.ts';
 
 export const SCHEMA_VERSION = 5;
@@ -110,6 +110,9 @@ const isLocale = (v: unknown): v is Locale =>
   (v['subtitles'] === undefined || typeof v['subtitles'] === 'boolean') &&
   isOverrides(v['overrides']);
 
+const isTranslatedFrom = (v: unknown): v is TranslatedFrom =>
+  isBag(v) && isLocaleId(v['id']) && isText(v['script']);
+
 /**
  * Read a file back. Everything is checked rather than trusted: this is the one
  * door into the model that the editor's commands do not guard, and a half-read
@@ -187,7 +190,11 @@ function readLocales(
     // Normalised on the way in, like a photo's template: a language from
     // before subtitles existed is one that never opted out.
     const locales = stored.filter(isLocale)
-      .map(l => ({ ...l, subtitles: l.subtitles !== false, overrides: { ...l.overrides } }));
+      .map(({ translatedFrom, ...l }) => ({
+        ...l, subtitles: l.subtitles !== false, overrides: { ...l.overrides },
+        // Absent in files from before the export translated; a malformed one reads as written by hand.
+        ...(isTranslatedFrom(translatedFrom) ? { translatedFrom: { id: translatedFrom.id, script: translatedFrom.script } } : {}),
+      }));
     // One record per language: two would make "the German script" ambiguous
     // everywhere downstream, and the first is the one the editor was showing.
     const byId = new Map<LocaleId, Locale>();

@@ -37,7 +37,7 @@ interface Props {
   catalogue: VoiceCatalogue | null;
   translator: Translator;
   run: ExportRun;
-  onExportOne: () => BatchPlan | null;
+  onExportOne: (project: Project) => BatchPlan | null;
   topic: TopicBatch;
 }
 
@@ -443,6 +443,7 @@ export function SidePanel(props: Props) {
             dispatch={dispatch}
             run={props.run}
             onExportOne={props.onExportOne}
+            translator={props.translator}
             topic={props.topic}
           />
         </>

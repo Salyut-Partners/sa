@@ -6,7 +6,7 @@
 //
 // Spend, ROI and clicks are deliberately not here: the platform has them, and
 // two versions of that truth would be one too many.
-import { describeRejection, isRejected, type CampaignState, type PlatformBuilder, type PlatformCampaign } from './campaign-plan.ts';
+import { describeRejection, isRejected, type AdAccount, type CampaignState, type PlatformBuilder, type PlatformCampaign } from './campaign-plan.ts';
 import { parseCampaignManifest, parseTopicManifest, type TopicManifest, type TrafficSource } from './launch.ts';
 import { campaignsOf, type TreeCampaign } from './launches-tree.ts';
 import type { CampaignOutline, LaunchState } from './plan.ts';
@@ -31,12 +31,15 @@ export interface TopicFolder {
 
 /**
  * What the platform says about the buyer, read once for all their topics:
- * every builder with its status, rejection and the bot's verdicts, and every
- * campaign with its status. `at` is when; `note` why there is nothing.
+ * every builder with its status, rejection and the bot's verdicts, every
+ * campaign with its status, and the cabinets it still lists per source.
+ * `at` is when; `note` why there is nothing.
  */
 export interface PlatformStatus {
   builders: PlatformBuilder[];
   campaigns: PlatformCampaign[];
+  /** The cabinets the platform lists, per source it was read for; a source missing was not read, and says nothing about its cabinets. */
+  adAccounts?: Partial<Record<TrafficSource, AdAccount[]>>;
   at: string | null;
   note: string | null;
 }
@@ -143,8 +146,9 @@ export interface Totals {
 
 export interface TableAccount {
   alias: string;
+  /** The cabinet's id: the manifest's, or — where `sa adopt` left a placeholder — the one its launched campaigns went out from; null when neither says. */
   adAccount: string | null;
-  /** The cabinet's name as the platform lists it, off the buyer's builders; null until a campaign went out from it. */
+  /** The cabinet's name as the platform lists it — its list of cabinets, else the buyer's builders; null when neither names it. */
   adAccountName: string | null;
   campaigns: TableCampaign[];
   totals: Totals;
@@ -256,6 +260,9 @@ export function platformColumn(state: CampaignState | undefined, platform: Platf
 
 // --------------------------------------------------------------- table --
 
+/** A cabinet id as `topic.yaml` holds it, or null for the placeholder `sa adopt` leaves when it could not learn one — never an id, never a name to show. */
+const knownCabinet = (id: string | null): string | null => (id !== null && /^\d+$/.test(id) ? id : null);
+
 interface Placed {
   row: TableCampaign;
   source: TrafficSource | typeof NO_CABINET;
@@ -296,7 +303,8 @@ function rowOf(folder: TopicFolder, topic: TopicManifest | null, tree: TreeCampa
 /**
  * The table for one topic. Cabinets come in the manifest's order, sources in
  * the order the cabinets first name them; a cabinet with no campaigns is
- * still a row, so the buyer sees where the matrix left a hole. Campaigns
+ * still a row, so the buyer sees where the matrix left a hole — unless the
+ * platform no longer lists it, when it goes with its campaigns. Campaigns
  * whose manifest names no cabinet of the topic close the table under
  * «без кабінету».
  */
@@ -317,24 +325,56 @@ export function buildTopicTable(
   const outlines = new Map((outline ?? []).map(o => [o.name, o]));
   const placed = campaignsOf(folder.paths).map(tree => rowOf(folder, topic, tree, state, outlines.get(tree.name), platform));
 
-  // A cabinet's name is on every campaign that went out from it; the buyer's builders carry them all.
+  const listed = platform?.adAccounts ?? {};
+  // A cabinet's name is the platform's list of cabinets first, and every campaign that went out from it after.
   const cabinetNames = new Map<string, string>();
+  for (const list of Object.values(listed)) {
+    for (const a of list ?? []) if (a.name !== '') cabinetNames.set(String(a.id), a.name);
+  }
+  // The cabinet each builder's campaign went out from — what names a cabinet `sa adopt` could only leave a placeholder for.
+  const builderCabinets = new Map<number, string>();
   for (const b of platform?.builders ?? []) {
     for (const c of b.campaigns) {
-      if (c.ad_account != null && c.ad_account_name != null && c.ad_account_name !== '') cabinetNames.set(c.ad_account, c.ad_account_name);
+      if (c.ad_account == null || c.ad_account === '') continue;
+      if (!builderCabinets.has(b.id)) builderCabinets.set(b.id, c.ad_account);
+      if (c.ad_account_name != null && c.ad_account_name !== '' && !cabinetNames.has(c.ad_account)) cabinetNames.set(c.ad_account, c.ad_account_name);
     }
   }
+  const learnedCabinet = (alias: string): string | null => {
+    for (const p of placed) {
+      if (p.alias !== alias || p.row.platform.builderId === null) continue;
+      const id = builderCabinets.get(p.row.platform.builderId);
+      if (id !== undefined) return id;
+    }
+    return null;
+  };
   const sources = new Map<TrafficSource | typeof NO_CABINET, Map<string, TableAccount>>();
-  const accountOf = (source: TrafficSource | typeof NO_CABINET, alias: string, adAccount: string | null): TableAccount => {
+  const accountOf = (source: TrafficSource | typeof NO_CABINET, alias: string, written: string | null): TableAccount => {
     const bySource = sources.get(source) ?? new Map<string, TableAccount>();
     sources.set(source, bySource);
+    const known = bySource.get(alias);
+    if (known !== undefined) return known;
+    const adAccount = source === NO_CABINET ? null : knownCabinet(written) ?? learnedCabinet(alias);
     const adAccountName = adAccount === null ? null : cabinetNames.get(adAccount) ?? null;
-    const own = bySource.get(alias) ?? { alias, adAccount, adAccountName, campaigns: [], totals: emptyTotals() };
+    const own = { alias, adAccount, adAccountName, campaigns: [], totals: emptyTotals() };
     bySource.set(alias, own);
     return own;
   };
   for (const [alias, cabinet] of Object.entries(topic?.accounts ?? {})) accountOf(cabinet.source, alias, cabinet.ad_account);
   for (const p of placed) accountOf(p.source, p.alias, p.adAccount).campaigns.push(p.row);
+
+  // A cabinet the platform no longer lists for its source is banned or frozen:
+  // its campaigns are neither shown nor counted. Only a list that was read can
+  // say so, and only of a cabinet whose id is known.
+  const dead = (source: TrafficSource | typeof NO_CABINET, account: TableAccount): boolean => {
+    if (source === NO_CABINET || account.adAccount === null) return false;
+    const list = listed[source];
+    return list !== undefined && !list.some(a => String(a.id) === account.adAccount);
+  };
+  for (const [source, accounts] of sources) {
+    for (const [alias, account] of accounts) if (dead(source, account)) accounts.delete(alias);
+    if (accounts.size === 0) sources.delete(source);
+  }
 
   const tableSources: TableSource[] = [...sources.entries()]
     .sort(([a], [b]) => (a === NO_CABINET ? 1 : b === NO_CABINET ? -1 : 0))

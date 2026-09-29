@@ -1,16 +1,19 @@
 // The buyer's standing on the platform, read once for all their topics: every
-// builder with its status, rejection and the bot's verdicts, and every
-// campaign with its status — two reads per buyer, never one per topic. Kept
+// builder with its status, rejection and the bot's verdicts, every campaign
+// with its status, and the cabinets still listed — a few reads per buyer,
+// never one per topic. Kept
 // in memory, refreshed on a timer, after every apply, and when a topic is
 // opened; the topic table reads it, and the tree carries a version number so
 // the tab knows when to look again. What the answer means is
 // `core/topic-table`'s decision.
+import type { AdAccount } from '../core/campaign-plan.ts';
+import { TRAFFIC_SOURCES, type TrafficSource } from '../core/launch.ts';
 import { buyerIdFromToken } from '../core/platform-token.ts';
 import { emptyPlatformStatus, type PlatformStatus } from '../core/topic-table.ts';
 import { readState } from './apply.ts';
 import type { SaConfig } from './config.ts';
 import { existingLaunchKeys } from './launches.ts';
-import { PlatformClient, platformState, readBuyerBuilders, readBuyerCampaigns, readTopic } from './platform.ts';
+import { PlatformClient, platformState, readAdAccounts, readBuyerBuilders, readBuyerCampaigns, readSites, readTopic } from './platform.ts';
 import path from 'node:path';
 
 /** How often the platform is asked when nothing else asks. */
@@ -77,8 +80,25 @@ async function read(config: SaConfig): Promise<PlatformStatus> {
   if (userId === null) {
     return emptyPlatformStatus('user_id байера невідомий: задайте platform.user_id у конфігурації або зробіть sa plan на топіку, що вже є на платформі');
   }
-  const [builders, campaigns] = await Promise.all([readBuyerBuilders(api, userId), readBuyerCampaigns(api, userId)]);
-  return { builders, campaigns, at: new Date().toISOString(), note: null };
+  const [builders, campaigns, adAccounts] = await Promise.all([readBuyerBuilders(api, userId), readBuyerCampaigns(api, userId), readCabinets(api)]);
+  return { builders, campaigns, adAccounts, at: new Date().toISOString(), note: null };
+}
+
+/**
+ * The cabinets the platform lists per source, over every site of the
+ * organisation — what tells a banned or frozen cabinet, which it stops
+ * listing. A source whose read failed is left out, so its cabinets are not
+ * taken for dead.
+ */
+async function readCabinets(api: PlatformClient): Promise<Partial<Record<TrafficSource, AdAccount[]>>> {
+  const sites = await readSites(api).catch(() => null);
+  if (sites === null || sites.length === 0) return {};
+  const out: Partial<Record<TrafficSource, AdAccount[]>> = {};
+  await Promise.all(TRAFFIC_SOURCES.map(async source => {
+    const lists = await Promise.all(sites.map(site => readAdAccounts(api, site.id, source))).catch(() => null);
+    if (lists !== null) out[source] = lists.flat();
+  }));
+  return out;
 }
 
 /**

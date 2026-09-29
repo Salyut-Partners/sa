@@ -211,6 +211,14 @@ describe('a project file carrying languages', () => {
     expect(project.locales[0]!.include).toBe(false);
   });
 
+  it('comes back knowing which script was translated from what, and reads a malformed mark as written by hand', () => {
+    const file = toFile(saved()) as unknown as { locales: Record<string, unknown>[] };
+    file.locales[1]!['translatedFrom'] = { id: 'en', script: 'Hi.' };
+    expect(reopened(file).locales[1]!.translatedFrom).toEqual({ id: 'en', script: 'Hi.' });
+    file.locales[1]!['translatedFrom'] = { id: 'xx', script: 3 };
+    expect(reopened(file).locales[1]!.translatedFrom).toBeUndefined();
+  });
+
   it('comes back with the project voice, model and whether it stretches', () => {
     const project = reopened(toFile(saved()));
     expect(project.voiceId).toBe('george');

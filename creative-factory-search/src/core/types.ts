@@ -132,6 +132,18 @@ export interface Locale {
   subtitles: boolean;
   /** Hand edits to template fields, over the phrase book. */
   overrides: Readonly<Record<string, FieldValue>>;
+  /**
+   * The script this one's was machine-translated from — which language, and
+   * its words at the time — or null (absent in older files) for a script
+   * written or corrected by hand. What tells a translation gone stale when
+   * its source changes, and a buyer's own words from one to redo.
+   */
+  translatedFrom?: TranslatedFrom | null;
+}
+
+export interface TranslatedFrom {
+  id: LocaleId;
+  script: string;
 }
 
 /** Everything one working session holds. The unit of saving. */

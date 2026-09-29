@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeLocale, availableLocales, editedFieldCount, isLocaleId, localeDir, LOCALE_ENGLISH,
-  LOCALE_IDS, LOCALE_NAMES, newLocale, releaseLocales,
+  LOCALE_IDS, LOCALE_NAMES, newLocale, pendingTranslation, releaseLocales,
 } from './locales.ts';
 import { apply, createProject } from './project.ts';
 import type { LocaleId, Project } from './types.ts';
@@ -129,5 +129,47 @@ describe('editedFieldCount', () => {
     });
     expect(project.activeLocale).toBe('de');
     expect(editedFieldCount(project)).toBe(0);
+  });
+});
+
+describe('what the export translates before it renders', () => {
+  const scripted = (p: Project, id: LocaleId, script: string): Project =>
+    apply(p, { type: 'locale/patch', id, patch: { script } });
+  const translated = (p: Project, id: LocaleId, script: string, from: { id: LocaleId; script: string }): Project =>
+    apply(p, { type: 'locale/write', writes: [{ id, script, translatedFrom: from }] });
+
+  it('is the script on screen into every language going out that has none', () => {
+    const p = scripted(withLocales('de', 'fr'), 'en', ' Apply now ');
+    expect(pendingTranslation(p)).toEqual({ source: 'en', script: 'Apply now', targets: ['de', 'fr'] });
+  });
+
+  it('is nothing when every language going out has its script, or no script is written anywhere', () => {
+    expect(pendingTranslation(withLocales('de'))).toBeNull();
+    let p = scripted(withLocales('de'), 'en', 'Apply now');
+    p = translated(p, 'de', 'Jetzt bewerben', { id: 'en', script: 'Apply now' });
+    expect(pendingTranslation(p)).toBeNull();
+  });
+
+  it('redoes a translation whose source changed since, and leaves one the buyer corrected by hand', () => {
+    let p = scripted(withLocales('de', 'fr'), 'en', 'Apply now');
+    p = translated(p, 'de', 'Jetzt bewerben', { id: 'en', script: 'Apply now' });
+    p = translated(p, 'fr', 'Postulez', { id: 'en', script: 'Apply now' });
+    p = scripted(p, 'fr', 'Postulez maintenant');
+    p = scripted(p, 'en', 'Apply today');
+    expect(pendingTranslation(p)).toEqual({ source: 'en', script: 'Apply today', targets: ['de'] });
+  });
+
+  it('skips a language left out of the export', () => {
+    let p = scripted(withLocales('de', 'fr'), 'en', 'Apply now');
+    p = apply(p, { type: 'locale/patch', id: 'fr', patch: { include: false } });
+    expect(pendingTranslation(p)?.targets).toEqual(['de']);
+  });
+
+  it('takes the source from a language written by hand when the one on screen is a translation', () => {
+    let p = scripted(withLocales('de'), 'en', 'Apply now');
+    p = translated(p, 'de', 'Jetzt bewerben', { id: 'en', script: 'Apply now' });
+    p = apply(p, { type: 'locale/add', id: 'it' });
+    p = apply(p, { type: 'locale/activate', id: 'de' });
+    expect(pendingTranslation(p)).toEqual({ source: 'en', script: 'Apply now', targets: ['it'] });
   });
 });

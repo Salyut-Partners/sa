@@ -289,10 +289,8 @@ export function App() {
   };
 
   /** The one creative on screen, planned exactly as a release plans eighty. */
-  const onExportOne = useCallback((): BatchPlan | null => {
-    const current = latest.current;
-    return current.activeId === null ? null : planOne(current, current.activeId);
-  }, []);
+  const onExportOne = useCallback((current: Project): BatchPlan | null =>
+    current.activeId === null ? null : planOne(current, current.activeId), []);
 
   return (
     <div

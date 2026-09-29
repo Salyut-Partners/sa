@@ -151,6 +151,36 @@ describe('the topic table', () => {
       [['fb-1', '9001', null]],
     ]);
   });
+  it('names a cabinet by the platform\'s list of cabinets first, and learns one `sa adopt` left as a placeholder from its launched campaign', () => {
+    const adopted = TOPIC.replace('ad_account: "53560"', 'ad_account: "REPLACE_AD_ACCOUNT_ID"');
+    const table = buildTopicTable(folder({ topicYaml: adopted }), state({ 'de-de-main-tk': built(700, 1000) }), null, platform({
+      builders: [builder(700, { campaigns: [{ id: 1000, name: 'x', term_group_id: null, ad_account: '53560', ad_account_name: 'from the campaign' }] })],
+      adAccounts: { tiktok: [{ id: 53560, name: 'GB / Salyut_Partners / Account 16', account_id: '7680550759062339602' }] },
+    }));
+    expect(table.sources[0]!.accounts.map(a => [a.alias, a.adAccount, a.adAccountName])).toEqual([['main-tk', '53560', 'GB / Salyut_Partners / Account 16']]);
+  });
+
+  it('never shows the placeholder as a cabinet, when nothing launched says which it is', () => {
+    const adopted = TOPIC.replace('ad_account: "53560"', 'ad_account: "REPLACE_AD_ACCOUNT_ID"');
+    const table = buildTopicTable(folder({ topicYaml: adopted }), state(), null, null);
+    expect(table.sources[0]!.accounts[0]).toMatchObject({ alias: 'main-tk', adAccount: null, adAccountName: null });
+  });
+
+  it('leaves out a cabinet the platform no longer lists, with its campaigns, from the rows and the totals', () => {
+    const table = buildTopicTable(folder(), state({ 'de-de-main-tk': built(700, 1000) }), null, platform({
+      builders: [builder(700, { campaigns: [{ id: 1000, name: 'x', term_group_id: null }] })],
+      campaigns: [campaign(1000, 'ACTIVE')],
+      adAccounts: { tiktok: [{ id: 53561, name: 'Account 17', account_id: '1' }], facebook: [{ id: 9001, name: 'FB', account_id: '2' }] },
+    }));
+    expect(table.sources.map(s => [s.source, s.accounts.map(a => a.alias)])).toEqual([['facebook', ['fb-1']]]);
+    expect(table.totals).toEqual({ campaigns: 1, built: 0, active: 0, rejected: 0, withoutCreatives: 0 });
+    expect(topicClipboard(table, '/r/ai-jobs-de')).not.toMatch(/main-tk/);
+  });
+
+  it('hides nothing for a source whose cabinets were not read', () => {
+    const table = buildTopicTable(folder(), state(), null, platform({ adAccounts: { tiktok: [{ id: 53560, name: 'Account 16', account_id: '1' }] } }));
+    expect(table.sources.map(s => s.source)).toEqual(['tiktok', 'facebook']);
+  });
 });
 
 describe('what «Копіювати» puts on the clipboard', () => {

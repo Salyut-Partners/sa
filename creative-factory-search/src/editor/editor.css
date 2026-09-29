@@ -434,3 +434,4 @@ textarea.mixed::placeholder { color: var(--warn); font-style: italic; }
   height: 100%; background: var(--accent); transition: width .25s linear;
 }
 .export-progress .note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dest-folder { display: block; color: var(--muted); font-size: 11px; word-break: break-all; }

@@ -5,7 +5,7 @@ import { newLocale } from './locales.ts';
 import { templateById, templateMoves } from './templates.ts';
 import { DEFAULT_MODEL_ID } from './voice.ts';
 import type {
-  ButtonLayer, FieldValue, Locale, LocaleId, Photo, Project, Rect, Timing,
+  ButtonLayer, FieldValue, Locale, LocaleId, Photo, Project, Rect, Timing, TranslatedFrom,
 } from './types.ts';
 
 export const DEFAULT_CANVAS = { width: 1080, height: 1920 } as const;
@@ -64,6 +64,8 @@ export type LocalePatch = Partial<Pick<Locale, 'script' | 'voiceId' | 'include' 
 export interface LocaleWrite {
   id: LocaleId;
   script?: string;
+  /** What a translated script came from; given with `script` by the translator. */
+  translatedFrom?: TranslatedFrom | null;
   /** Merged over what the locale already holds, key by key. */
   overrides?: Readonly<Record<string, FieldValue>>;
 }
@@ -427,7 +429,11 @@ export function apply(project: Project, command: Command): Project {
         : project;
 
     case 'locale/patch':
-      return mapLocales(project, [command.id], l => ({ ...l, ...command.patch }));
+      return mapLocales(project, [command.id], l => {
+        const next = { ...l, ...command.patch };
+        // A script typed over is the buyer's from then on: no longer a translation to redo.
+        return command.patch.script !== undefined && command.patch.script !== l.script ? { ...next, translatedFrom: null } : next;
+      });
 
     case 'locale/field':
       return mapLocales(project, [command.id], l => {
@@ -448,6 +454,7 @@ export function apply(project: Project, command: Command): Project {
         return {
           ...l,
           script: write.script ?? l.script,
+          ...(write.translatedFrom !== undefined ? { translatedFrom: write.translatedFrom } : {}),
           // Merged rather than replaced: a translation that came back for three
           // of the four edited fields must not silently drop the fourth.
           overrides: write.overrides === undefined

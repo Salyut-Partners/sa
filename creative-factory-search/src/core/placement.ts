@@ -29,6 +29,8 @@ export interface CampaignInfo {
   name: string;
   language: string | null;
   country: string | null;
+  /** What the platform calls the campaign once it is launched — the name the buyer knows it by; null or absent before. */
+  platformName?: string | null;
 }
 
 /** The campaigns a file goes to; none is "not exported". Sorted, no repeats. */

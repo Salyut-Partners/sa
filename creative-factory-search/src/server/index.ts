@@ -11,7 +11,7 @@ import { describePlan, onApplySettled, planLaunch, readState, startApply, type P
 import { parseAdjustValue } from '../core/adjust.ts';
 import { emptyState } from '../core/plan.ts';
 import { startAdjust } from './adjust.ts';
-import { buildTopicTable } from '../core/topic-table.ts';
+import { buildTopicTable, platformColumn } from '../core/topic-table.ts';
 import { buyerKnown, freshPlatform, learnBuyer, platformStatus, platformVersion, refreshPlatform, startPlatformPoll } from './platform-status.ts';
 import { startBatch } from './batch.ts';
 import { campaignCreativesDir, createBatch, listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
@@ -22,6 +22,7 @@ import { adoptLaunch, createCampaign, createLaunch, existingLaunchKeys, expandLa
 import { isTrafficSource } from '../core/launch.ts';
 import { BadRequestError, cancelJob, jobById, outputsOf, statusOf } from './jobs.ts';
 import { PlatformReadError, platformState } from './platform.ts';
+import { countedPlan, countPlan } from './plans.ts';
 import { closeBrowser } from './render.ts';
 import { startSubtitles, subsState, SUBS_OUTPUT } from './subs.ts';
 import { nicheOptions, startTicketSync, syncTickets, ticketReport } from './tickets.ts';
@@ -127,31 +128,24 @@ app.get('/api/launches/tree', (_req, res) => {
 /**
  * The topic table: the folder in three states per campaign. Opening a topic
  * reads the disk and the buyer's platform status — two reads for every topic
- * at once, refreshed when not fresh — and no plan: the launch column comes
- * from the state and the files' hashes. With `plan: true` in the body the
- * topic's plan is counted too, and with `refresh: true` the platform is read
- * again first — what «Оновити план» asks for; a plan
- * that cannot be read leaves the table standing, with the sentence why.
+ * at once, refreshed when not fresh — and the plan as far as it was counted:
+ * with `count: true` in the body a count starts in the background — what
+ * «Рахувати план» asks for — and the answer says it is counting until a later
+ * read finds it done; with `refresh: true` the platform is read again first.
+ * A plan that cannot be counted leaves the table standing, with the sentence why.
  */
 app.post('/api/launches/:key/table', async (req, res) => {
   try {
     const config = loadConfig();
     const key = req.params.key;
     if (!existingLaunchKeys(config.launches_root).includes(key)) throw new RefusedError(`заливу \`${key}\` немає`);
-    const body = (req.body ?? {}) as { plan?: unknown; refresh?: unknown };
-    const withPlan = body.plan === true;
-    // «Оновити план» asks for the platform read again; the table's own re-reads take a fresh-enough status.
+    const body = (req.body ?? {}) as { count?: unknown; refresh?: unknown };
+    // «Рахувати план» asks for the platform read again; the table's own re-reads take a fresh-enough status.
     const platform = body.refresh === true ? await refreshPlatform(config) : await freshPlatform(config);
-    let plan: PlanDescription | null = null;
-    let planNote = '';
-    if (withPlan) {
-      try {
-        plan = describePlan(await planLaunch(config, key, null));
-      } catch (e) {
-        if (e instanceof RefusedError || e instanceof PlatformReadError) planNote = e.message;
-        else throw e;
-      }
-    }
+    const folder = readTopicFolder(config.launches_root, key);
+    const fingerprint = JSON.stringify(folder);
+    if (body.count === true) countPlan(key, fingerprint, async () => describePlan(await planLaunch(config, key, null)));
+    const counted = countedPlan(key, fingerprint);
     let state = emptyState();
     let stateNote = '';
     try {
@@ -159,8 +153,8 @@ app.post('/api/launches/:key/table', async (req, res) => {
     } catch (e) {
       stateNote = e instanceof RefusedError ? e.message : (e as Error).message;
     }
-    const table = buildTopicTable(readTopicFolder(config.launches_root, key), state, plan?.outline ?? null, platform);
-    res.json({ table, plan, planNote, stateNote, folder: path.join(config.launches_root, key) });
+    const table = buildTopicTable(folder, state, counted.plan?.outline ?? null, platform);
+    res.json({ table, plan: counted.plan, planCounting: counted.counting, planNote: counted.note, stateNote, folder: path.join(config.launches_root, key) });
   } catch (e) {
     answerFailure(res, e, 'table');
   }
@@ -407,9 +401,19 @@ app.post('/api/launches/:key/adjust', async (req, res) => {
 
 // ----------------------------------------------------------------- batches --
 
+/** The topic's campaigns for the export's «Куди», each with the name the platform gave it once launched. */
 app.get('/api/launches/:key/campaigns', (req, res) => {
   try {
-    res.json({ campaigns: listCampaigns(loadConfig(), req.params.key) });
+    const config = loadConfig();
+    const campaigns = listCampaigns(config, req.params.key);
+    let state = emptyState();
+    try {
+      state = readState(path.join(config.launches_root, req.params.key));
+    } catch {
+      // A state that does not read names nothing; the folders still list.
+    }
+    const platform = platformStatus();
+    res.json({ campaigns: campaigns.map(c => ({ ...c, platformName: platformColumn(state.campaigns[c.name], platform).campaignName })) });
   } catch (e) {
     answerFailure(res, e, 'campaigns');
   }
