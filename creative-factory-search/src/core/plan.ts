@@ -102,9 +102,12 @@ export function parseTermGroupOptions(source: string | null): ParseResult<TermGr
   const errors: string[] = [];
   let weight: number | null = null;
   if (bag['weight'] !== undefined && bag['weight'] !== null) {
-    const value = Number(bag['weight']);
-    if (Number.isInteger(value) && value > 0 && value <= 100) weight = value;
-    else errors.push('termgroup.yaml: `weight` має бути цілим числом від 1 до 100');
+    // The platform holds what its admin lets a buyer set: 0 for a group kept but
+    // given no traffic, and fractions — what `sa adopt` copies over as it is.
+    const raw = bag['weight'];
+    const value = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
+    if (Number.isFinite(value) && value >= 0 && value <= 100) weight = value;
+    else errors.push('termgroup.yaml: `weight` має бути числом від 0 до 100');
   }
   const text = (field: string): string => {
     const value = bag[field];
@@ -340,6 +343,9 @@ const sameList = (a: readonly string[], b: readonly string[]): boolean =>
  * Equal shares that add up to exactly 100: the remainder goes to the first
  * groups, one point each, so three groups are 34/33/33 and not 33/33/33.
  */
+/** Whether weights add up to 100 — fractions summed as floats land a hair off it. */
+export const isHundred = (sum: number): boolean => Math.abs(sum - 100) < 0.01;
+
 function equalShares(count: number): number[] {
   const base = Math.floor(100 / count);
   const extra = 100 - base * count;
@@ -463,8 +469,8 @@ export function plan(contents: LaunchContents, snapshot: Snapshot, state: Launch
     errors.push('вага задана не в усіх термгрупах: або в кожній `termgroup.yaml`, або в жодній');
   }
   const explicitSum = explicit.reduce((sum, g) => sum + (g.weight ?? 0), 0);
-  if (explicit.length === contents.termgroups.length && explicit.length > 0 && explicitSum !== 100) {
-    errors.push(`ваги термгруп мають давати в сумі 100, зараз ${explicitSum}`);
+  if (explicit.length === contents.termgroups.length && explicit.length > 0 && !isHundred(explicitSum)) {
+    errors.push(`ваги термгруп мають давати в сумі 100, зараз ${Number(explicitSum.toFixed(2))}`);
   }
   const weights: { id: TermGroupRef; weight: number }[] = [];
   let weightsDiffer = false;

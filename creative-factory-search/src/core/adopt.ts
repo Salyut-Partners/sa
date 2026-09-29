@@ -21,7 +21,7 @@ import { internalName, isLaunchKey, LAUNCH_DIRS, type LaunchTree, TRAFFIC_SOURCE
 import { LOCALE_ENGLISH, LOCALE_IDS } from './locales.ts';
 import { campaignFolderName, renderCampaignYaml } from './matrix.ts';
 import {
-  articleHash, emptyState, type Country, type LaunchState, type PlatformConfiguration, type PlatformPostDetail, type PlatformTermGroup, type PlatformTopic,
+  articleHash, emptyState, isHundred, type Country, type LaunchState, type PlatformConfiguration, type PlatformPostDetail, type PlatformTermGroup, type PlatformTopic,
 } from './plan.ts';
 import YAML from 'yaml';
 
@@ -199,8 +199,8 @@ export function adoptTopic(input: AdoptInput): Adopted {
   const weights = input.termGroups.map(g => g.weight);
   const weightsSum = weights.reduce((s, w) => s + w, 0);
   const shares = equalShares(Math.max(1, input.termGroups.length));
-  const weightsMatter = input.termGroups.length > 0 && weightsSum === 100 && weights.some((w, i) => w !== shares[i]);
-  if (input.termGroups.length > 0 && weightsSum !== 100) notes.push(`ваги термгруп на платформі дають ${weightsSum}, не 100 — у теку записано рівні частки, plan запропонує виставити їх`);
+  const weightsMatter = input.termGroups.length > 0 && isHundred(weightsSum) && weights.some((w, i) => w !== shares[i]);
+  if (input.termGroups.length > 0 && !isHundred(weightsSum)) notes.push(`ваги термгруп на платформі дають ${Number(weightsSum.toFixed(2))}, не 100 — у теку записано рівні частки, plan запропонує виставити їх`);
   input.termGroups.forEach((g, i) => {
     const folder = groupFolders[i]!;
     dirs.push(`termgroups/${folder}`);

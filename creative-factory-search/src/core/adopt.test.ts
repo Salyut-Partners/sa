@@ -90,6 +90,20 @@ describe('adopting a topic from the platform', () => {
     expect(second.ok && second.value).toEqual({ name: 'tg HR 2', weight: 40, country: 'All', language: 'All' });
   });
 
+  it('carries a weight of 0 and fractions over as the platform holds them, in a form the plan reads back', () => {
+    const adopted = adoptTopic(input({ termGroups: [
+      { id: 1, name: 'tg-2', terms: ['a'], weight: 0, country: 'All', language: 'All' },
+      { id: 2, name: 'tgcredit', terms: ['b'], weight: 33.33, country: 'All', language: 'All' },
+      { id: 3, name: 'tgimmodev', terms: ['c'], weight: 33.33, country: 'All', language: 'All' },
+      { id: 4, name: 'tgsaisiecred', terms: ['d'], weight: 33.34, country: 'All', language: 'All' },
+    ] }));
+    const weights = ['tg-2', 'tgcredit', 'tgimmodev', 'tgsaisiecred'].map(folder => {
+      const read = parseTermGroupOptions(fileOf(adopted, `termgroups/${folder}/termgroup.yaml`));
+      return read.ok ? read.value.weight : read.errors.join();
+    });
+    expect(weights).toEqual([0, 33.33, 33.33, 33.34]);
+  });
+
   it('turns each post into articles/<slug>/article.md with a front matter, and writes the fingerprint the plan will compute', () => {
     const adopted = adoptTopic(input());
     const markdown = fileOf(adopted, 'articles/warehouse-jobs-in-germany-2026-shifts/article.md');

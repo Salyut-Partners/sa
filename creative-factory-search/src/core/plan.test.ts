@@ -227,6 +227,17 @@ describe('term groups', () => {
     });
   });
 
+  it('takes the weights the platform holds: 0 for a group given no traffic, and fractions that add up to 100', () => {
+    expect(parseTermGroupOptions('weight: 0')).toMatchObject({ ok: true, value: { weight: 0 } });
+    expect(parseTermGroupOptions('weight: 33.33')).toMatchObject({ ok: true, value: { weight: 33.33 } });
+    const contents = full();
+    contents.termgroups = [
+      tg('tg-main', ['a'], { weight: 0 }), tg('tg-second', ['b'], { weight: 33.33 }),
+      tg('tg-third', ['c'], { weight: 33.33 }), tg('tg-fourth', ['d'], { weight: 33.34 }),
+    ];
+    expect(plan(contents, ON_PLATFORM, DONE_STATE()).errors.join()).not.toMatch(/ваг/);
+  });
+
   it('refuses weights that do not add up to 100', () => {
     const contents = full();
     contents.termgroups = [tg('tg-main', ['a'], { weight: 70 }), tg('tg-second', ['b'], { weight: 40 })];
@@ -275,6 +286,8 @@ describe('parseTermGroupOptions', () => {
       .toEqual({ ok: true, value: { weight: 60, country: 'DE', language: 'de', name: null } });
     expect(parseTermGroupOptions('name: tgHR\n')).toMatchObject({ ok: true, value: { name: 'tgHR' } });
     expect(parseTermGroupOptions('weight: -3').ok).toBe(false);
+    expect(parseTermGroupOptions('weight: 101').ok).toBe(false);
+    expect(parseTermGroupOptions('weight: ""').ok).toBe(false);
     expect(parseTermGroupOptions('name: 3').ok).toBe(false);
   });
 
