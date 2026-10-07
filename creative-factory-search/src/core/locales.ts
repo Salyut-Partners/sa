@@ -66,7 +66,6 @@ export const localeLabel = (id: LocaleId): string => `${FLAGS[id]} ${LOCALE_NAME
 export const newLocale = (id: LocaleId): Locale => ({
   id,
   script: '',
-  voiceId: null,
   include: true,
   subtitles: true,
   overrides: {},

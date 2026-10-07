@@ -7,7 +7,7 @@ import { activeLocale } from '../core/locales.ts';
 import {
   apply, createProject, MAX_PHOTOS, photoTimings, type Command,
 } from '../core/project.ts';
-import { parseRoute, routeHash, type Route } from '../core/route.ts';
+import { parseRoute, routeHash, type Tab } from '../core/route.ts';
 import { buildSpec } from '../core/spec.ts';
 import { posterTime } from '../core/timing.ts';
 import type { Photo, Project, Spec } from '../core/types.ts';
@@ -23,12 +23,9 @@ import { explainRefusal, openProjectFile, saveProjectFile } from './project-file
 import { fetchVoices, type VoiceCatalogue } from './server.ts';
 import { SidePanel } from './SidePanel.tsx';
 import { autosaver, loadAutosave, type SaveState } from './store.ts';
-import { useApplyRun } from './launches.ts';
-import { LaunchesTab } from './LaunchesTab.tsx';
 import { useSubtitleQueue } from './subtitles.ts';
 import { SubtitlesTab } from './SubtitlesTab.tsx';
 import { Timeline } from './Timeline.tsx';
-import { useTopicBatch } from './topic-batch.ts';
 import { useTranslator } from './translate.ts';
 
 /** Width of one grid cell in CSS pixels — four of these fit the work area. */
@@ -57,14 +54,8 @@ export function App() {
   const [dropping, setDropping] = useState(false);
   const [catalogue, setCatalogue] = useState<VoiceCatalogue | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
-  // The tab, and the topic on the launches tab, live in the address: a reload opens where the buyer was.
-  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
-  const tab = route.tab;
-  /** The topic last open on the launches tab, so coming back to the tab finds it. */
-  const lastTopic = useRef(route.topic);
-  useEffect(() => {
-    if (route.topic !== null) lastTopic.current = route.topic;
-  }, [route.topic]);
+  // The tab lives in the address: a reload opens where the buyer was.
+  const [tab, setTab] = useState<Tab>(() => parseRoute(window.location.hash));
 
   const project = history.present;
 
@@ -130,23 +121,20 @@ export function App() {
 
   const run = useExport();
   const translator = useTranslator(project, dispatch);
-  const topic = useTopicBatch(project, replaceProject);
   // Lives here rather than in the tab so a run keeps going while the buyer is
   // back on the creatives, the same way an export does.
   const subtitles = useSubtitleQueue();
-  // An apply, likewise: started from the launches tab, watched from wherever the buyer is.
-  const applyRun = useApplyRun();
 
   useEffect(() => {
-    const follow = (): void => setRoute(parseRoute(window.location.hash));
+    const follow = (): void => setTab(parseRoute(window.location.hash));
     window.addEventListener('hashchange', follow);
     return () => window.removeEventListener('hashchange', follow);
   }, []);
 
   /** Move to a place: the address changes, and the hashchange brings the state along. */
-  const go = useCallback((next: Route) => {
+  const go = useCallback((next: Tab) => {
     const hash = routeHash(next);
-    if (window.location.hash === hash) setRoute(next);
+    if (window.location.hash === hash) setTab(next);
     else window.location.hash = hash;
   }, []);
 
@@ -235,8 +223,8 @@ export function App() {
         walk(e.shiftKey ? redo : undo);
         return;
       }
-      // ⌘S saves the project file, as the header button does. The sources
-      // reach the topic folder with the export, not by hand.
+      // ⌘S saves the project file, as the header button does. The pictures
+      // reach the topic's sources folder with a launch, not by hand.
       if (meta && e.key.toLowerCase() === 's') {
         e.preventDefault();
         if (latest.current.photos.length === 0) return;
@@ -280,8 +268,6 @@ export function App() {
     const result = await openProjectFile(file);
     if (result.ok) {
       replaceProject(result.project);
-      // A project from a file is not the sources of the last export: the next export starts its own batch.
-      topic.forget();
       setStatus(`Відкрито ${file.name}`);
     } else {
       setReport({ warnings: [], rejected: [`${file.name}: ${explainRefusal(result.reason)}`] });
@@ -309,14 +295,11 @@ export function App() {
       <header>
         <div className="brand"><span className="mark" /> Creative Factory Search</div>
         <nav className="tabs" aria-label="Таби">
-          <button className={tab === 'creatives' ? 'on' : ''} onClick={() => go({ tab: 'creatives', topic: null })}>
+          <button className={tab === 'creatives' ? 'on' : ''} onClick={() => go('creatives')}>
             Креативи
           </button>
-          <button className={tab === 'subtitles' ? 'on' : ''} onClick={() => go({ tab: 'subtitles', topic: null })}>
+          <button className={tab === 'subtitles' ? 'on' : ''} onClick={() => go('subtitles')}>
             Субтитри{subtitles.busy ? <span className="busy" title="Іде обробка" /> : null}
-          </button>
-          <button className={tab === 'launches' ? 'on' : ''} onClick={() => go({ tab: 'launches', topic: lastTopic.current })}>
-            Заливи{applyRun.running ? <span className="busy" title="Іде залив" /> : null}
           </button>
         </nav>
         <div className="tools">
@@ -328,7 +311,7 @@ export function App() {
           >
             {themeIcon[theme.choice]}
           </button>
-          {/* The editor's own tools: nothing on the launches or subtitles tab edits a project. */}
+          {/* The editor's own tools: nothing on the subtitles tab edits a project. */}
           {tab !== 'creatives' ? null : (<>
           <button
             disabled={!canUndo(history)}
@@ -353,9 +336,9 @@ export function App() {
             Зберегти
           </button>
           <button
-            onClick={() => { replaceProject(createProject()); topic.forget(); }}
+            onClick={() => replaceProject(createProject())}
             disabled={project.photos.length === 0}
-            title="Почати з чистого: наступний експорт покладе ісходники в нову теку"
+            title="Почати з чистого"
           >
             Новий
           </button>
@@ -376,19 +359,8 @@ export function App() {
         </>)}
       </header>
 
-      {tab === 'launches' ? (
-        <LaunchesTab
-          run={applyRun}
-          chosenKey={route.topic}
-          onChoose={key => go({ tab: 'launches', topic: key })}
-          onOpenBatch={(launchKey, batch) => {
-            // The batch opens in the editor tab: that is where the pictures are.
-            topic.openIn(launchKey, batch);
-            go({ tab: 'creatives', topic: null });
-          }}
-        />
-      ) : tab === 'subtitles' ? (
-        <SubtitlesTab queue={subtitles} launchKey={topic.location?.launchKey ?? null} />
+      {tab === 'subtitles' ? (
+        <SubtitlesTab queue={subtitles} />
       ) : (
       <main>
         <section className="stage-area">
@@ -454,7 +426,6 @@ export function App() {
           translator={translator}
           run={run}
           onExportOne={onExportOne}
-          topic={topic}
         />
       </main>
       )}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { archiveName, burnCount, groupDuration, planBatch, planOne, VOICE_TAIL } from './batch.ts';
+import { archiveName, batchNames, burnCount, groupDuration, keepItems, planBatch, planOne, subtitleCount, VOICE_TAIL } from './batch.ts';
 import { apply, createProject, defaultButton } from './project.ts';
 import type { LocaleId, Project } from './types.ts';
 
@@ -243,5 +243,33 @@ describe('subtitles in the plan', () => {
     const plain = apply(styled(), { type: 'project/patch', patch: { subtitles: null } });
     expect(planBatch(styled()).renders).toBe(planBatch(plain).renders);
     expect(planBatch(styled()).groups.map(g => g.key)).toEqual(planBatch(plain).groups.map(g => g.key));
+  });
+});
+
+describe('batchNames', () => {
+  it('names the files the plan makes, without planning them', () => {
+    const project = withLocales(batchOf('a.jpg', 'b.jpg'), 'de');
+    const planned = planBatch(project).groups.flatMap(g => g.items.map(i => i.name)).sort();
+    expect(batchNames(project).map(n => n.name).sort()).toEqual(planned);
+  });
+});
+
+describe('keepItems', () => {
+  it('cuts a plan to the files named, dropping groups left empty', () => {
+    const plan = planBatch(withLocales(batchOf('a.jpg', 'b.jpg'), 'de'));
+    const one = plan.groups[0]!.items[0]!.name;
+    const kept = keepItems(plan, new Set([one]));
+    expect(kept.groups.flatMap(g => g.items.map(i => i.name))).toEqual([one]);
+    expect([kept.total, kept.renders]).toEqual([1, 1]);
+  });
+});
+
+describe('subtitleCount', () => {
+  it('counts the files that will get subtitles the way the plan comes out', () => {
+    const styled = apply(withLocales(batchOf('a.jpg', 'b.jpg'), 'de', 'it'), { type: 'project/patch', patch: { subtitles: 'yellow' } });
+    const project = apply(styled, { type: 'locale/patch', id: 'de', patch: { subtitles: false } });
+    const plan = planBatch(project);
+    expect(subtitleCount(project)).toEqual({ burned: burnCount(plan), total: plan.total });
+    expect(subtitleCount(project).burned).toBeLessThan(plan.total);
   });
 });

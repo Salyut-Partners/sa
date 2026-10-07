@@ -1,21 +1,17 @@
 // The digifor client. Thin: the request form as the admin sends it — Bearer,
 // `organization_id` in the query, JSON or multipart — and one typed helper per
-// call the chain makes. No decisions live here: what to send is the plan's,
-// what to do when the platform does not answer is the queue policy's.
+// call a launch makes. No decisions live here: what to send is
+// `core/quick-launch.ts`'s, what to do when the platform does not answer is
+// the queue policy's.
 //
 // Every call answers an `Outcome` rather than throwing, because the policy in
 // `core/queue.ts` reads outcomes: a timeout is a fact to reason about, not an
 // exception to unwind.
-import type { AdjustBody } from '../core/adjust.ts';
-import type { BuilderLinks } from '../core/adopt.ts';
+import crypto from 'node:crypto';
 import type {
-  AdAccount, HeadlineBody, PauseBody, Pixel, PlatformBuilder, PlatformCampaign, PlatformCreative, PlatformTsp, Rejection, ReviewVerdict,
-  Theme, TspBody, TspFields,
-} from '../core/campaign-plan.ts';
-import type {
-  Country, PlatformConfiguration, PlatformPost, PlatformPostDetail, PlatformTermGroup, PlatformTopic, Site, TermGroupBody,
-} from '../core/plan.ts';
-import type { PlatformRule, RuleAction, RuleCondition, RuleCreateBody, RuleLimitsBody } from '../core/rules.ts';
+  AdAccount, BuilderLinks, Country, HeadlineBody, Pixel, PlatformBuilder, PlatformCampaign, PlatformCreative, PlatformPost, PlatformPostDetail,
+  PlatformTermGroup, PlatformTopic, PlatformTsp, Rejection, ReviewVerdict, Theme, TspBody, TspFields,
+} from '../core/platform-model.ts';
 import type { SaConfig } from './config.ts';
 
 /** How long one call may take before it is treated as unanswered. Posts are text; a video upload gets its own. */
@@ -63,14 +59,17 @@ export class PlatformClient {
 
   async call(
     method: string, path: string, query: Record<string, string | number>, body?: BodyInit, contentType?: string, timeoutMs = TIMEOUT_MS,
+    extra: Record<string, string> = {},
   ): Promise<Answer> {
-    const headers = this.headers();
+    const headers = { ...this.headers(), ...extra };
     if (contentType !== undefined) headers['content-type'] = contentType;
     let response: Response;
     try {
+      // A streamed body has to say it is sent before the answer is read: `duplex`, which the DOM types do not know yet.
+      const streamed = body instanceof ReadableStream ? { duplex: 'half' } : {};
       response = await fetch(this.url(path, query), {
-        method, headers, ...(body === undefined ? {} : { body }), signal: AbortSignal.timeout(timeoutMs),
-      });
+        method, headers, ...(body === undefined ? {} : { body }), ...streamed, signal: AbortSignal.timeout(timeoutMs),
+      } as RequestInit);
     } catch (e) {
       // A network that dropped mid-request is as uncertain as a timeout: the
       // request may have arrived.
@@ -95,20 +94,46 @@ export class PlatformClient {
     return this.call('POST', path, {}, JSON.stringify(body), 'application/json');
   }
 
-  putJson(path: string, body: unknown): Promise<Answer> {
-    return this.call('PUT', path, {}, JSON.stringify(body), 'application/json');
-  }
-
-  /** Multipart the way the admin's forms send it: a list field is one part per item under `name[]`. */
-  postForm(path: string, fields: Record<string, string | string[]>, file?: { field: string; name: string; bytes: Buffer; mime: string }): Promise<Answer> {
-    const form = new FormData();
+  /**
+   * Multipart the way the admin's forms send it: a list field is one part per
+   * item under `name[]`. With a file the body is spelled out here rather than
+   * by `FormData`, so it can be handed over in slices and `onProgress` told
+   * how many bytes have gone — fifty megabytes is long enough to want a bar.
+   */
+  postForm(
+    path: string, fields: Record<string, string | string[]>,
+    file?: { field: string; name: string; bytes: Buffer; mime: string }, onProgress?: (sent: number, total: number) => void,
+  ): Promise<Answer> {
+    const parts: [string, string][] = [];
     for (const [name, value] of Object.entries(fields)) {
-      if (Array.isArray(value)) for (const item of value) form.append(name.endsWith('[]') ? name : `${name}[]`, item);
-      else form.append(name, value);
+      if (Array.isArray(value)) for (const item of value) parts.push([name.endsWith('[]') ? name : `${name}[]`, item]);
+      else parts.push([name, value]);
     }
-    if (file === undefined) return this.call('POST', path, {}, form);
-    form.append(file.field, new Blob([new Uint8Array(file.bytes)], { type: file.mime }), file.name);
-    return this.call('POST', path, {}, form, undefined, UPLOAD_TIMEOUT_MS);
+    if (file === undefined) {
+      const form = new FormData();
+      for (const [name, value] of parts) form.append(name, value);
+      return this.call('POST', path, {}, form);
+    }
+    const boundary = `----sa${crypto.randomUUID().replace(/-/g, '')}`;
+    const quoted = (v: string): string => v.replace(/["\r\n]/g, c => encodeURIComponent(c));
+    const head = parts.map(([name, value]) => `--${boundary}\r\nContent-Disposition: form-data; name="${quoted(name)}"\r\n\r\n${value}\r\n`).join('')
+      + `--${boundary}\r\nContent-Disposition: form-data; name="${quoted(file.field)}"; filename="${quoted(file.name)}"\r\nContent-Type: ${file.mime}\r\n\r\n`;
+    const body = Buffer.concat([Buffer.from(head, 'utf8'), file.bytes, Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8')]);
+    const SLICE = 256 * 1024;
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent >= body.length) {
+          controller.close();
+          return;
+        }
+        const next = body.subarray(sent, Math.min(sent + SLICE, body.length));
+        sent += next.length;
+        controller.enqueue(new Uint8Array(next));
+        onProgress?.(sent, body.length);
+      },
+    }, { highWaterMark: 1 });
+    return this.call('POST', path, {}, stream, `multipart/form-data; boundary=${boundary}`, UPLOAD_TIMEOUT_MS, { 'content-length': String(body.length) });
   }
 }
 
@@ -134,10 +159,21 @@ const toTopic = (raw: unknown): PlatformTopic => {
   return { id: num(t['id']), name: str(t['name']), internal_name: str(t['internal_name']), user_id: num(t['user_id'] ?? 0) };
 };
 
-/** Every topic whose name or internal name the platform's search matches. */
-export async function searchTopics(client: PlatformClient, search: string): Promise<PlatformTopic[]> {
-  const body = bag(need(await client.get('/topics', { pageId: 1, limit: 100, search }), 'GET /topics'));
-  return (Array.isArray(body['topics']) ? body['topics'] : []).map(toTopic);
+/**
+ * The buyer's topics, page by page: the list is the organisation's, so it is
+ * asked for the buyer and narrowed here too, in case it does not honour it.
+ */
+export async function readBuyerTopics(client: PlatformClient, userId: number | null): Promise<PlatformTopic[]> {
+  const topics: PlatformTopic[] = [];
+  for (let pageId = 1; pageId <= 50; pageId++) {
+    const query: Record<string, string | number> = { pageId, limit: 100, search: '' };
+    if (userId !== null) query['user_id'] = userId;
+    const body = bag(need(await client.get('/topics', query), 'GET /topics'));
+    const page = (Array.isArray(body['topics']) ? body['topics'] : []).map(toTopic);
+    topics.push(...page.filter(t => userId === null || t.user_id === userId));
+    if (page.length < 100) break;
+  }
+  return topics;
 }
 
 export async function readTopic(client: PlatformClient, id: number): Promise<PlatformTopic | null> {
@@ -145,17 +181,6 @@ export async function readTopic(client: PlatformClient, id: number): Promise<Pla
   if (answer.status === 'error' && answer.code === 404) return null;
   const body = bag(need(answer, `GET /topics/${id}`));
   return body['topic'] === undefined ? null : toTopic(body['topic']);
-}
-
-export async function readConfigurations(client: PlatformClient, topicId: number): Promise<PlatformConfiguration[]> {
-  const body = bag(need(await client.get(`/topics/${topicId}/configurations`), `GET /topics/${topicId}/configurations`));
-  return (Array.isArray(body['configurations']) ? body['configurations'] : []).map(raw => {
-    const c = bag(raw);
-    return {
-      id: num(c['id']), name: str(c['name']), topic_id: num(c['topic_id']),
-      country: str(c['country']), traffic_source: str(c['traffic_source']),
-    };
-  });
 }
 
 export async function readTermGroups(client: PlatformClient, topicId: number): Promise<PlatformTermGroup[]> {
@@ -205,14 +230,6 @@ export async function readCountries(client: PlatformClient): Promise<Country[]> 
   return (Array.isArray(body['countries']) ? body['countries'] : []).map(raw => {
     const c = bag(raw);
     return { name: str(c['name']), code: str(c['country_code']) };
-  });
-}
-
-export async function readSites(client: PlatformClient): Promise<Site[]> {
-  const body = bag(need(await client.get('/sites'), 'GET /sites'));
-  return (Array.isArray(body['sites']) ? body['sites'] : []).map(raw => {
-    const s = bag(raw);
-    return { id: num(s['id']), url: str(s['url']) };
   });
 }
 
@@ -332,48 +349,6 @@ export async function readTsps(client: PlatformClient, topicId: number, userId: 
     return { id: num(t['id']), name: str(t['name']), topic_id: num(t['topic_id']), fields: toTspFields(t) };
   }).filter(t => t.topic_id === topicId);
 }
-
-/** A JSON list the platform stores as text, or already as a list. Same trap as a TSP's `age_from`. */
-const ruleList = (v: unknown): { type: string; operator: string; value: string }[] => {
-  let raw: unknown = v;
-  if (typeof v === 'string') {
-    try {
-      raw = JSON.parse(v);
-    } catch {
-      return [];
-    }
-  }
-  return Array.isArray(raw) ? raw.map(r => { const b = bag(r); return { type: str(b['type']), operator: str(b['operator']), value: str(b['value']) }; }) : [];
-};
-
-const toRule = (raw: unknown): PlatformRule => {
-  const r = bag(raw);
-  const topicId = r['topic_id'] == null || r['topic_id'] === '' ? null : num(r['topic_id']);
-  return {
-    id: num(r['id']),
-    topic_id: topicId,
-    userId: num(r['ad_account_id'] ?? 0),
-    conditions: ruleList(r['conditions']) as RuleCondition[],
-    actions: ruleList(r['results']) as RuleAction[],
-  };
-};
-
-/**
- * The buyer's autorules: topic-scoped and general alike, so `plan` can warn
- * about a general one stacking onto the topic's own. The query's own name
- * for the buyer is `ad_account_id` — the same trap the create call has.
- */
-export async function readRules(client: PlatformClient, topicId: number, userId: number): Promise<PlatformRule[]> {
-  const body = need(await client.get('/campaign-rules', { ad_account_id: userId }), 'GET /campaign-rules');
-  return listOf(body, 'campaignRules').map(toRule).filter(r => r.topic_id === null || r.topic_id === topicId);
-}
-
-export const createRule = (client: PlatformClient, body: RuleCreateBody): Promise<Answer> =>
-  client.postJson('/campaign-rules', body);
-
-/** The limits a create cannot carry; the admin sends the whole body again, with them added. */
-export const updateRuleLimits = (client: PlatformClient, id: number, body: RuleLimitsBody): Promise<Answer> =>
-  client.putJson(`/campaign-rules/${id}`, body);
 
 /**
  * The bot's verdicts as the builder carries them: one entry per creative,
@@ -531,74 +506,10 @@ export async function readBuyerCampaigns(client: PlatformClient, userId: number)
   return found;
 }
 
-export async function readCampaigns(client: PlatformClient, wanted: readonly number[]): Promise<PlatformCampaign[]> {
-  if (wanted.length === 0) return [];
-  const left = new Set(wanted);
-  const found: PlatformCampaign[] = [];
-  const query = campaignWindow();
-  for (let pageId = 0; pageId < CAMPAIGN_PAGES_MAX && left.size > 0; pageId++) {
-    const body = need(await client.get('/v2/campaigns', { ...query, pageId, limit: CAMPAIGN_PAGE }), 'GET /v2/campaigns');
-    const page = listOf(body, 'data');
-    for (const raw of page) {
-      const campaign = toCampaign(raw);
-      if (!left.has(campaign.id)) continue;
-      left.delete(campaign.id);
-      found.push(campaign);
-    }
-    if (page.length < CAMPAIGN_PAGE) break;
-  }
-  return found;
-}
-
 // --------------------------------------------------------------- writes --
 
-export const createTopic = (client: PlatformClient, body: { name: string; internal_name: string }): Promise<Answer> =>
-  client.postJson('/topics', body);
-
-export const createConfiguration = (client: PlatformClient, topicId: number, body: unknown): Promise<Answer> =>
-  client.postJson(`/topics/${topicId}/configurations`, body);
-
-export const createTermGroup = (client: PlatformClient, topicId: number, body: TermGroupBody): Promise<Answer> =>
-  client.postJson('/topics/term-groups', { ...body, topic_id: topicId });
-
-export const updateTermGroup = (client: PlatformClient, id: number, body: TermGroupBody): Promise<Answer> =>
-  client.putJson(`/topics/term-groups/${id}`, body);
-
-export const setTermGroupWeights = (client: PlatformClient, topicId: number, weights: { id: number; weight: number }[]): Promise<Answer> =>
-  client.putJson(`/topics/${topicId}/term-groups/weight`, weights);
-
-export interface PostFields {
-  description: string;
-  site_id: string;
-  post_type: string;
-  language: string;
-  title: string;
-  topic_ids: string[];
-  countries: string[];
-  status: string;
-}
-
-/** The admin's form, part for part, including the empty `featured_image` it always sends. */
-const postForm = (fields: PostFields): Record<string, string | string[]> => ({
-  description: fields.description,
-  site_id: fields.site_id,
-  post_type: fields.post_type,
-  language: fields.language,
-  title: fields.title,
-  topic_ids: fields.topic_ids,
-  countries: fields.countries,
-  status: fields.status,
-  featured_image: '',
-});
-
-export const createPost = (client: PlatformClient, fields: PostFields): Promise<Answer> =>
-  client.postForm('/posts', postForm(fields));
-
-export const updatePost = (client: PlatformClient, id: number, fields: PostFields): Promise<Answer> =>
-  client.postForm(`/posts/${id}/update`, { ...postForm(fields), id: String(id) });
-
-/** The id a create answered with, where the platform gives one — topics, term groups and builders do. */
-export function createdId(answer: Answer, key: 'topic' | 'termGroup' | 'campaignBuilder'): number | null {
+/** The id a create answered with, where the platform gives one — a builder does. */
+export function createdId(answer: Answer, key: 'campaignBuilder'): number | null {
   if (answer.status !== 'ok') return null;
   const id = bag(bag(answer.body)[key])['id'];
   return typeof id === 'number' && Number.isInteger(id) ? id : null;
@@ -617,8 +528,10 @@ export interface UploadFields {
 }
 
 /** One video into the repository, the admin's form part for part, the file last. */
-export const uploadCreative = (client: PlatformClient, fields: UploadFields, file: { name: string; bytes: Buffer }): Promise<Answer> =>
-  client.postForm('/creative-repo', { ...fields }, { field: 'file', name: file.name, bytes: file.bytes, mime: 'video/mp4' });
+export const uploadCreative = (
+  client: PlatformClient, fields: UploadFields, file: { name: string; bytes: Buffer }, onProgress?: (sent: number, total: number) => void,
+): Promise<Answer> =>
+  client.postForm('/creative-repo', { ...fields }, { field: 'file', name: file.name, bytes: file.bytes, mime: 'video/mp4' }, onProgress);
 
 /** The admin sends every list twice — once plain, once as `name[]` — and so does this. */
 export const createHeadline = (client: PlatformClient, body: Omit<HeadlineBody, 'topic_ids'> & { topic_ids: string[] }): Promise<Answer> =>
@@ -640,9 +553,6 @@ export const createHeadline = (client: PlatformClient, body: Omit<HeadlineBody, 
 
 export const createTsp = (client: PlatformClient, body: Omit<TspBody, 'topic_id'> & { topic_id: number }): Promise<Answer> =>
   client.postJson('/traffic-source-profiles', body);
-
-export const updateTsp = (client: PlatformClient, id: number, name: string, body: Omit<TspBody, 'topic_id'> & { topic_id: number }): Promise<Answer> =>
-  client.putJson(`/traffic-source-profiles/${id}`, { ...body, id, name });
 
 export interface BuilderFields {
   topic_id: string;
@@ -666,22 +576,3 @@ export interface BuilderFields {
 
 export const createBuilder = (client: PlatformClient, fields: BuilderFields): Promise<Answer> =>
   client.postForm('/campaign-builder', { ...fields });
-
-/** The admin's bulk status change: multipart, campaign ids — never builder ids. */
-export const pauseCampaigns = (client: PlatformClient, body: PauseBody): Promise<Answer> =>
-  client.postForm('/v2/campaign/bulk-update', { status: body.status, 'campaign_ids[]': body.campaign_ids.map(String) });
-
-/**
- * The admin's campaign management: one multipart per campaign with the id,
- * bid, budget and status all together — `core/adjust.ts` fills the parts
- * that do not change from the list. Answers `{"success":true}`; a 2xx that
- * says `success: false` is an error answer here, so the policy stops on it
- * with the platform's words instead of writing a change that did not happen.
- */
-export async function updateCampaign(client: PlatformClient, body: AdjustBody): Promise<Answer> {
-  const answer = await client.postForm(`/v2/campaign/${body.id}`, { id: body.id, bid: body.bid, budget: body.budget, status: body.status });
-  if (answer.status === 'ok' && bag(answer.body)['success'] === false) {
-    return { status: 'error', code: answer.code, body: answer.body, text: JSON.stringify(answer.body).slice(0, 300) };
-  }
-  return answer;
-}

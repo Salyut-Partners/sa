@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BatchPlan } from '../core/batch.ts';
 import {
-  cancelJob, downloadBatch, jobStatus, startBatch, type BatchOutput, type JobStatus,
+  cancelJob, downloadBatch, jobStatus, startBatch, type JobStatus,
 } from './server.ts';
 
 /** How often to ask. Often enough to feel live, rarely enough to be free. */
@@ -19,8 +19,7 @@ export interface ExportRun {
   note: string;
   failed: boolean;
   running: boolean;
-  /** With `output`, the files land in campaign folders instead of a download. */
-  start: (plan: BatchPlan, duration: number, fitToVoice: boolean, output?: BatchOutput) => void;
+  start: (plan: BatchPlan, duration: number, fitToVoice: boolean) => void;
   cancel: () => void;
   download: () => void;
 }
@@ -70,12 +69,10 @@ export function useExport(): ExportRun {
     return () => clearInterval(timer);
   }, [running, id, take]);
 
-  const start = useCallback((plan: BatchPlan, duration: number, fitToVoice: boolean, output?: BatchOutput) => {
+  const start = useCallback((plan: BatchPlan, duration: number, fitToVoice: boolean) => {
     if (plan.total === 0) {
       setFailed(true);
-      setNote(output === undefined
-        ? 'Нема чого експортувати: оберіть фото і хоча б одну мову.'
-        : 'Нема чого експортувати: жодна мова не має кампанії призначення.');
+      setNote('Нема чого експортувати: оберіть фото і хоча б одну мову.');
       return;
     }
     setFailed(false);
@@ -85,14 +82,14 @@ export function useExport(): ExportRun {
     // through the seconds it takes to send a batch of photos over.
     setStatus({
       id: '', state: 'running', done: 0, total: plan.total, current: '',
-      errors: [], elapsed: 0, remaining: null, ready: false, folders: [],
+      errors: [], elapsed: 0, remaining: null, ready: false, folders: [], result: null, finished: [], progress: {},
     });
     // The number that costs time is the frame walks, not the files. Said once
     // here, where the plan is in hand, rather than recomputed on every render.
     if (plan.renders < plan.total) {
       setNote(`${plan.renders} відеорядів на ${plan.total} файлів — решта лише озвучкою.`);
     }
-    void startBatch(plan, duration, fitToVoice, output)
+    void startBatch(plan, duration, fitToVoice)
       .then(started => setStatus(s => (s === null ? s : { ...s, id: started.id })))
       .catch(e => {
         setFailed(true);
@@ -123,13 +120,12 @@ export function useExport(): ExportRun {
 function summarise(status: JobStatus): string {
   const seconds = status.elapsed.toFixed(0);
   const failures = status.errors.length === 0 ? '' : ` · не вийшло: ${status.errors.length}`;
-  const where = status.folders.length === 0 ? '' : ` · у ${status.folders.join(', ')}`;
   switch (status.state) {
     case 'cancelled':
-      return `Скасовано на ${status.done} з ${status.total}${where}`;
+      return `Скасовано на ${status.done} з ${status.total}`;
     case 'failed':
       return `Експорт не вдався за ${seconds} с${failures}`;
     default:
-      return `Готово: ${status.done - status.errors.length} з ${status.total} за ${seconds} с${failures}${where}`;
+      return `Готово: ${status.done - status.errors.length} з ${status.total} за ${seconds} с${failures}`;
   }
 }

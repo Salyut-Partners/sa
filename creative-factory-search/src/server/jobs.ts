@@ -37,6 +37,17 @@ export interface JobStatus {
   ready: boolean;
   /** The folders files were written to, when they went to folders rather than a download. */
   folders: string[];
+  /** What a launch made, once it has: where to find it and what it is. */
+  result: { url: string; label: string } | null;
+  /** Every step of a launch done so far, by its label, in order. */
+  finished: string[];
+  /** How far along each piece of work in flight is — frames of a render, bytes of an upload — by its name. */
+  progress: Record<string, Progress>;
+}
+
+export interface Progress {
+  done: number;
+  total: number;
 }
 
 export interface Output {
@@ -71,20 +82,27 @@ export interface Job {
   /** Files this job made on its way, deleted when it settles. */
   scratch: string[];
   /**
-   * Output name → the files it is written as, for a job going to folders —
-   * one per campaign the file goes to, the first written and the rest copied.
-   * Null is a download: everything stays in `dir` until it is fetched.
+   * Output name → the files it is written as, for a job writing to a folder
+   * of its own — the subtitles' `subs/output`. Null is a download: everything
+   * stays in `dir` until it is fetched, or a launch takes it.
    */
   targets: Map<string, string[]> | null;
   /** Folders that received at least one file, for the panel to name. */
   folders: Set<string>;
   /** Something to do the moment the job is cancelled — kill a child, say. */
   onCancel: (() => void) | null;
+  /** What a launch made, once it has. */
+  result: { url: string; label: string } | null;
+  /** Name → how far along it is, while it is in flight. */
+  progress: Map<string, Progress>;
 }
 
 const jobs = new Map<string, Job>();
 
 export class BadRequestError extends Error {}
+
+/** A request the buyer got wrong, or one the platform will not allow: the message is for them, and nothing was made. */
+export class RefusedError extends Error {}
 
 /** A new running job, registered and given its scratch folder. */
 export function createJob(total: number, targets: Map<string, string[]> | null, prefix: string): Job {
@@ -104,6 +122,8 @@ export function createJob(total: number, targets: Map<string, string[]> | null, 
     targets,
     folders: new Set(),
     onCancel: null,
+    result: null,
+    progress: new Map(),
   };
   jobs.set(job.id, job);
   sweep();
@@ -130,6 +150,9 @@ export function statusOf(job: Job): JobStatus {
       : (elapsed / done) * (job.total - done),
     ready: job.targets === null && job.outputs.length > 0 && job.state !== 'running',
     folders: [...job.folders].sort(),
+    result: job.result,
+    finished: job.outputs.map(o => o.name),
+    progress: Object.fromEntries(job.progress),
   };
 }
 
@@ -163,6 +186,7 @@ export function settleJob(job: Job, crashed: Error | null): void {
     }
   }
   job.active.clear();
+  job.progress.clear();
   job.finishedAt ??= Date.now();
   job.settled = true;
   for (const file of job.scratch) fs.promises.unlink(file).catch(() => {});
@@ -197,10 +221,6 @@ export async function working<T>(job: Job, name: string, step: () => Promise<T>)
     job.active.delete(name);
   }
 }
-
-/** `campaigns/<name>/creatives` out of a full path, for the panel to name. */
-export const relativeFolder = (file: string): string =>
-  path.dirname(file).split(path.sep).slice(-3).join('/');
 
 /** A failure in the words the panel will show: the message is the whole of it. */
 export const explain = (e: unknown): string => (e as Error)?.message || String(e);

@@ -2,53 +2,19 @@
 // hold no knowledge of routes, and so a failed request always arrives as a
 // sentence rather than as a status code.
 import type { BatchPlan } from '../core/batch.ts';
-import type { CampaignInfo } from '../core/placement.ts';
-import type { ProjectFile } from '../core/serialize.ts';
 import type { LocaleId } from '../core/types.ts';
 import type { VoiceModel } from '../core/voice.ts';
 // Type-only, and therefore erased: the editor never bundles a line of server
 // code. Naming the server's own types is what stops the two ends of each of
 // these routes drifting apart without anything noticing.
-import type { LaunchesTree as DiskTree } from '../core/launches-tree.ts';
-import type { TopicTable } from '../core/topic-table.ts';
-import type { ImportableTopic } from '../core/adopt.ts';
-import type { PlanDescription } from '../server/apply.ts';
-import type { AdoptedFolder } from '../server/launches.ts';
-import type { BatchOutput } from '../server/batch.ts';
+import type { LaunchLine, LaunchTopic, StagedFile } from '../server/quick-launch.ts';
+import type { LaunchForm } from '../core/quick-launch.ts';
 import type { JobFailure, JobStatus } from '../server/jobs.ts';
-import type { BatchRead, BatchWritten } from '../server/batches.ts';
 import type { SubsState } from '../server/subs.ts';
 import type { Translations, TranslatorId } from '../server/translate.ts';
 import type { Voice, VoiceCatalogue as ServerVoices } from '../server/tts.ts';
 
-export type { BatchOutput, JobFailure, JobStatus, PlanDescription, SubsState, TopicTable, Voice };
-
-/** The tree as the route answers it: the disk, plus where the platform status stands, so the tab knows when a table is stale. */
-export interface LaunchesTree extends DiskTree {
-  platform: { version: number; at: string | null; note: string | null };
-}
-
-/** The topic table, and the plan when it was asked for; a plan that could not be read leaves `plan` null and says why. */
-export interface TopicTableRead {
-  table: TopicTable;
-  /** The plan as far as the server counted it for the folder as it is now; null while counting, before the first count, or when the folder changed since. */
-  plan: PlanDescription | null;
-  /** Whether a count is on — started by «Оновити план», going on whatever the editor does meanwhile. */
-  planCounting: boolean;
-  planNote: string;
-  stateNote: string;
-  /** The topic folder's full path, for the text «Копіювати» puts on the clipboard. */
-  folder: string;
-}
-
-/** The import dialog's list: the buyer's topics no folder has yet, or — for a buyer not known yet — the ask for one topic id. */
-export interface ImportableRead {
-  topics: (ImportableTopic & { launchKey: string; niche: string | null })[];
-  needsTopic: boolean;
-  /** The niches the ticket board offers; empty when ClickUp is not set up, and then nothing is picked. */
-  niches: string[];
-  note?: string | null;
-}
+export type { JobFailure, JobStatus, LaunchForm, LaunchLine, LaunchTopic, StagedFile, SubsState, Voice };
 
 /**
  * The sentence behind a failed response.
@@ -122,79 +88,11 @@ export const translate = (
 ): Promise<TranslationResult> =>
   ask<TranslationResult>('/api/translate', asJson({ texts, targets }));
 
-// ---------------------------------------------------------------- launches --
-
-/** The launch keys under `launches_root`, as `sa launches` lists them. */
-export const fetchLaunches = (): Promise<string[]> =>
-  ask<{ launches: string[] }>('/api/launches').then(r => r.launches);
-
-/** The launches by key and topic name, off the tree — what the export panel offers the buyer to pick from. */
-export const fetchLaunchNames = (): Promise<{ key: string; name: string }[]> =>
-  ask<LaunchesTree>('/api/launches/tree').then(t => t.niches.flatMap(n => n.topics.map(topic => ({ key: topic.key, name: topic.name }))));
-
-/** The campaign folders of a launch, each with the language its manifest names. */
-export const fetchCampaigns = (launchKey: string): Promise<CampaignInfo[]> =>
-  ask<{ campaigns: CampaignInfo[] }>(`/api/launches/${launchKey}/campaigns`).then(r => r.campaigns);
-
-/** The launches as a tree, read off the disk: niche → topic → campaigns with their file counts. */
-export const fetchLaunchesTree = (): Promise<LaunchesTree> => ask<LaunchesTree>('/api/launches/tree');
-
-/** The plan — what the platform would be asked for — for a topic, or for some campaigns of it. Creates nothing. */
-export const fetchPlan = (launchKey: string, campaigns: readonly string[] | null): Promise<PlanDescription> =>
-  ask<PlanDescription>(`/api/launches/${launchKey}/plan`, asJson(campaigns === null ? {} : { campaigns }));
-
-/** The topic table: three states per campaign, the totals, the batches — and with `plan` the topic's plan counted. Reads the platform; creates nothing. */
-/** The topic's table; `count` starts counting its plan in the background, `refresh` reads the platform again first. */
-export const fetchTopicTable = (launchKey: string, count = false, refresh = false): Promise<TopicTableRead> =>
-  ask<TopicTableRead>(`/api/launches/${launchKey}/table`, asJson({ count, refresh }));
-
-/** The topics the buyer can import; `topicId` names one of theirs when the server does not know the buyer yet. */
-export const fetchImportable = (topicId?: number): Promise<ImportableRead> =>
-  ask<ImportableRead>('/api/launches/importable' + (topicId === undefined ? '' : `?topicId=${topicId}`));
-
-/** Import one topic with its campaigns into a new folder, under the niche picked for it. Reads the platform; writes nothing to it. */
-export const importTopic = (topicId: number, launchKey: string, vertical: string | null): Promise<AdoptedFolder> =>
-  ask<AdoptedFolder>('/api/launches/import', asJson({ topicId, launchKey, ...(vertical === null ? {} : { vertical }) }));
-
-/**
- * Apply. The `confirm` is the gate the server insists on, and the button that
- * sends it is the one the buyer pressed after reading the plan. A null id
- * means there was nothing to do.
- */
-export const startApply = (launchKey: string, campaigns: readonly string[] | null): Promise<{ id: string | null; steps: number }> =>
-  ask<{ id: string | null; steps: number }>(`/api/launches/${launchKey}/apply`, asJson({ confirm: true, ...(campaigns === null ? {} : { campaigns }) }));
-
-/** The batch as the server read it: pictures back inside, and which files were gone. */
-export const readBatch = (launchKey: string, batch: string): Promise<BatchRead> =>
-  ask<BatchRead>(`/api/launches/${launchKey}/batches/${batch}`);
-
-/** Save into a batch the server names by the clock; the answer says which. */
-export const createBatch = (launchKey: string, file: ProjectFile): Promise<BatchWritten> =>
-  ask<BatchWritten>(`/api/launches/${launchKey}/batches`, asJson(file));
-
-export const writeBatch = (launchKey: string, batch: string, file: ProjectFile): Promise<BatchWritten> =>
-  ask<BatchWritten>(`/api/launches/${launchKey}/batches/${batch}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(file),
-  });
-
 // ------------------------------------------------------------------ export --
 
-/**
- * Start an export. With `output` the files are written into the launch's
- * campaign folders and nothing comes back to download; without it they are
- * fetched as before.
- */
-export const startBatch = (
-  plan: BatchPlan,
-  duration: number,
-  fitToVoice: boolean,
-  output?: BatchOutput,
-): Promise<{ id: string }> =>
-  ask<{ id: string }>('/api/batch', asJson({
-    groups: plan.groups, duration, fitToVoice, ...(output === undefined ? {} : { output }),
-  }));
+/** Start an export; its files stay on the server until they are downloaded or a launch takes them. */
+export const startBatch = (plan: BatchPlan, duration: number, fitToVoice: boolean): Promise<{ id: string }> =>
+  ask<{ id: string }>('/api/batch', asJson({ groups: plan.groups, duration, fitToVoice }));
 
 /** Any job's progress — an export or a subtitle run; they share the registry. */
 export const jobStatus = (id: string): Promise<JobStatus> =>
@@ -212,17 +110,11 @@ export interface SubtitleTarget {
   style: string;
   /** A language code, or `auto`. */
   lang: string;
-  /** A campaign folder to write into, or null for the pipeline's own output folder. */
-  campaign: { launchKey: string; campaign: string } | null;
 }
 
-/** Upload one video and start subtitling it. Answers once the upload is in. */
+/** Upload one video and start subtitling it into `subs/output`. Answers once the upload is in. */
 export function startSubtitles(file: File, target: SubtitleTarget): Promise<{ id: string }> {
   const query = new URLSearchParams({ name: file.name, style: target.style, lang: target.lang });
-  if (target.campaign !== null) {
-    query.set('launchKey', target.campaign.launchKey);
-    query.set('campaign', target.campaign.campaign);
-  }
   return ask<{ id: string }>('/api/subtitles?' + query.toString(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream' },
@@ -252,3 +144,40 @@ export async function downloadBatch(id: string): Promise<number> {
 
 const nameFrom = (disposition: string | null): string | null =>
   disposition?.match(/filename="([^"]+)"/)?.[1] ?? null;
+
+// ------------------------------------------------------------------ launch --
+
+/** Whether the config holds what a launch needs — a token and an organisation — and if not, why. */
+export type PlatformState = { ready: true } | { ready: false; note: string };
+
+export const fetchPlatform = (): Promise<PlatformState> =>
+  ask<{ platform: PlatformState }>('/api/config').then(r => r.platform);
+
+/** The buyer's topics on the platform. */
+export const fetchLaunchTopics = (): Promise<{ id: number; name: string }[]> =>
+  ask<{ topics: { id: number; name: string }[] }>('/api/launch/topics').then(r => r.topics);
+
+/** One topic off the platform: its sets, their defaults, and the lists for one traffic source. */
+export const fetchLaunchTopic = (id: number, source: string): Promise<LaunchTopic> =>
+  ask<LaunchTopic>(`/api/launch/topics/${id}?source=${encodeURIComponent(source)}`);
+
+export interface LaunchRequest {
+  topicId: number;
+  form: LaunchForm;
+  renders: { job: string; name: string }[];
+  disk: { id: string; name: string }[];
+  scripts: Record<string, string>;
+  sources: { name: string; image: string }[];
+}
+
+/** One new campaign. `confirm` rides along: the only caller is the modal's «Підтвердити». */
+export const startLaunch = (request: LaunchRequest): Promise<{ id: string; lines: LaunchLine[]; warnings: string[] }> =>
+  ask('/api/launch', asJson({ ...request, confirm: true }));
+
+/** A designer's mp4 sent to this machine's server once, when it is added to the form; the launch names it by the id. */
+export const stageLaunchFile = (file: File): Promise<StagedFile> =>
+  ask<StagedFile>('/api/launch/files?' + new URLSearchParams({ name: file.name }).toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: file,
+  });

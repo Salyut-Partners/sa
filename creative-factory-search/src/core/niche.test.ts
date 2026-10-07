@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { guessNiche } from './niche.ts';
 
-/** The dropdown the team's ClickUp list carries today. */
+/** The niches the team works in, as it spells them. */
 const OPTIONS = ['Jobs', 'Credits', 'E-commerce'];
 
 describe('guessNiche', () => {

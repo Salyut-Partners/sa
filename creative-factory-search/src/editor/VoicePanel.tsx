@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { activeLocale, LOCALE_NAMES } from '../core/locales.ts';
 import type { Command } from '../core/project.ts';
 import { just } from '../core/selection.ts';
@@ -15,15 +16,14 @@ interface Props {
   translator: Translator;
 }
 
-/** What the project's voice means when nobody has picked one. */
-const PROJECT_DEFAULT = '';
-
 /**
  * The voice-over, for the language on screen.
  *
- * The script is the locale's, the voice may be the locale's or the project's,
- * and the model is the project's — because the model is a price, and paying two
- * prices in one export is not a thing anybody asks for.
+ * The script is the locale's; the voice and the model are the project's. One
+ * voice, because a multilingual model speaks every language in it and a second
+ * select per language read as the same choice twice. One model, because the
+ * model is a price, and paying two prices in one export is not a thing anybody
+ * asks for.
  */
 export function VoicePanel({ project, dispatch, catalogue, translator }: Props) {
   const locale = activeLocale(project);
@@ -33,13 +33,20 @@ export function VoicePanel({ project, dispatch, catalogue, translator }: Props) 
   const source = catalogue === null ? '' : describeVoiceSource(catalogue);
   const noTranslator = describeTranslator(catalogue);
 
-  const voiceOptions = [
-    { id: PROJECT_DEFAULT, label: 'голос проєкту' },
-    ...voices.map(v => ({
-      id: v.voiceId,
-      label: [v.name, v.labels['accent'], v.labels['gender']].filter(Boolean).join(' · '),
-    })),
-  ];
+  // A project from before the editor picked a voice holds none, which means
+  // the first on the list — the one synthesis falls back to. Shown by name, so
+  // the select and the play button say what the export will speak with.
+  const voiceId = project.voiceId || voices[0]?.voiceId || '';
+  const voice = voices.find(v => v.voiceId === voiceId) ?? null;
+  const voiceOptions = voices.map(v => ({
+    id: v.voiceId,
+    label: [v.name, v.labels['accent'], v.labels['gender']].filter(Boolean).join(' · '),
+  }));
+  // A voice the project names but this account does not list — a file from
+  // another buyer — stays shown rather than reading as the first one.
+  if (voiceId !== '' && voice === null) voiceOptions.push({ id: voiceId, label: 'голос не з цього акаунта' });
+
+  const sample = useSample(voice?.previewUrl ?? null);
 
   return (
     <>
@@ -67,31 +74,23 @@ export function VoicePanel({ project, dispatch, catalogue, translator }: Props) 
       </div>
 
       <div className="group">
-        <div className="lab">Голос цієї мови</div>
-        <SelectField
-          value={just(locale.voiceId ?? PROJECT_DEFAULT)}
-          options={voiceOptions}
-          onChange={id =>
-            dispatch({
-              type: 'locale/patch', id: locale.id,
-              patch: { voiceId: id === PROJECT_DEFAULT ? null : id },
-            })}
-        />
-        <div className="note">
-          Німецька своїм голосом звучить природніше, ніж голосом з англійської.
+        <div className="lab">Голос</div>
+        <div className="row">
+          <SelectField
+            value={just(voiceId)}
+            options={voiceOptions}
+            onChange={id => dispatch({ type: 'project/patch', patch: { voiceId: id } })}
+          />
+          <button
+            disabled={voice?.previewUrl == null}
+            title={voice?.previewUrl == null ? 'Для цього голосу немає семплу' : sample.playing ? 'Зупинити' : 'Прослухати семпл ElevenLabs'}
+            onClick={sample.toggle}
+          >
+            {sample.playing ? '■' : '▶'}
+          </button>
         </div>
-      </div>
-
-      <div className="group">
-        <div className="lab">Голос проєкту</div>
-        <SelectField
-          value={just(project.voiceId)}
-          options={[
-            { id: PROJECT_DEFAULT, label: 'перший доступний' },
-            ...voiceOptions.slice(1),
-          ]}
-          onChange={voiceId => dispatch({ type: 'project/patch', patch: { voiceId } })}
-        />
+        <div className="note">Один голос на всі мови. Семпл — англійська фраза від ElevenLabs, безкоштовно.</div>
+        {sample.failed ? <div className="error">Семпл не відтворився — перевірте з'єднання.</div> : null}
         {source === '' ? null : <div className="note">{source}</div>}
       </div>
 
@@ -124,4 +123,45 @@ export function VoicePanel({ project, dispatch, catalogue, translator }: Props) 
       </div>
     </>
   );
+}
+
+/**
+ * A voice's sample, played and stopped from one button. Changing the voice
+ * stops whatever was playing: the button now stands for another voice, and a
+ * sample running on under it would be the wrong one.
+ */
+function useSample(url: string | null): { playing: boolean; failed: boolean; toggle: () => void } {
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+    return () => {
+      audio.current?.pause();
+      audio.current = null;
+      setPlaying(false);
+    };
+  }, [url]);
+
+  const toggle = (): void => {
+    if (url === null) return;
+    if (playing) {
+      audio.current?.pause();
+      setPlaying(false);
+      return;
+    }
+    const player = audio.current ?? new Audio(url);
+    audio.current = player;
+    player.currentTime = 0;
+    player.onended = () => setPlaying(false);
+    setFailed(false);
+    setPlaying(true);
+    player.play().catch(() => {
+      setPlaying(false);
+      setFailed(true);
+    });
+  };
+
+  return { playing, failed, toggle };
 }

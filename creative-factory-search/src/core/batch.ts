@@ -184,6 +184,45 @@ export function batchSize(project: Project): BatchSize {
   return { photos, locales, total: photos * locales };
 }
 
+/** How many of the files the export makes get subtitles burned in, of how many. */
+export interface SubtitleShare {
+  burned: number;
+  total: number;
+}
+
+/** Counted like `batchSize`, for the subtitles line of the panel: what `burnCount` of the plan will say. */
+export function subtitleCount(project: Project): SubtitleShare {
+  const locales = releaseLocales(project);
+  const burned = locales.filter(l => subtitleStyleFor(project, l.id) !== null).length;
+  const photos = project.selection.length;
+  return { burned: photos * burned, total: photos * locales.length };
+}
+
+/** One file the export would make, by name only. */
+export interface BatchName {
+  name: string;
+  photoId: string;
+  locale: LocaleId;
+}
+
+/**
+ * The files `planBatch` makes, named and nothing more — for a list of
+ * checkboxes that redraws on every keystroke. Arithmetic like `batchSize`:
+ * no Spec is built, so a photo `planBatch` would drop still shows here.
+ */
+export function batchNames(project: Project): BatchName[] {
+  const locales = releaseLocales(project).map(l => l.id);
+  const chosen = new Set(project.selection);
+  return project.photos.flatMap((photo, index) =>
+    chosen.has(photo.id) ? locales.map(locale => ({ name: archiveName(index, photo.name, locale), photoId: photo.id, locale })) : []);
+}
+
+/** A plan cut down to the files named — the ones still to render. Groups left empty go. */
+export function keepItems(plan: BatchPlan, names: ReadonlySet<string>): BatchPlan {
+  const groups = plan.groups.map(g => ({ ...g, items: g.items.filter(i => names.has(i.name)) })).filter(g => g.items.length > 0);
+  return { groups, total: groups.reduce((sum, g) => sum + g.items.length, 0), renders: groups.length };
+}
+
 /**
  * The video length one group renders at.
  *

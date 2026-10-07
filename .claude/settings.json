@@ -1,27 +1,9 @@
 {
   "permissions": {
     "deny": [
-      "Bash(sa apply:*)",
-      "Bash(*/sa apply:*)",
-      "Bash(bin/sa apply:*)",
-      "Bash(npm run sa -- apply:*)",
-      "Bash(npm run sa apply:*)",
-      "Bash(tsx src/cli/main.ts apply:*)",
-      "Bash(npx tsx src/cli/main.ts apply:*)",
-      "Bash(sa budget * --confirm*)",
-      "Bash(*/sa budget * --confirm*)",
-      "Bash(bin/sa budget * --confirm*)",
-      "Bash(npm run sa -- budget * --confirm*)",
-      "Bash(npm run sa budget * --confirm*)",
-      "Bash(tsx src/cli/main.ts budget * --confirm*)",
-      "Bash(npx tsx src/cli/main.ts budget * --confirm*)",
-      "Bash(sa bid * --confirm*)",
-      "Bash(*/sa bid * --confirm*)",
-      "Bash(bin/sa bid * --confirm*)",
-      "Bash(npm run sa -- bid * --confirm*)",
-      "Bash(npm run sa bid * --confirm*)",
-      "Bash(tsx src/cli/main.ts bid * --confirm*)",
-      "Bash(npx tsx src/cli/main.ts bid * --confirm*)"
+      "Bash(curl * */api/launch*)",
+      "Bash(curl */api/launch*)",
+      "Bash(wget */api/launch*)"
     ]
   }
 }

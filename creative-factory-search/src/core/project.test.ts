@@ -584,7 +584,7 @@ describe('locale commands', () => {
     expect(p.locales.map(l => l.id)).toEqual(['en']);
     expect(p.activeLocale).toBe('en');
     expect(p.locales[0]).toEqual({
-      id: 'en', script: '', voiceId: null, include: true, subtitles: true, overrides: {},
+      id: 'en', script: '', include: true, subtitles: true, overrides: {},
     });
   });
 
@@ -625,10 +625,10 @@ describe('locale commands', () => {
     }).activeLocale).toBe('en');
   });
 
-  it('writes the script, the voice and whether it goes out', () => {
+  it('writes the script and whether it goes out', () => {
     let p = apply(createProject(), { type: 'locale/patch', id: 'en', patch: { script: 'Привіт' } });
-    p = apply(p, { type: 'locale/patch', id: 'en', patch: { voiceId: 'lily', include: false } });
-    expect(p.locales[0]).toMatchObject({ script: 'Привіт', voiceId: 'lily', include: false });
+    p = apply(p, { type: 'locale/patch', id: 'en', patch: { include: false } });
+    expect(p.locales[0]).toMatchObject({ script: 'Привіт', include: false });
   });
 
   it('keeps where a translated script came from, until the buyer types over it', () => {

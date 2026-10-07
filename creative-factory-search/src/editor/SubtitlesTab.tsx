@@ -1,16 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LOCALE_IDS, LOCALE_NAMES } from '../core/locales.ts';
-import type { CampaignInfo } from '../core/placement.ts';
 import { FilePicker } from './FilePicker.tsx';
-import {
-  fetchCampaigns, fetchLaunches, fetchSubtitles, type SubsState, type SubtitleTarget,
-} from './server.ts';
+import { fetchSubtitles, type SubsState, type SubtitleTarget } from './server.ts';
 import type { QueuedFile, SubtitleQueue } from './subtitles.ts';
 
 interface Props {
   queue: SubtitleQueue;
-  /** The topic the editor is bound to, offered as the default destination. */
-  launchKey: string | null;
 }
 
 /** Languages Whisper is asked for by name; anything else it guesses. */
@@ -21,25 +16,17 @@ const LANGS: readonly { id: string; label: string }[] = [
   { id: 'ru', label: 'Русский' },
 ];
 
-const NOWHERE = ' output';
-
 /**
- * The watcher, in a window. Drop a video, pick a style, a language and a
- * folder, and watch it go through the same pipeline `inbox/<style>/` feeds —
- * one job per file, on the same board as an export.
+ * The watcher, in a window. Drop a video, pick a style and a language, and
+ * watch it go through the same pipeline `inbox/<style>/` feeds — one job per
+ * file, on the same board as an export, into `subs/output/`.
  */
-export function SubtitlesTab({ queue, launchKey }: Props) {
+export function SubtitlesTab({ queue }: Props) {
   const [state, setState] = useState<SubsState | null>(null);
   const [stateNote, setStateNote] = useState('');
   const [style, setStyle] = useState('');
   const [lang, setLang] = useState('auto');
-  const [launches, setLaunches] = useState<string[]>([]);
-  const [launch, setLaunch] = useState(launchKey ?? '');
-  const [campaigns, setCampaigns] = useState<CampaignInfo[]>([]);
-  const [campaign, setCampaign] = useState(NOWHERE);
   const [dropping, setDropping] = useState(false);
-  /** The bound topic's first campaign is offered once; after that the choice is the buyer's. */
-  const defaulted = useRef(false);
 
   useEffect(() => {
     fetchSubtitles()
@@ -48,31 +35,10 @@ export function SubtitlesTab({ queue, launchKey }: Props) {
         setStyle(current => (current !== '' ? current : s.styles?.default ?? ''));
       })
       .catch(e => setStateNote((e as Error).message));
-    fetchLaunches().then(setLaunches).catch(() => setLaunches([]));
   }, []);
 
-  useEffect(() => {
-    if (launch === '') { setCampaigns([]); setCampaign(NOWHERE); return; }
-    let stale = false;
-    fetchCampaigns(launch)
-      .then(list => {
-        if (stale) return;
-        setCampaigns(list);
-        const first = list[0]?.name;
-        const offer = !defaulted.current && launch === launchKey && first !== undefined;
-        defaulted.current = true;
-        setCampaign(current => (list.some(c => c.name === current) ? current : offer ? first : NOWHERE));
-      })
-      .catch(() => { if (!stale) setCampaigns([]); });
-    return () => { stale = true; };
-  }, [launch]);
-
   const ready = state?.ready === true && style !== '';
-  const target = (): SubtitleTarget => ({
-    style,
-    lang,
-    campaign: launch !== '' && campaign !== NOWHERE ? { launchKey: launch, campaign } : null,
-  });
+  const target = (): SubtitleTarget => ({ style, lang });
   const take = (list: FileList | null): void => {
     const files = Array.from(list ?? []).filter(f => f.type.startsWith('video/') || /\.(mp4|mov|m4v|mkv|webm|avi)$/i.test(f.name));
     if (files.length > 0 && ready) queue.add(files, target());
@@ -90,7 +56,7 @@ export function SubtitlesTab({ queue, launchKey }: Props) {
         {queue.files.length === 0 ? (
           <div className="empty">
             <b>{ready ? 'Перетягніть відео' : 'Субтитри поки не готові'}</b>
-            <span>{ready ? 'mp4, mov — можна декілька; стиль і теку виберіть праворуч' : 'дивіться панель праворуч'}</span>
+            <span>{ready ? 'mp4, mov — можна декілька; стиль і мову виберіть праворуч' : 'дивіться панель праворуч'}</span>
           </div>
         ) : (
           <div className="subs-list">
@@ -131,28 +97,7 @@ export function SubtitlesTab({ queue, launchKey }: Props) {
         </div>
 
         <div className="group">
-          <div className="lab">Куди</div>
-          <div className="row" style={{ marginBottom: 8 }}>
-            <select value={launch} onChange={e => setLaunch(e.target.value)}>
-              <option value="">— без топіка: subs/output —</option>
-              {launches.map(key => <option key={key} value={key}>{key}</option>)}
-            </select>
-          </div>
-          {launch === '' ? null : (
-            <select value={campaign} onChange={e => setCampaign(e.target.value)}>
-              <option value={NOWHERE}>— без кампанії: subs/output —</option>
-              {campaigns.map(c => (
-                <option key={c.name} value={c.name}>
-                  {c.name}{c.language ? ` · ${c.language}` : ''}
-                </option>
-              ))}
-            </select>
-          )}
-          <div className="note">
-            {launch !== '' && campaign !== NOWHERE
-              ? `Файл ляже в ${launch}/campaigns/${campaign}/creatives/`
-              : 'Файл ляже в subs/output/, як у вотчера.'}
-          </div>
+          <div className="note">Файл ляже в subs/output/, як у вотчера; для заливу додайте його у «Креативах» кнопкою «+ mp4 з диска».</div>
         </div>
 
         <div className="group">

@@ -1,7 +1,5 @@
 // A project as a file. Images travel inside it as data URLs, so one .json is the
-// whole batch when it goes through the browser. In a launch folder the same
-// file points at `photos/` instead — see `batch-folder.ts`, which splits and
-// rejoins it on either side of the disk.
+// whole batch.
 import { isLocaleId, newLocale } from './locales.ts';
 import { DEFAULT_CANVAS, DEFAULT_DURATION, DEFAULT_FPS, MAX_PHOTOS } from './project.ts';
 import { DEFAULT_MODEL_ID } from './voice.ts';
@@ -30,7 +28,7 @@ export interface ProjectFile {
   fps: number;
   duration: number;
   photos: Photo[];
-  locales: Locale[];
+  locales: (Locale & { voiceId: null })[];
   voiceId: string;
   modelId: string;
   fitToVoice: boolean;
@@ -57,7 +55,9 @@ export function toFile(project: Project): ProjectFile {
     fps: project.fps,
     duration: project.duration,
     photos: structuredClone(project.photos),
-    locales: structuredClone(project.locales),
+    // `voiceId: null` on every language for an editor from before the voice was
+    // the project's alone: it refuses a language without one.
+    locales: project.locales.map(l => ({ ...structuredClone(l), voiceId: null })),
     voiceId: project.voiceId,
     modelId: project.modelId,
     fitToVoice: project.fitToVoice,
@@ -105,7 +105,7 @@ const isCanvas = (v: unknown): v is CanvasSize => isBag(v) && isNum(v['width']) 
 
 const isLocale = (v: unknown): v is Locale =>
   isBag(v) && isLocaleId(v['id']) && isText(v['script']) &&
-  (v['voiceId'] === null || isText(v['voiceId'])) && typeof v['include'] === 'boolean' &&
+  typeof v['include'] === 'boolean' &&
   // Absent is what every file written before subtitles existed says.
   (v['subtitles'] === undefined || typeof v['subtitles'] === 'boolean') &&
   isOverrides(v['overrides']);
@@ -191,7 +191,10 @@ function readLocales(
     // before subtitles existed is one that never opted out.
     const locales = stored.filter(isLocale)
       .map(({ translatedFrom, ...l }) => ({
-        ...l, subtitles: l.subtitles !== false, overrides: { ...l.overrides },
+        // Named field by field: a language's own voice, from files written
+        // before the voice was the project's alone, is dropped here.
+        id: l.id, script: l.script, include: l.include,
+        subtitles: l.subtitles !== false, overrides: { ...l.overrides },
         // Absent in files from before the export translated; a malformed one reads as written by hand.
         ...(isTranslatedFrom(translatedFrom) ? { translatedFrom: { id: translatedFrom.id, script: translatedFrom.script } } : {}),
       }));

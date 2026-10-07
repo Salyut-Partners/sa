@@ -86,5 +86,5 @@ export function useSubtitleQueue(): SubtitleQueue {
 
 const blank = (id: string): JobStatus => ({
   id, state: 'running', done: 0, total: 1, current: '', errors: [],
-  elapsed: 0, remaining: null, ready: false, folders: [],
+  elapsed: 0, remaining: null, ready: false, folders: [], result: null, finished: [], progress: {},
 });

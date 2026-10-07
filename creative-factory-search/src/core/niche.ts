@@ -1,13 +1,11 @@
-// The niche a topic belongs to, guessed from its name. An imported topic comes
-// off the platform with nothing to say which niche it is — the platform has no
-// such field — so the launches tab would file every import under «без ніші»
-// until a hand edited `topic.yaml`. The buyer picks from the list the ticket
-// board offers; this only saves them the click when the name says it plainly:
-// `NewEraVadimJobsEU` is jobs, `888VLADAutoLoansFR` is credits.
+// The niche a topic belongs to, guessed from its name. A topic comes off the
+// platform with nothing to say which niche it is — the platform has no such
+// field — and the launch needs it for one thing: a topic with no campaign of
+// its own takes its niche's pixel. `NewEraVadimJobsEU` is jobs,
+// `888VLADAutoLoansFR` is credits.
 //
 // The guess never invents a niche. It answers one of the options it was given
-// or null, so an option added to or taken off the ClickUp dropdown needs no
-// change here — and a name that matches two niches is left to the buyer rather
+// or null — and a name that matches two niches is left to the buyer rather
 // than decided by the order of a table.
 
 /**
@@ -19,6 +17,7 @@ const WORDS: Record<string, string[]> = {
   jobs: ['job', 'jobs', 'work', 'vacan', 'career', 'hiring', 'recruit', 'staff', 'employ', 'arbeit', 'trabajo', 'lavoro', 'praca', 'robota'],
   credits: ['credit', 'kredit', 'loan', 'lening', 'prestamo', 'prestito', 'pozyczk', 'mortgage', 'debt', 'refinanc'],
   ecommerce: ['ecom', 'commerce', 'shop', 'store', 'retail', 'product', 'sale', 'deal'],
+  auto: ['auto', 'car', 'vehicle', 'kfz', 'voiture', 'coche'],
 };
 
 /** An option as a key: lower case, letters and digits only, so `E-commerce` and `ecommerce` are one word. */

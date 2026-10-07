@@ -12,11 +12,17 @@ import { spawnEncoder } from './ffmpeg.ts';
 /** A ten-minute video at 60 fps — far past anything a creative needs, close enough to catch a bad number. */
 const MAX_FRAMES = 36_000;
 
-let browserPromise: Promise<Browser> | null = null;
+/** The render browsers, one per worker slot. */
+const browsers = new Map<number, Promise<Browser>>();
 
 /**
- * The render browser: launched once and kept, because starting one costs more
- * than a whole short video.
+ * The render browser for one worker slot: launched once and kept, because
+ * starting one costs more than a whole short video.
+ *
+ * One per worker rather than one for all: pages in a single browser share its
+ * compositor, and their screenshots queue behind each other — measured, two
+ * workers in one browser were barely faster than one, four in four browsers
+ * two and a half times as fast as two in one.
  *
  * Kept, but not trusted. A handle whose browser has gone answers every call
  * with "Connection closed", and a memo that never looks would hand that same
@@ -30,16 +36,20 @@ let browserPromise: Promise<Browser> | null = null;
  * A launch that failed is dropped for the same reason: a rejected promise left
  * in the memo is a permanent outage caused by one bad minute.
  */
-async function getBrowser(): Promise<Browser> {
-  const pending = browserPromise;
-  if (pending !== null) {
+async function getBrowser(slot: number): Promise<Browser> {
+  const pending = browsers.get(slot);
+  if (pending !== undefined) {
     const browser = await pending.catch(() => null);
     if (browser !== null && browser.connected) return browser;
-    // Only if no one has replaced it meanwhile: several workers reach here at
-    // once, and the second must not throw away the browser the first just made.
-    if (browserPromise === pending) browserPromise = null;
+    // Only if no one has replaced it meanwhile.
+    if (browsers.get(slot) === pending) browsers.delete(slot);
   }
-  return (browserPromise ??= launchBrowser());
+  let launching = browsers.get(slot);
+  if (launching === undefined) {
+    launching = launchBrowser();
+    browsers.set(slot, launching);
+  }
+  return launching;
 }
 
 const launchBrowser = (): Promise<Browser> =>
@@ -61,14 +71,16 @@ const launchBrowser = (): Promise<Browser> =>
     ],
   });
 
-export async function closeBrowser(): Promise<void> {
-  const pending = browserPromise;
-  browserPromise = null;
+export async function closeBrowsers(): Promise<void> {
+  const pending = [...browsers.values()];
+  browsers.clear();
   // Nothing here may throw: this runs on the way out of the process, and a
   // launch that had failed would otherwise reject on shutdown and leave the
   // exit that was waiting on it unreached.
-  const browser = pending === null ? null : await pending.catch(() => null);
-  if (browser !== null) await browser.close().catch(() => {});
+  await Promise.all(pending.map(async p => {
+    const browser = await p.catch(() => null);
+    if (browser !== null) await browser.close().catch(() => {});
+  }));
 }
 
 export const tempFile = (ext: string): string =>
@@ -103,8 +115,12 @@ export interface RenderOptions {
    * known until the speech has been made.
    */
   duration: number;
+  /** Which worker is rendering: each has a browser of its own. */
+  slot: number;
   /** Asked between frames. A job the user has abandoned should stop, not finish. */
   cancelled?: () => boolean;
+  /** Told after every frame, for a progress bar. */
+  onFrame?: (done: number, total: number) => void;
 }
 
 /** Render one Spec into `outFile` as a silent mp4. */
@@ -113,10 +129,10 @@ export async function renderSpecToFile(
   outFile: string,
   options: RenderOptions,
 ): Promise<void> {
-  const { origin, duration, cancelled } = options;
+  const { origin, duration, slot, cancelled, onFrame } = options;
   assertRenderable(spec, duration);
 
-  const browser = await getBrowser();
+  const browser = await getBrowser(slot);
   let page: Page | null = null;
   let encoder: ReturnType<typeof spawnEncoder> | null = null;
   try {
@@ -149,6 +165,7 @@ export async function renderSpecToFile(
       await page.evaluate(t => window.__render(t), i / spec.fps);
       const frame = await page.screenshot({ type: 'jpeg', quality: 95 });
       await encoder.write(frame);
+      onFrame?.(i + 1, frames);
     }
     encoder.stdin.end();
     await encoder.done;

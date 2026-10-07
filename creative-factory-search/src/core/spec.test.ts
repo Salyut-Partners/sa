@@ -170,16 +170,15 @@ describe('buildSpec and the sound', () => {
     expect(buildSpec(spoken(), 'a', 'de')!.script).toBe('');
   });
 
-  it('carries the project voice for a language that has not picked its own', () => {
+  it('carries the project voice and model', () => {
     const spec = buildSpec(spoken(), 'a', 'de')!;
     expect(spec.voiceId).toBe('george');
     expect(spec.modelId).toBe('flash');
   });
 
-  it('lets a language speak with a voice of its own', () => {
-    const p = apply(spoken(), { type: 'locale/patch', id: 'de', patch: { voiceId: 'lily' } });
-    expect(buildSpec(p, 'a', 'de')!.voiceId).toBe('lily');
-    expect(buildSpec(p, 'a', 'en')!.voiceId).toBe('george');
+  it('speaks every language in the one project voice', () => {
+    expect(buildSpec(spoken(), 'a', 'de')!.voiceId).toBe('george');
+    expect(buildSpec(spoken(), 'a', 'en')!.voiceId).toBe('george');
   });
 
   it('builds in the language on screen when it is not told which', () => {

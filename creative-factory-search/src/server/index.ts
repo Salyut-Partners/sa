@@ -1,4 +1,4 @@
-// Serves the editor, serves the render target, and runs the export queue.
+// Serves the editor, serves the render target, runs the export queue and the launch.
 import 'dotenv/config';
 import { ZipArchive } from 'archiver';
 import express from 'express';
@@ -7,25 +7,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isLocaleId } from '../core/locales.ts';
 import { VOICE_MODELS } from '../core/voice.ts';
-import { describePlan, onApplySettled, planLaunch, readState, startApply, type PlanDescription } from './apply.ts';
-import { parseAdjustValue } from '../core/adjust.ts';
-import { emptyState } from '../core/plan.ts';
-import { startAdjust } from './adjust.ts';
-import { buildTopicTable, platformColumn } from '../core/topic-table.ts';
-import { buyerKnown, freshPlatform, learnBuyer, platformStatus, platformVersion, refreshPlatform, startPlatformPoll } from './platform-status.ts';
 import { startBatch } from './batch.ts';
-import { campaignCreativesDir, createBatch, listBatches, listCampaigns, readBatch, writeBatch } from './batches.ts';
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
-import { clickupState } from './clickup.ts';
-import { configPath, ensureLaunchesRoot, loadConfig } from './config.ts';
-import { adoptLaunch, createCampaign, createLaunch, existingLaunchKeys, expandLaunch, importList, launchesTree, readTopicFolder, RefusedError } from './launches.ts';
-import { isTrafficSource } from '../core/launch.ts';
-import { BadRequestError, cancelJob, jobById, outputsOf, statusOf } from './jobs.ts';
+import { configPath, loadConfig } from './config.ts';
+import { BadRequestError, cancelJob, jobById, outputsOf, RefusedError, statusOf } from './jobs.ts';
 import { PlatformReadError, platformState } from './platform.ts';
-import { countedPlan, countPlan } from './plans.ts';
-import { closeBrowser } from './render.ts';
-import { startSubtitles, subsState, SUBS_OUTPUT } from './subs.ts';
-import { nicheOptions, startTicketSync, syncTickets, ticketReport } from './tickets.ts';
+import { launchTopic, launchTopics, showTopic, stageFile, startLaunch } from './quick-launch.ts';
+import { closeBrowsers } from './render.ts';
+import { startSubtitles, subsState } from './subs.ts';
 import { listVoices } from './tts.ts';
 import { NoTranslatorError, translateAll, translator } from './translate.ts';
 
@@ -81,240 +70,19 @@ app.post('/api/translate', async (req, res) => {
   }
 });
 
-// ---------------------------------------------------------------- launches --
+// ------------------------------------------------------------------ config --
 
-/** Where things are and whether the ticket side can work — for `sa config`. */
+/** Where the config is and whether the platform can be reached — for `sa config`. */
 app.get('/api/config', (_req, res) => {
   const config = loadConfig();
-  const clickup = clickupState(config);
   const platform = platformState(config);
   res.json({
     path: configPath(),
-    launches_root: config.launches_root,
-    clickup: clickup.ready ? { ready: true, list_id: clickup.listId } : { ready: false, note: clickup.note },
+    sources_root: config.sources_root,
     platform: platform.ready
       ? { ready: true, organization_id: platform.organizationId, base_url: platform.baseUrl }
       : { ready: false, note: platform.note },
   });
-});
-
-app.get('/api/launches', (_req, res) => {
-  const config = loadConfig();
-  res.json({ launches_root: config.launches_root, launches: existingLaunchKeys(config.launches_root) });
-});
-
-/**
- * The launches as a tree — niche, topic, campaigns with their file counts —
- * read off the disk, with what the last ticket sync said of each topic, and
- * the platform status's version so the tab knows when a topic's table is
- * worth reading again.
- */
-app.get('/api/launches/tree', (_req, res) => {
-  try {
-    const tree = launchesTree(loadConfig().launches_root);
-    for (const niche of tree.niches) {
-      for (const topic of niche.topics) {
-        const report = ticketReport(topic.key);
-        if (report !== null) topic.ticket = report.ok ? { url: report.url, note: null } : { url: null, note: report.note };
-      }
-    }
-    const status = platformStatus();
-    res.json({ ...tree, platform: { version: platformVersion(), at: status.at, note: status.note } });
-  } catch (e) {
-    answerFailure(res, e, 'tree');
-  }
-});
-
-/**
- * The topic table: the folder in three states per campaign. Opening a topic
- * reads the disk and the buyer's platform status — two reads for every topic
- * at once, refreshed when not fresh — and the plan as far as it was counted:
- * with `count: true` in the body a count starts in the background — what
- * «Рахувати план» asks for — and the answer says it is counting until a later
- * read finds it done; with `refresh: true` the platform is read again first.
- * A plan that cannot be counted leaves the table standing, with the sentence why.
- */
-app.post('/api/launches/:key/table', async (req, res) => {
-  try {
-    const config = loadConfig();
-    const key = req.params.key;
-    if (!existingLaunchKeys(config.launches_root).includes(key)) throw new RefusedError(`заливу \`${key}\` немає`);
-    const body = (req.body ?? {}) as { count?: unknown; refresh?: unknown };
-    // «Рахувати план» asks for the platform read again; the table's own re-reads take a fresh-enough status.
-    const platform = body.refresh === true ? await refreshPlatform(config) : await freshPlatform(config);
-    const folder = readTopicFolder(config.launches_root, key);
-    const fingerprint = JSON.stringify(folder);
-    if (body.count === true) countPlan(key, fingerprint, async () => describePlan(await planLaunch(config, key, null)));
-    const counted = countedPlan(key, fingerprint);
-    let state = emptyState();
-    let stateNote = '';
-    try {
-      state = readState(path.join(config.launches_root, key));
-    } catch (e) {
-      stateNote = e instanceof RefusedError ? e.message : (e as Error).message;
-    }
-    const table = buildTopicTable(folder, state, counted.plan?.outline ?? null, platform);
-    res.json({ table, plan: counted.plan, planCounting: counted.counting, planNote: counted.note, stateNote, folder: path.join(config.launches_root, key) });
-  } catch (e) {
-    answerFailure(res, e, 'table');
-  }
-});
-
-/** A pass of the ticket sync now, for every folder: what `sa tickets` asks for. */
-app.post('/api/tickets/sync', async (_req, res) => {
-  try {
-    res.json({ tickets: await syncTickets(loadConfig()) });
-  } catch (e) {
-    answerFailure(res, e, 'tickets');
-  }
-});
-
-/**
- * A new launch: the folder tree, then the ticket. A refusal is a 400 with the
- * sentence for the buyer; a ticket that could not be filed is not a failure of
- * the request — the folder is there — and comes back inside the 200.
- */
-app.post('/api/launches', async (req, res) => {
-  const body = req.body as { launchKey?: unknown; name?: unknown; trafficSource?: unknown; vertical?: unknown; geo?: unknown };
-  if (typeof body.launchKey !== 'string') {
-    res.status(400).json({ error: 'у запиті немає launchKey' });
-    return;
-  }
-  const source = body.trafficSource;
-  if (source !== undefined && !isTrafficSource(source)) {
-    res.status(400).json({ error: 'trafficSource має бути одним із: tiktok, facebook' });
-    return;
-  }
-  try {
-    const config = loadConfig();
-    const made = createLaunch(config, {
-      launchKey: body.launchKey,
-      ...(typeof body.name === 'string' ? { name: body.name } : {}),
-      ...(source !== undefined ? { trafficSource: source } : {}),
-      ...(typeof body.vertical === 'string' ? { vertical: body.vertical } : {}),
-      ...(Array.isArray(body.geo) ? { geo: body.geo.map(String) } : {}),
-    });
-    const ticket = (await syncTickets(config, made.launchKey))[made.launchKey] ?? { ok: false as const, note: 'звірка тікетів нічого не сказала про цю теку' };
-    res.json({ ...made, ticket });
-  } catch (e) {
-    if (e instanceof RefusedError) res.status(400).json({ error: e.message });
-    else {
-      console.error('launch failed:', (e as Error).message);
-      res.status(500).json({ error: (e as Error).message });
-    }
-  }
-});
-
-/**
- * A launch folder from a topic already on the platform: `sa adopt`. Reads
- * the platform, writes the folder and its state, files the ticket by the
- * usual sync. Nothing on the platform is written.
- */
-app.post('/api/launches/adopt', async (req, res) => {
-  const body = (typeof req.body === 'object' && req.body !== null ? req.body : {}) as Record<string, unknown>;
-  const topicId = Number(body['topicId']);
-  if (typeof body['launchKey'] !== 'string') {
-    res.status(400).json({ error: 'у запиті немає launchKey' });
-    return;
-  }
-  try {
-    const config = loadConfig();
-    const made = await adoptLaunch(config, {
-      topicId, launchKey: body['launchKey'],
-      ...(typeof body['vertical'] === 'string' ? { vertical: body['vertical'] } : {}),
-    });
-    const ticket = (await syncTickets(config, made.launchKey))[made.launchKey] ?? { ok: false as const, note: 'звірка тікетів нічого не сказала про цю теку' };
-    res.json({ ...made, ticket });
-  } catch (e) {
-    answerFailure(res, e, 'adopt');
-  }
-});
-
-/**
- * The topics the buyer can import: off the buyer's builders, which the
- * platform status already holds. A buyer the server does not know yet —
- * no user id in the config, no launch folder to learn it from — can name one
- * topic of theirs as `?topicId=`, and the buyer is learned from it.
- */
-app.get('/api/launches/importable', async (req, res) => {
-  try {
-    const config = loadConfig();
-    const ready = platformState(config);
-    if (!ready.ready) throw new RefusedError(ready.note);
-    const topicId = Number(req.query['topicId']);
-    if (Number.isInteger(topicId) && topicId > 0 && (await learnBuyer(config, topicId)) === null) {
-      throw new RefusedError(`топіка ${topicId} на платформі немає — перевірте id`);
-    }
-    if (!buyerKnown(config) && platformStatus().at === null) {
-      res.json({ topics: [], needsTopic: true, niches: [] });
-      return;
-    }
-    const [platform, niches] = await Promise.all([freshPlatform(config), nicheOptions(config)]);
-    res.json({ ...importList(config, platform, niches), niches, needsTopic: false, note: platform.note });
-  } catch (e) {
-    answerFailure(res, e, 'importable');
-  }
-});
-
-/**
- * Import a topic with its campaigns into a folder — the launches tab's button,
- * `sa adopt` by another door. Reads the platform, writes nothing to it; the
- * ticket is filed by the usual sync, and the platform status is read again so
- * the new folder's campaigns show their state straight away.
- */
-app.post('/api/launches/import', async (req, res) => {
-  const body = (typeof req.body === 'object' && req.body !== null ? req.body : {}) as Record<string, unknown>;
-  if (typeof body['launchKey'] !== 'string') {
-    res.status(400).json({ error: 'у запиті немає launchKey' });
-    return;
-  }
-  try {
-    const config = loadConfig();
-    // The niche the dialog guessed or the buyer picked: the platform has no such
-    // field, so without it every import would sit under «без ніші».
-    const vertical = typeof body['vertical'] === 'string' && body['vertical'].trim() !== '' ? body['vertical'].trim() : undefined;
-    const made = await adoptLaunch(config, {
-      topicId: Number(body['topicId']), launchKey: body['launchKey'], ...(vertical !== undefined ? { vertical } : {}),
-    });
-    const ticket = (await syncTickets(config, made.launchKey))[made.launchKey] ?? { ok: false as const, note: 'звірка тікетів нічого не сказала про цю теку' };
-    void refreshPlatform(config);
-    res.json({ ...made, ticket });
-  } catch (e) {
-    answerFailure(res, e, 'import');
-  }
-});
-
-/**
- * The matrix as folders: the body is the matrix JSON, the answer says what
- * was made and what was already there. Nothing on the platform is touched.
- */
-app.post('/api/launches/:key/expand', (req, res) => {
-  try {
-    res.json(expandLaunch(loadConfig(), req.params.key, req.body));
-  } catch (e) {
-    answerFailure(res, e, 'expand');
-  }
-});
-
-/** One campaign folder from its axes; a taken name is a 400. */
-app.post('/api/launches/:key/campaigns', (req, res) => {
-  const body = (typeof req.body === 'object' && req.body !== null ? req.body : {}) as Record<string, unknown>;
-  const text = (key: string): string => (typeof body[key] === 'string' ? (body[key] as string) : '');
-  const num = (key: string): number | undefined => (typeof body[key] === 'number' ? (body[key] as number) : undefined);
-  const bid = num('bid');
-  const budget = num('budget');
-  try {
-    res.json(createCampaign(loadConfig(), req.params.key, {
-      termgroup: text('termgroup'), article: text('article'), language: text('language'), country: text('country'), account: text('account'),
-      ...(typeof body['name'] === 'string' ? { name: body['name'] } : {}),
-      ...(typeof body['theme'] === 'string' ? { theme: body['theme'] } : {}),
-      ...(typeof body['headline'] === 'string' ? { headline: body['headline'] } : {}),
-      ...(bid !== undefined ? { bid } : {}),
-      ...(budget !== undefined ? { budget } : {}),
-    }));
-  } catch (e) {
-    answerFailure(res, e, 'new campaign');
-  }
 });
 
 /** A refusal is the buyer's to fix and comes back as a 400; anything else is ours. */
@@ -327,128 +95,59 @@ function answerFailure(res: express.Response, e: unknown, what: string): void {
   }
 }
 
-// -------------------------------------------------------------- plan/apply --
+// ------------------------------------------------------------------ launch --
 
-/**
- * A `campaign` in the body narrows the plan or the apply to one campaign of
- * the topic, `campaigns` to a few. Anything else under those names is refused
- * rather than widened to the whole topic — an apply that meant one campaign
- * must not do them all.
- */
-function campaignsIn(body: unknown): string[] | null {
-  const bag = (typeof body === 'object' && body !== null ? body : {}) as { campaign?: unknown; campaigns?: unknown };
-  const list: string[] = [];
-  if (bag.campaign !== undefined && bag.campaign !== null) {
-    if (typeof bag.campaign !== 'string' || bag.campaign === '') throw new RefusedError('campaign має бути назвою теки кампанії');
-    list.push(bag.campaign);
-  }
-  if (bag.campaigns !== undefined && bag.campaigns !== null) {
-    if (!Array.isArray(bag.campaigns) || !bag.campaigns.every(c => typeof c === 'string' && c !== '')) {
-      throw new RefusedError('campaigns має бути списком назв тек кампаній');
-    }
-    for (const c of bag.campaigns) if (!list.includes(c)) list.push(c);
-    if (list.length === 0) throw new RefusedError('campaigns порожній — нема що робити');
-  }
-  return list.length === 0 ? null : list;
-}
-
-/** The plan: reads the folder and the platform, creates nothing, however often it is asked; ids it found by read-back are written to state.json. */
-app.post('/api/launches/:key/plan', async (req, res) => {
+/** The buyer's topics on the platform, for the launch form. */
+app.get('/api/launch/topics', async (_req, res) => {
   try {
-    res.json(describePlan(await planLaunch(loadConfig(), req.params.key, campaignsIn(req.body))));
+    res.json({ topics: await launchTopics(loadConfig()) });
   } catch (e) {
-    answerFailure(res, e, 'plan');
+    answerFailure(res, e, 'launch topics');
+  }
+});
+
+/** One topic read off the platform: its sets with their defaults, and what the form's selects offer. Creates nothing. */
+app.get('/api/launch/topics/:id', async (req, res) => {
+  try {
+    const source = typeof req.query['source'] === 'string' ? req.query['source'] : '';
+    res.json(await launchTopic(loadConfig(), Number(req.params.id), source));
+  } catch (e) {
+    answerFailure(res, e, 'launch topic');
+  }
+});
+
+/** One topic for Claude to read — term groups with keywords and weights, articles, sets: `sa show`. Creates nothing. */
+app.get('/api/topics/:topic', async (req, res) => {
+  try {
+    const source = typeof req.query['source'] === 'string' ? req.query['source'] : '';
+    res.json(await showTopic(loadConfig(), req.params.topic, source));
+  } catch (e) {
+    answerFailure(res, e, 'show topic');
+  }
+});
+
+/** A designer's mp4 for the launch form: the body is the file, streamed to this machine and named by its digest. */
+app.post('/api/launch/files', async (req, res) => {
+  try {
+    const name = typeof req.query['name'] === 'string' ? req.query['name'] : '';
+    if (name === '') throw new RefusedError('потрібне name');
+    res.json(await stageFile(req, name));
+  } catch (e) {
+    req.resume();
+    answerFailure(res, e, 'launch file');
   }
 });
 
 /**
- * The gate. Only a body that says `confirm: true` starts anything; the CLI
- * sends it only under `--confirm`, and the mono-repo denies that command to
- * Claude. A plan with errors is refused; an empty one answers with no job.
+ * The launch: one new campaign from finished renders and files from disk. Only a body with
+ * `confirm: true` — the editor sends it from the modal's «Підтвердити» — starts
+ * anything; a refusal comes back before a job exists.
  */
-app.post('/api/launches/:key/apply', async (req, res) => {
-  const body = req.body as { confirm?: unknown } | undefined;
+app.post('/api/launch', async (req, res) => {
   try {
-    res.json(await startApply(loadConfig(), req.params.key, body?.confirm === true, campaignsIn(body)));
+    res.json(await startLaunch(loadConfig(), req.body));
   } catch (e) {
-    answerFailure(res, e, 'apply');
-  }
-});
-
-// ------------------------------------------------------------ bid / budget --
-
-/**
- * `sa budget` / `sa bid`: the plan of a change to live campaigns, and — under
- * `confirm` — the change itself, the admin's campaign-management form per
- * campaign. A field other than budget or bid, or a value that is not a
- * positive number, is a 400.
- */
-app.post('/api/launches/:key/adjust', async (req, res) => {
-  const body = (typeof req.body === 'object' && req.body !== null ? req.body : {}) as Record<string, unknown>;
-  try {
-    const field = body['field'];
-    if (field !== 'budget' && field !== 'bid') throw new RefusedError('field має бути budget або bid');
-    const value = parseAdjustValue(field, body['value']);
-    if (!value.ok) throw new RefusedError(value.errors.join('; '));
-    const text = (key: string): string | null => (typeof body[key] === 'string' && body[key] !== '' ? (body[key] as string) : null);
-    const filter = { campaign: text('campaign'), country: text('country'), status: text('status') };
-    if (filter.campaign === null && body['all'] !== true) throw new RefusedError('назвіть кампанію (<key>/<campaign>) або дайте --all');
-    res.json(await startAdjust(loadConfig(), req.params.key, { field, value: value.value, filter }, body['confirm'] === true));
-  } catch (e) {
-    answerFailure(res, e, 'adjust');
-  }
-});
-
-// ----------------------------------------------------------------- batches --
-
-/** The topic's campaigns for the export's «Куди», each with the name the platform gave it once launched. */
-app.get('/api/launches/:key/campaigns', (req, res) => {
-  try {
-    const config = loadConfig();
-    const campaigns = listCampaigns(config, req.params.key);
-    let state = emptyState();
-    try {
-      state = readState(path.join(config.launches_root, req.params.key));
-    } catch {
-      // A state that does not read names nothing; the folders still list.
-    }
-    const platform = platformStatus();
-    res.json({ campaigns: campaigns.map(c => ({ ...c, platformName: platformColumn(state.campaigns[c.name], platform).campaignName })) });
-  } catch (e) {
-    answerFailure(res, e, 'campaigns');
-  }
-});
-
-app.get('/api/launches/:key/batches', (req, res) => {
-  try {
-    res.json({ batches: listBatches(loadConfig(), req.params.key) });
-  } catch (e) {
-    answerFailure(res, e, 'batches');
-  }
-});
-
-app.get('/api/launches/:key/batches/:batch', (req, res) => {
-  try {
-    res.json(readBatch(loadConfig(), req.params.key, req.params.batch));
-  } catch (e) {
-    answerFailure(res, e, 'batch read');
-  }
-});
-
-/** A batch saved for the first time: the server names it by the clock and answers with the name. */
-app.post('/api/launches/:key/batches', (req, res) => {
-  try {
-    res.json(createBatch(loadConfig(), req.params.key, req.body));
-  } catch (e) {
-    answerFailure(res, e, 'batch create');
-  }
-});
-
-app.put('/api/launches/:key/batches/:batch', (req, res) => {
-  try {
-    res.json(writeBatch(loadConfig(), req.params.key, req.params.batch, req.body));
-  } catch (e) {
-    answerFailure(res, e, 'batch write');
+    answerFailure(res, e, 'launch');
   }
 });
 
@@ -456,8 +155,7 @@ app.put('/api/launches/:key/batches/:batch', (req, res) => {
 
 app.post('/api/batch', (req, res) => {
   try {
-    const config = loadConfig();
-    res.json({ id: startBatch(req.body, ORIGIN, (key, campaign) => campaignCreativesDir(config, key, campaign)) });
+    res.json({ id: startBatch(req.body, ORIGIN) });
   } catch (e) {
     if (e instanceof BadRequestError || e instanceof RefusedError) res.status(400).json({ error: e.message });
     else {
@@ -485,10 +183,7 @@ app.post('/api/subtitles', async (req, res) => {
   const lang = q['lang'] && q['lang'] !== 'auto' ? q['lang'] : null;
   try {
     if (name === '' || style === '') throw new RefusedError('потрібні name і style');
-    const dest = q['launchKey'] && q['campaign']
-      ? campaignCreativesDir(loadConfig(), q['launchKey'], q['campaign'])
-      : SUBS_OUTPUT;
-    res.json({ id: await startSubtitles(req, { name, style, lang, dest }) });
+    res.json({ id: await startSubtitles(req, { name, style, lang }) });
   } catch (e) {
     // The body may still be arriving; it is drained so the client sees the answer.
     req.resume();
@@ -554,26 +249,11 @@ app.get('/api/jobs/:id/download', (req, res) => {
 
 const server = app.listen(PORT, () => {
   console.log(`Creative Factory Search -> ${ORIGIN}`);
-  // The launches folder exists from the first start, so the editor and `sa`
-  // never meet a missing root. Where it is comes from the buyer's config.
-  try {
-    console.log(`launches -> ${ensureLaunchesRoot(loadConfig())}`);
-  } catch (e) {
-    console.error((e as Error).message);
-  }
-  // The tickets: a pass now, every ten minutes, and after every apply. The
-  // platform status likewise: the builders just made have a status to show.
-  onApplySettled(launchKey => {
-    syncTickets(loadConfig(), launchKey).catch(e => console.error('тікети:', (e as Error).message));
-    void refreshPlatform(loadConfig());
-  });
-  startTicketSync(loadConfig);
-  startPlatformPoll(loadConfig);
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     server.close();
-    void closeBrowser().then(() => process.exit(0));
+    void closeBrowsers().then(() => process.exit(0));
   });
 }

@@ -188,7 +188,7 @@ describe('a project file carrying languages', () => {
       type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:,a' }],
     });
     p = apply(p, { type: 'locale/add', id: 'de' });
-    p = apply(p, { type: 'locale/patch', id: 'de', patch: { script: 'Hallo.', voiceId: 'lily' } });
+    p = apply(p, { type: 'locale/patch', id: 'de', patch: { script: 'Hallo.' } });
     p = apply(p, { type: 'locale/patch', id: 'en', patch: { include: false } });
     p = apply(p, { type: 'locale/field', id: 'de', key: 'cta', value: 'JETZT' });
     return apply(p, {
@@ -202,13 +202,25 @@ describe('a project file carrying languages', () => {
     return (result as { project: Project }).project;
   };
 
-  it('comes back with every language, its script, its voice and its edits', () => {
+  it('comes back with every language, its script and its edits', () => {
     const project = reopened(toFile(saved()));
     expect(project.locales.map(l => l.id)).toEqual(['en', 'de']);
     expect(project.locales[1]).toEqual({
-      id: 'de', script: 'Hallo.', voiceId: 'lily', include: true, subtitles: true, overrides: { cta: 'JETZT' },
+      id: 'de', script: 'Hallo.', include: true, subtitles: true, overrides: { cta: 'JETZT' },
     });
     expect(project.locales[0]!.include).toBe(false);
+  });
+
+  it('drops a language\'s own voice from an older file, and speaks it in the project\'s', () => {
+    const file = toFile(saved()) as unknown as { locales: Record<string, unknown>[] };
+    file.locales[1]!['voiceId'] = 'lily';
+    const project = reopened(file);
+    expect(project.locales[1]).not.toHaveProperty('voiceId');
+    expect(project.voiceId).toBe('george');
+  });
+
+  it('still writes an empty voice on every language, which an older editor needs to open it', () => {
+    expect(toFile(saved()).locales.map(l => l.voiceId)).toEqual([null, null]);
   });
 
   it('comes back knowing which script was translated from what, and reads a malformed mark as written by hand', () => {

@@ -13,8 +13,7 @@ import { fileURLToPath } from 'node:url';
 import {
   parseSetupCheck, parseStyleCatalogue, subtitledName, uniqueName, type StyleCatalogue,
 } from '../core/subtitles.ts';
-import { createJob, explain, relativeFolder, settleJob, type Job } from './jobs.ts';
-import { RefusedError } from './launches.ts';
+import { createJob, explain, RefusedError, settleJob, type Job } from './jobs.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 /** The sibling in the mono-repo. */
@@ -135,8 +134,6 @@ export interface SubtitleRequest {
   style: string;
   /** A language code for Whisper, or null to let it guess. */
   lang: string | null;
-  /** The folder the result is written to. */
-  dest: string;
 }
 
 /** One at a time: Whisper is the whole machine while it runs. */
@@ -155,7 +152,7 @@ export async function startSubtitles(body: NodeJS.ReadableStream, request: Subti
   if (!state.ready) throw new RefusedError('субтитри не готові на цій машині: ' + state.notes.join('; '));
   const name = path.basename(request.name).replace(/[/\\]/g, '_');
   if (name === '' || name.startsWith('.')) throw new RefusedError('у файлу немає імені');
-  fs.mkdirSync(request.dest, { recursive: true });
+  fs.mkdirSync(SUBS_OUTPUT, { recursive: true });
 
   const job = createJob(1, new Map(), 'cfs-subs-');
   const input = path.join(job.dir, name);
@@ -192,8 +189,8 @@ function burn(job: Job, name: string, input: string, request: SubtitleRequest): 
     // Named on the lane, not at upload: two drops of `clip.mp4` queued
     // together would otherwise both be told `clip.yellow.mp4` and the second
     // would write over the first.
-    const output = path.join(request.dest, uniqueName(
-      subtitledName(name, request.style), n => fs.existsSync(path.join(request.dest, n)),
+    const output = path.join(SUBS_OUTPUT, uniqueName(
+      subtitledName(name, request.style), n => fs.existsSync(path.join(SUBS_OUTPUT, n)),
     ));
     job.targets!.set(name, [output]);
     const args = [STYLER, input, '-o', output, '--style', request.style];
@@ -227,7 +224,7 @@ function burn(job: Job, name: string, input: string, request: SubtitleRequest): 
         fs.promises.unlink(output).catch(() => {});
       } else if (code === 0 && fs.existsSync(output)) {
         job.outputs.push({ name, file: output });
-        job.folders.add(request.dest === SUBS_OUTPUT ? 'subs/output' : relativeFolder(output));
+        job.folders.add('subs/output');
       } else {
         const why = stderr.trim().split('\n').filter(l => l.trim() !== '').slice(-3).join(' · ');
         job.errors.push({ name, message: why === '' ? `пайплайн вийшов із кодом ${code}` : why });

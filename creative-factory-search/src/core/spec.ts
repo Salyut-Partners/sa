@@ -57,10 +57,11 @@ export function buildSpec(
     buttons,
     locale: locale.id,
     script: locale.script.trim(),
-    // A language that has not picked its own speaks with the project's, which
-    // may itself be empty — "whichever the provider offers first", resolved at
-    // synthesis where the list of voices is.
-    voiceId: locale.voiceId ?? project.voiceId,
+    // One voice for every language: a multilingual model speaks them all, and
+    // a second voice to pick per language was a choice nobody could tell from
+    // the first. Empty in a project from before the editor picked one — "the
+    // first the provider offers", resolved at synthesis where the list is.
+    voiceId: project.voiceId,
     modelId: project.modelId,
   };
 }

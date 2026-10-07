@@ -22,7 +22,6 @@ import { StyleLibrary } from './StylePreview.tsx';
 import { TemplateFields } from './TemplateFields.tsx';
 import { TemplateLibrary } from './TemplatePreview.tsx';
 import { TimingFields } from './TimingFields.tsx';
-import type { TopicBatch } from './topic-batch.ts';
 import type { Translator } from './translate.ts';
 import { VoicePanel } from './VoicePanel.tsx';
 
@@ -38,7 +37,6 @@ interface Props {
   translator: Translator;
   run: ExportRun;
   onExportOne: (project: Project) => BatchPlan | null;
-  topic: TopicBatch;
 }
 
 const FONT_OPTIONS = Object.values(FONTS).map(f => ({ id: f.id, label: f.label }));
@@ -444,7 +442,6 @@ export function SidePanel(props: Props) {
             run={props.run}
             onExportOne={props.onExportOne}
             translator={props.translator}
-            topic={props.topic}
           />
         </>
       ) : null}

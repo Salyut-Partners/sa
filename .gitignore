@@ -4,3 +4,6 @@ launches/
 
 # Токени й приклади запитів — ніколи в git.
 secrets/
+
+# Зібрана сторінка гайду — генерується з playbook/.
+playbook/guide/dist/

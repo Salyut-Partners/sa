@@ -1,0 +1,346 @@
+<title>Гайд байера SA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600&family=Onest:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a field manual. Sticky section rail on the left, one reading column, sections numbered in learning order. */
+:root{
+  --paper:#f4f6f1; --panel:#fbfcf8; --sunk:#e9ede5;
+  --ink:#17201c; --ink-2:#46534c; --muted:#78847d; --line:#d9dfd5;
+  --accent:#0a7453; --accent-ink:#075c41; --accent-wash:rgba(10,116,83,.09);
+  --note:#9a6412; --note-wash:rgba(196,138,36,.12);
+  --bad:#b8402b; --good:#1d7f47;
+  --f-display:"Unbounded","Onest",system-ui,sans-serif;
+  --f-body:"Onest",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#101513; --panel:#161c19; --sunk:#1d2521;
+  --ink:#e6ece8; --ink-2:#b3beb8; --muted:#7d8983; --line:#29322d;
+  --accent:#41c08f; --accent-ink:#6fd6ad; --accent-wash:rgba(65,192,143,.12);
+  --note:#e2ad55; --note-wash:rgba(226,173,85,.12);
+  --bad:#f08470; --good:#62c98e; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --paper:#101513; --panel:#161c19; --sunk:#1d2521;
+  --ink:#e6ece8; --ink-2:#b3beb8; --muted:#7d8983; --line:#29322d;
+  --accent:#41c08f; --accent-ink:#6fd6ad; --accent-wash:rgba(65,192,143,.12);
+  --note:#e2ad55; --note-wash:rgba(226,173,85,.12);
+  --bad:#f08470; --good:#62c98e; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 var(--f-body)}
+a{color:var(--accent-ink);text-underline-offset:2px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+
+.shell{display:grid;grid-template-columns:250px minmax(0,1fr);gap:48px;max-width:1140px;margin:0 auto;padding-inline:24px;padding-block:0 96px}
+
+/* rail */
+.rail{position:sticky;top:env(safe-area-inset-top,0px);align-self:start;padding-block:32px;max-height:100vh;overflow:auto}
+.brand{font:600 15px/1.25 var(--f-display);letter-spacing:-.01em;margin:0 0 4px}
+.brand-sub{font:12px/1.4 var(--f-mono);color:var(--muted);margin:0 0 24px}
+.toc{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.toc a{display:grid;grid-template-columns:28px 1fr;align-items:baseline;padding:6px 8px;border-radius:6px;color:var(--ink-2);text-decoration:none;font-size:14px;line-height:1.3}
+.toc a span{font:500 12px var(--f-mono);color:var(--muted)}
+.toc a:hover{background:var(--sunk);color:var(--ink)}
+.toc a[aria-current="true"]{background:var(--accent-wash);color:var(--accent-ink)}
+.toc a[aria-current="true"] span{color:var(--accent-ink)}
+
+.tools{display:grid;gap:8px;margin-top:24px}
+.btn{font:500 14px var(--f-body);border:1px solid var(--accent);background:var(--accent);color:var(--paper);border-radius:8px;padding:9px 12px;cursor:pointer;text-align:left}
+.btn:hover{filter:brightness(1.08)}
+.hint{font-size:12px;color:var(--muted);line-height:1.4}
+.search{position:relative}
+.search input{width:100%;font:14px var(--f-body);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.results{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:10;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.14);max-height:60vh;overflow:auto}
+.results button{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;color:var(--ink);font:13px/1.4 var(--f-body);padding:8px 10px;cursor:pointer}
+.results button:last-child{border-bottom:0}
+.results button:hover,.results button:focus-visible{background:var(--sunk)}
+.results small{display:block;font:11px var(--f-mono);color:var(--muted);margin-bottom:2px}
+.results mark{background:var(--note-wash);color:inherit;border-radius:2px}
+.results .none{padding:10px;font-size:13px;color:var(--muted)}
+
+/* content */
+main{min-width:0;padding-block:32px}
+.hero{padding-block:8px 40px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.hero h1{font:600 clamp(28px,4.4vw,44px)/1.1 var(--f-display);letter-spacing:-.025em;margin:0 0 14px;text-wrap:balance}
+.hero p{max-width:60ch;color:var(--ink-2);margin:0}
+.chain{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:24px}
+.chain b{font:500 13px/1.3 var(--f-body);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:6px 12px}
+.chain b:last-child{border-color:var(--accent);color:var(--accent-ink)}
+.chain i{font-style:normal;color:var(--muted);font-family:var(--f-mono)}
+
+section.sec{padding-block:48px 16px;scroll-margin-top:16px}
+.sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:20px}
+.sec-num{font:500 14px var(--f-mono);color:var(--accent-ink);border:1px solid var(--accent);border-radius:6px;padding:1px 7px}
+.sec-head h2{font:600 26px/1.2 var(--f-display);letter-spacing:-.02em;margin:0;text-wrap:balance}
+
+.prose{max-width:720px}
+.prose>*:first-child{margin-top:0}
+.prose h2{font:600 19px/1.3 var(--f-body);margin:36px 0 10px;text-wrap:balance}
+.prose h3{font:600 16px/1.35 var(--f-body);margin:28px 0 8px}
+.prose p,.prose ul,.prose ol{margin:0 0 14px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li{margin-bottom:6px}
+.prose li>p{margin-bottom:6px}
+.prose strong{font-weight:600}
+.prose code{font:13px var(--f-mono);background:var(--sunk);border-radius:4px;padding:1px 5px}
+.prose blockquote{margin:0 0 18px;padding:12px 16px;background:var(--note-wash);border-radius:8px;color:var(--ink)}
+.prose blockquote p{margin:0}
+.prose blockquote strong:first-child{color:var(--note)}
+.tbl{overflow-x:auto;margin:0 0 18px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.prose table{border-collapse:collapse;width:100%;font-size:14px;line-height:1.45}
+.prose th{text-align:left;font:500 11px/1.3 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:9px 12px;border-bottom:1px solid var(--line);background:var(--sunk)}
+.prose td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top;font-variant-numeric:tabular-nums}
+.prose tr:last-child td{border-bottom:0}
+.prose td:first-child{font-weight:500}
+.pair td:first-child{color:var(--bad);font-weight:400}
+.pair td:last-child{color:var(--good)}
+
+.fold{max-width:720px;border:1px solid var(--line);border-radius:10px;background:var(--panel);margin:0 0 10px}
+.fold>summary{cursor:pointer;list-style:none;padding:12px 16px;font-weight:600;display:flex;gap:10px;align-items:baseline}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary::before{content:"+";font:500 14px var(--f-mono);color:var(--accent-ink);width:12px}
+.fold[open]>summary::before{content:"−"}
+.fold>.prose{padding:0 16px 8px 38px}
+.part-title{font:600 19px/1.3 var(--f-body);margin:36px 0 12px;max-width:720px}
+
+.cmp-group{font:500 11px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:28px 0 10px}
+.cmp{max-width:720px;border-bottom:1px solid var(--line)}
+.cmp>summary{cursor:pointer;list-style:none;padding:10px 8px;margin-inline:-8px;border-radius:6px;display:grid;grid-template-columns:78px 1fr 28px;gap:8px;align-items:center}
+.cmp>summary:hover{background:var(--sunk)}
+.cmp>summary::-webkit-details-marker{display:none}
+.cmp>summary::after{content:"";justify-self:end;width:24px;height:24px;border-radius:50%;border:1px solid var(--line);background:var(--panel) center/10px no-repeat;
+  -webkit-mask:none;background-image:linear-gradient(var(--accent-ink),var(--accent-ink)),linear-gradient(var(--accent-ink),var(--accent-ink));background-size:10px 1.5px,1.5px 10px;transition:transform .15s}
+.cmp>summary:hover::after{border-color:var(--accent)}
+.cmp[open]>summary::after{background-size:10px 1.5px,0 0;border-color:var(--accent)}
+.cmp>summary code{font:500 12px var(--f-mono);color:var(--accent-ink)}
+.cmp>.prose{padding:0 0 12px 86px;font-size:15px}
+.cmp:target,.flash{animation:flash 1.6s ease-out}
+@keyframes flash{from{background:var(--note-wash)}to{background:transparent}}
+
+.foot{margin-top:56px;padding-top:16px;border-top:1px solid var(--line);font:12px/1.5 var(--f-mono);color:var(--muted);max-width:720px}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--paper);font-size:14px;padding:9px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}
+.toast.on{opacity:1}
+textarea.fallback{width:100%;height:160px;font:12px var(--f-mono);margin-top:8px}
+
+@media (max-width:900px){
+  .shell{grid-template-columns:minmax(0,1fr);gap:0;padding-inline:16px}
+  .rail{position:static;max-height:none;padding-block:20px 0}
+  .toc{grid-auto-flow:column;grid-auto-columns:max-content;overflow-x:auto;padding-bottom:6px}
+  .toc a{grid-template-columns:auto auto;gap:6px}
+  .cmp>summary{grid-template-columns:1fr 28px}
+  .cmp>summary code{grid-column:1}
+  .cmp>summary span{grid-column:1}
+  .cmp>summary::after{grid-column:2;grid-row:1 / span 2}
+  .cmp>.prose{padding-left:0}
+  .fold>.prose{padding-left:16px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="shell">
+  <aside class="rail">
+    <p class="brand">Гайд байера<br>Search Arbitrage</p>
+    <p class="brand-sub" id="built"></p>
+    <nav><ol class="toc" id="toc"></ol></nav>
+    <div class="tools">
+      <div class="search">
+        <input id="q" type="search" placeholder="Пошук: бід, Klarna, CMP-011…" autocomplete="off" aria-label="Пошук по гайду">
+        <div class="results" id="results" hidden></div>
+      </div>
+      <button class="btn" id="copy" type="button">Скопіювати для Claude</button>
+      <div class="hint">Весь гайд одним текстом — встав у чат Claude й питай.</div>
+      <div id="fallback" hidden></div>
+    </div>
+  </aside>
+
+  <main id="main">
+    <header class="hero">
+      <h1>Гайд байера Search Arbitrage</h1>
+      <p>Модель, платформа, логіка зв'язки, ключі, compliance і матриця заливу — все, щоб стартувати й повертатись перед кожним заливом. Зібрано з менторства партнерів; цифри — орієнтир.</p>
+      <div class="chain" aria-label="Ланцюг заробітку"><b>Креатив у TikTok / FB</b><i>→</i><b>Стаття з RSOC</b><i>→</i><b>Клік по ключу</b><i>→</i><b>Рекламодавець платить</b></div>
+    </header>
+    <div id="content"></div>
+    <p class="foot">Джерело — плейбук у репозиторії ~/sa: playbook/guide/, rules.md, cheatsheet.md, compliance/. Правиш там — перезбираєш сторінку.</p>
+  </main>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script>
+const DATA = /*__DATA__*/null;
+
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+marked.use({
+  gfm: true,
+  renderer: {
+    code(code, lang) {
+      if (lang === 'flow') {
+        const steps = code.trim().split('|').map((s) => `<b>${esc(s.trim())}</b>`);
+        return `<div class="chain">${steps.join('<i>→</i>')}</div>`;
+      }
+      return false;
+    },
+  },
+});
+
+const md = (s) => {
+  const div = document.createElement('div');
+  div.className = 'prose';
+  div.innerHTML = marked.parse(s);
+  div.querySelectorAll('table').forEach((t) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'tbl';
+    t.replaceWith(wrap);
+    wrap.appendChild(t);
+    const head = t.querySelector('th')?.textContent || '';
+    if (head.includes('❌')) t.classList.add('pair');
+  });
+  div.querySelectorAll('a[href^="http"]').forEach((a) => { a.target = '_blank'; a.rel = 'noopener'; });
+  return div;
+};
+
+const content = document.getElementById('content');
+const toc = document.getElementById('toc');
+document.getElementById('built').textContent = 'зібрано ' + DATA.built;
+
+DATA.sections.forEach((s, i) => {
+  const sec = document.createElement('section');
+  sec.className = 'sec';
+  sec.id = s.id;
+  sec.innerHTML = `<div class="sec-head"><span class="sec-num">${i}</span><h2>${esc(s.title)}</h2></div>`;
+  s.parts.forEach((p) => {
+    if (p.folded) {
+      const d = document.createElement('details');
+      d.className = 'fold';
+      d.innerHTML = `<summary>${esc(p.title)}</summary>`;
+      d.appendChild(md(p.md));
+      sec.appendChild(d);
+    } else {
+      if (p.title) {
+        const h = document.createElement('h3');
+        h.className = 'part-title';
+        h.textContent = p.title;
+        sec.appendChild(h);
+      }
+      sec.appendChild(md(p.md));
+    }
+  });
+  if (s.cmp) {
+    const h = document.createElement('h3');
+    h.className = 'part-title';
+    h.textContent = `Усі правила CMP (${DATA.cmp.length})`;
+    sec.appendChild(h);
+    let group = '';
+    DATA.cmp.forEach((c) => {
+      if (c.group !== group) {
+        group = c.group;
+        const g = document.createElement('div');
+        g.className = 'cmp-group';
+        g.textContent = group;
+        sec.appendChild(g);
+      }
+      const d = document.createElement('details');
+      d.className = 'cmp';
+      d.id = c.id.toLowerCase();
+      d.innerHTML = `<summary><code>${esc(c.id)}</code><span>${esc(c.title)}</span></summary>`;
+      d.appendChild(md(c.md));
+      sec.appendChild(d);
+    });
+  }
+  content.appendChild(sec);
+
+  const li = document.createElement('li');
+  li.innerHTML = `<a href="#${s.id}"><span>${i}</span>${esc(s.title)}</a>`;
+  toc.appendChild(li);
+});
+
+// Links to a CMP rule open it.
+const openTarget = (id, smooth = true) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (el.tagName === 'DETAILS') el.open = true;
+  el.closest('details')?.setAttribute('open', '');
+  el.scrollIntoView({behavior: smooth ? 'smooth' : 'auto', block: 'start'});
+  el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+};
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href^="#cmp-"]');
+  if (!a) return;
+  e.preventDefault();
+  openTarget(a.getAttribute('href').slice(1));
+});
+if (location.hash.length > 1) openTarget(location.hash.slice(1), false);
+
+// Current section in the rail.
+const links = [...toc.querySelectorAll('a')];
+const secs = [...content.querySelectorAll('section.sec')];
+const mark = () => {
+  let cur = secs[0];
+  for (const s of secs) if (s.getBoundingClientRect().top < 140) cur = s;
+  links.forEach((a) => a.setAttribute('aria-current', a.getAttribute('href') === '#' + cur.id ? 'true' : 'false'));
+};
+addEventListener('scroll', mark, {passive: true});
+mark();
+
+// Search over rendered blocks.
+const blocks = [];
+secs.forEach((sec, i) => {
+  const title = DATA.sections[i].title;
+  sec.querySelectorAll('p, li, tr, summary').forEach((el) => {
+    if (el.closest('.results')) return;
+    const text = el.textContent.replace(/\s+/g, ' ').trim();
+    if (text.length > 3) blocks.push({el, text, title, low: text.toLowerCase()});
+  });
+});
+const q = document.getElementById('q');
+const results = document.getElementById('results');
+const snippet = (text, term) => {
+  const i = text.toLowerCase().indexOf(term);
+  const from = Math.max(0, i - 40);
+  const s = (from ? '…' : '') + text.slice(from, i + term.length + 80) + (i + term.length + 80 < text.length ? '…' : '');
+  return esc(s).replace(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), (m) => `<mark>${m}</mark>`);
+};
+q.addEventListener('input', () => {
+  const term = q.value.trim().toLowerCase();
+  if (term.length < 2) { results.hidden = true; return; }
+  const hits = blocks.filter((b) => b.low.includes(term)).slice(0, 14);
+  results.innerHTML = hits.length
+    ? hits.map((h, i) => `<button type="button" data-i="${blocks.indexOf(h)}"><small>${esc(h.title)}</small>${snippet(h.text, term)}</button>`).join('')
+    : '<div class="none">Нічого не знайдено</div>';
+  results.hidden = false;
+});
+results.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-i]');
+  if (!b) return;
+  const el = blocks[+b.dataset.i].el;
+  let d = el.closest('details');
+  while (d) { d.open = true; d = d.parentElement.closest('details'); }
+  el.scrollIntoView({behavior: 'smooth', block: 'center'});
+  el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  results.hidden = true;
+});
+document.addEventListener('click', (e) => { if (!e.target.closest('.search')) results.hidden = true; });
+q.addEventListener('keydown', (e) => { if (e.key === 'Escape') { results.hidden = true; q.blur(); } });
+
+// Copy for Claude.
+const toast = (msg) => {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('on'), 2200);
+};
+document.getElementById('copy').addEventListener('click', () => {
+  navigator.clipboard.writeText(DATA.plain).then(
+    () => toast('Скопійовано — встав у чат Claude'),
+    () => {
+      const box = document.getElementById('fallback');
+      box.hidden = false;
+      box.innerHTML = '<div class="hint">Браузер не дав скопіювати. Виділи текст нижче (Cmd+A) і скопіюй.</div><textarea class="fallback" id="plain" readonly></textarea>';
+      const ta = document.getElementById('plain');
+      ta.value = DATA.plain; ta.focus(); ta.select();
+    }
+  );
+});
+</script>

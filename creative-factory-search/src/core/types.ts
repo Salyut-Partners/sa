@@ -119,8 +119,6 @@ export interface Locale {
   id: LocaleId;
   /** What the voice says. Empty is a silent video, not a missing one. */
   script: string;
-  /** This language's own voice, or null to use the project's. */
-  voiceId: string | null;
   /** Whether it goes out in the next export. */
   include: boolean;
   /**

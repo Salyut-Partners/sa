@@ -4,7 +4,8 @@
 // and minutes of wall clock, so it runs as a job (see `jobs.ts`): posting one
 // starts it and gets an id back, and the editor watches it while the user
 // keeps working. This file is the work itself — speech, frames, mux, and the
-// subtitles burned in after — and where the files go.
+// subtitles burned in after. The files stay in the job's scratch, for the
+// download or for a launch to take.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -13,13 +14,18 @@ import { clamp } from '../core/canvas.ts';
 import { wordsFromAlignment, type Word } from '../core/subtitles.ts';
 import { mux, probeDuration } from './ffmpeg.ts';
 import {
-  BadRequestError, createJob, explain, relativeFolder, settleJob, working, type Job,
+  BadRequestError, createJob, explain, settleJob, working, type Job,
 } from './jobs.ts';
 import { CancelledError, renderSpecToFile } from './render.ts';
 import { burnWords, subsState } from './subs.ts';
 import { synthesize } from './tts.ts';
 
-/** How many pages walk frames at once. More than three starves the encoders. */
+/**
+ * How many workers walk frames at once, each in a browser of its own. Measured
+ * on a ten-core Mac, ten renders: two took 106 s against 167 s for two sharing
+ * one browser; four took 64 s but ran the fans, and a buyer's laptop is often
+ * smaller. So two, and `RENDER_CONCURRENCY=4` for a machine that can take it.
+ */
 const CONCURRENCY = readConcurrency();
 
 function readConcurrency(): number {
@@ -27,53 +33,20 @@ function readConcurrency(): number {
   return Number.isFinite(asked) ? clamp(Math.round(asked), 1, 4) : 2;
 }
 
-/**
- * Where the files go when they go to a launch rather than to a download:
- * archive name → the campaign folders, inside the launch, the file is copied
- * into. The plan has already been cut down to the files that have one.
- */
-export interface BatchOutput {
-  launchKey: string;
-  destinations: Record<string, string[]>;
-}
-
 export interface BatchRequest {
   groups: BatchGroup[];
   /** The length the user set. A group only ever grows past it, to hold speech. */
   duration: number;
   fitToVoice: boolean;
-  output?: BatchOutput;
 }
-
-/** Turns a campaign name into the folder its creatives go to, or throws for the buyer. */
-export type FolderResolver = (launchKey: string, campaign: string) => string;
 
 /**
  * Start an export. Returns at once with the id to watch it by — the work runs on
  * after this function has answered.
  */
-export function startBatch(request: unknown, origin: string, resolve: FolderResolver): string {
-  const { groups, duration, fitToVoice, output } = validate(request);
-  // Folders are resolved before the job exists: a campaign that is not there
-  // is a refusal the buyer reads now, not an error against every file later.
-  let targets: Map<string, string[]> | null = null;
-  if (output !== undefined) {
-    const folders = new Map<string, string>();
-    targets = new Map();
-    for (const [name, campaigns] of Object.entries(output.destinations)) {
-      const files: string[] = [];
-      for (const campaign of campaigns) {
-        let folder = folders.get(campaign);
-        if (folder === undefined) {
-          folder = resolve(output.launchKey, campaign);
-          folders.set(campaign, folder);
-        }
-        files.push(path.join(folder, name));
-      }
-      targets.set(name, files);
-    }
-  }
-  const job = createJob(groups.reduce((sum, g) => sum + g.items.length, 0), targets, 'cfs-batch-');
+export function startBatch(request: unknown, origin: string): string {
+  const { groups, duration, fitToVoice } = validate(request);
+  const job = createJob(groups.reduce((sum, g) => sum + g.items.length, 0), null, 'cfs-batch-');
   void run(job, groups, duration, fitToVoice, origin);
   return job.id;
 }
@@ -107,21 +80,7 @@ function validate(request: unknown): BatchRequest {
   }
   const duration = Number(body?.duration);
   if (!(duration > 0)) throw new BadRequestError('некоректна тривалість');
-  const output = body?.output;
-  if (output !== undefined) {
-    if (typeof output?.launchKey !== 'string' || typeof output.destinations !== 'object' || output.destinations === null) {
-      throw new BadRequestError('пошкоджена розкладка експорту');
-    }
-    for (const group of groups) {
-      for (const item of group.items) {
-        const to = output.destinations[item.name];
-        if (!Array.isArray(to) || to.length === 0 || !to.every(c => typeof c === 'string')) {
-          throw new BadRequestError(`файл ${item.name} не має теки призначення`);
-        }
-      }
-    }
-  }
-  return { groups, duration, fitToVoice: body?.fitToVoice !== false, ...(output !== undefined ? { output } : {}) };
+  return { groups, duration, fitToVoice: body?.fitToVoice !== false };
 }
 
 // ------------------------------------------------------------------- work --
@@ -157,17 +116,17 @@ async function run(
   const voices = new Map<string, Promise<Clip>>();
   const queue = [...groups];
 
-  const worker = async (): Promise<void> => {
+  const worker = async (slot: number): Promise<void> => {
     for (let group = queue.shift(); group !== undefined; group = queue.shift()) {
       if (job.cancelled) return;
-      await renderGroup(job, group, { voices, duration, fitToVoice, origin, wantsWords });
+      await renderGroup(job, group, { voices, duration, fitToVoice, origin, wantsWords, slot });
     }
   };
 
   let crashed: Error | null = null;
   try {
     await Promise.all(
-      Array.from({ length: Math.min(CONCURRENCY, groups.length) }, () => worker()),
+      Array.from({ length: Math.min(CONCURRENCY, groups.length) }, (_, slot) => worker(slot)),
     );
   } catch (e) {
     crashed = e as Error;
@@ -182,6 +141,8 @@ interface GroupContext {
   origin: string;
   /** Ask the voice for its timings, because some file will burn them. */
   wantsWords: boolean;
+  /** The worker this group is on, and so the browser it renders in. */
+  slot: number;
 }
 
 /**
@@ -217,13 +178,17 @@ async function renderGroup(job: Job, group: BatchGroup, ctx: GroupContext): Prom
     await working(job, group.items[0]!.name, () => renderSpecToFile(group.spec, silent, {
       origin: ctx.origin,
       duration: length,
+      slot: ctx.slot,
       cancelled: () => job.cancelled,
+      // The frames are the group's, and so every file in it is that far along.
+      onFrame: (done, total) => { for (const item of group.items) if (clips.has(item.name)) job.progress.set(item.name, { done, total }); },
     }));
   } catch (e) {
     if (e instanceof CancelledError) return;
     // The whole group shares one video, so losing it loses every file in it —
     // except the ones already counted as lost for want of a voice.
     for (const item of group.items) {
+      job.progress.delete(item.name);
       if (clips.has(item.name)) job.errors.push({ name: item.name, message: explain(e) });
     }
     return;
@@ -233,10 +198,7 @@ async function renderGroup(job: Job, group: BatchGroup, ctx: GroupContext): Prom
     if (job.cancelled) return;
     if (!clips.has(item.name)) continue;
     const clip = clips.get(item.name)!;
-    // Made in scratch and moved into place whole: a campaign folder must never
-    // hold a file ffmpeg was half-way through when it failed or was cancelled.
     const made = path.join(job.dir, item.name);
-    const [out = made, ...copies] = job.targets?.get(item.name) ?? [];
     try {
       await working(job, item.name, async () => {
         if (clip === null) await fs.promises.copyFile(silent, made);
@@ -251,14 +213,11 @@ async function renderGroup(job: Job, group: BatchGroup, ctx: GroupContext): Prom
           if (clip.words === null) throw new Error('субтитри не лягли: розмітка ElevenLabs не збіглась зі скриптом — файл не записано');
           await burn(job, item.name, made, item.subtitles, clip.words);
         }
-        if (out !== made) await fs.promises.rename(made, out);
-        // The same file in every other campaign of its language: copied, not
-        // rendered again, and after the move so no folder ever holds a half.
-        for (const copy of copies) await fs.promises.copyFile(out, copy);
       });
-      job.outputs.push({ name: item.name, file: out });
-      if (job.targets !== null) for (const file of [out, ...copies]) job.folders.add(relativeFolder(file));
+      job.progress.delete(item.name);
+      job.outputs.push({ name: item.name, file: made });
     } catch (e) {
+      job.progress.delete(item.name);
       job.errors.push({ name: item.name, message: explain(e) });
     }
   }
