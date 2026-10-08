@@ -186,7 +186,7 @@ main { flex: 1; display: flex; min-height: 0; }
 .lab .val { margin-left: auto; text-transform: none; letter-spacing: 0; font-variant-numeric: tabular-nums; }
 hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 
-input[type=text], select, textarea {
+input[type=text], input[type=search], select, textarea {
   width: 100%; background: var(--well); color: var(--ink);
   border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font: inherit;
 }
@@ -356,6 +356,14 @@ textarea.mixed::placeholder { color: var(--warn); font-style: italic; }
 .launch-edit-toggle { margin-top: 8px; font-size: 12px; padding: 6px 10px; }
 .launch-edit { display: flex; flex-direction: column; gap: 8px; }
 .launch-edit label:not(.check) { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
+.launch-page { justify-content: center; overflow-y: auto; }
+.launch-side { width: 520px; max-width: 100%; border-left: none; border-right: none; }
+.launch-refresh { margin-top: 6px; font-size: 12px; }
+.launch-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.launch-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }
+.launch-needed { outline: 2px solid var(--warn); outline-offset: 1px; }
+.launch-disk { margin-bottom: 8px; }
+.launch-script { width: 100%; box-sizing: border-box; font-size: 12px; resize: vertical; margin-top: 4px; }
 .launch-steps { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12px; }
 .launch-steps li { padding: 3px 0; color: var(--muted); }
 .launch-steps li.done { color: var(--ink); }

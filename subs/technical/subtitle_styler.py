@@ -676,6 +676,8 @@ def main() -> int:
                         help="надрукувати стилі як JSON і вийти (працює без venv)")
     parser.add_argument("--check", action="store_true",
                         help="перевірити оточення і надрукувати JSON: чого бракує")
+    parser.add_argument("--transcript", action="store_true",
+                        help="лише розпізнати мову відео і надрукувати текст останнім рядком як JSON {text}")
     args = parser.parse_args()
 
     if args.list_styles:
@@ -691,6 +693,12 @@ def main() -> int:
     if not args.video.exists():
         print(f"Немає файлу: {args.video}", file=sys.stderr)
         return 1
+
+    if args.transcript:
+        words = collect_words(transcribe(args.video, args.lang))
+        text = "".join((" " if w["space"] else "") + w["text"] for w in words).strip()
+        print(json.dumps({"text": text}, ensure_ascii=False))
+        return 0
 
     output = args.output or args.video.with_name(f"{args.video.stem}.{args.style}.mp4")
     if args.words is not None and not args.words.exists():

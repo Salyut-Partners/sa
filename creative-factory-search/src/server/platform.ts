@@ -9,7 +9,7 @@
 // exception to unwind.
 import crypto from 'node:crypto';
 import type {
-  AdAccount, BuilderLinks, Country, HeadlineBody, Pixel, PlatformBuilder, PlatformCampaign, PlatformCreative, PlatformPost, PlatformPostDetail,
+  AdAccount, BuilderLinks, Country, HeadlineBody, Page, Pixel, PlatformBuilder, PlatformCampaign, PlatformCreative, PlatformPost, PlatformPostDetail,
   PlatformTermGroup, PlatformTopic, PlatformTsp, Rejection, ReviewVerdict, Theme, TspBody, TspFields,
 } from '../core/platform-model.ts';
 import type { SaConfig } from './config.ts';
@@ -244,15 +244,31 @@ export async function readPixels(client: PlatformClient, trafficSource: string):
   const body = need(await client.get('/pixels', { traffic_source: trafficSource }), 'GET /pixels');
   return listOf(body, 'pixels').map(raw => {
     const p = bag(raw);
-    return { id: num(p['id']), name: str(p['name']), ad_account_id: str(p['ad_account_id']) };
+    return { id: num(p['id']), name: str(p['name']), ad_account_id: str(p['ad_account_id']), business_id: str(p['business_id'] ?? '') };
   });
+}
+
+/**
+ * The identities ads can go out under, every business's. TikTok's only: where
+ * Facebook keeps them is not known yet, and its launch goes out under the
+ * cabinet's default.
+ */
+export async function readPages(client: PlatformClient, trafficSource: string): Promise<Page[]> {
+  if (trafficSource !== 'tiktok') return [];
+  const body = need(await client.get('/tiktok/pages'), 'GET /tiktok/pages');
+  return listOf(body, 'pages').map(raw => {
+    const p = bag(raw);
+    return { id: num(p['id']), name: str(p['page_name']), business_id: str(p['business_id'] ?? '') };
+  }).filter(p => p.id > 0);
 }
 
 export async function readAdAccounts(client: PlatformClient, siteId: number, trafficSource: string): Promise<AdAccount[]> {
   const body = need(await client.get('/facebook/ad-accounts', { site_id: siteId, traffic_source: trafficSource }), 'GET /facebook/ad-accounts');
   return listOf(body, 'adAccounts').map(raw => {
     const a = bag(raw);
-    return { id: num(a['id']), name: str(a['account_name'] ?? a['internal_account_name']), account_id: str(a['account_id']) };
+    return {
+      id: num(a['id']), name: str(a['account_name'] ?? a['internal_account_name']), account_id: str(a['account_id']), business_id: str(a['business_id'] ?? ''),
+    };
   });
 }
 
@@ -288,6 +304,7 @@ export async function readCreatives(client: PlatformClient, topicId: number): Pr
       headline: c['headline'] == null ? null : str(c['headline']),
       status: str(c['status']),
       ad_script: c['ad_script'] == null ? null : str(c['ad_script']),
+      file_url: c['file_path_url'] == null || c['file_path_url'] === '' ? null : str(c['file_path_url']),
     };
   });
 }
@@ -385,6 +402,7 @@ export const toBuilder = (raw: unknown): PlatformBuilder => {
     topic_id: num(b['topic_id']),
     post_id: num(b['post_id']),
     pixel_id: num(b['pixel_id']),
+    page_id: b['page_id'] == null ? null : num(b['page_id']),
     status: str(b['status']),
     traffic_source: str(b['traffic_source']),
     creative_ids: (Array.isArray(b['creative_repos']) ? b['creative_repos'] : []).map(c => num(bag(c)['id'])),
@@ -564,6 +582,8 @@ export interface BuilderFields {
   rsoc_count: string;
   conversion_event_type: string;
   pixel_id: string;
+  /** Not sent when null: the cabinet's default identity. */
+  page_id: string | null;
   traffic_source: string;
   traffic_source_profile_ids: string[];
   creative_repo_ids: string[];
@@ -574,5 +594,5 @@ export interface BuilderFields {
   themes: string[];
 }
 
-export const createBuilder = (client: PlatformClient, fields: BuilderFields): Promise<Answer> =>
-  client.postForm('/campaign-builder', { ...fields });
+export const createBuilder = (client: PlatformClient, { page_id: page, ...fields }: BuilderFields): Promise<Answer> =>
+  client.postForm('/campaign-builder', page === null ? { ...fields } : { ...fields, page_id: page });

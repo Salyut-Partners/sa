@@ -12,7 +12,7 @@ import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
 import { configPath, loadConfig } from './config.ts';
 import { BadRequestError, cancelJob, jobById, outputsOf, RefusedError, statusOf } from './jobs.ts';
 import { PlatformReadError, platformState } from './platform.ts';
-import { launchTopic, launchTopics, showTopic, stageFile, startLaunch } from './quick-launch.ts';
+import { launchTopic, launchTopics, showTopic, stageFile, startLaunch, transcribeStaged } from './quick-launch.ts';
 import { closeBrowsers } from './render.ts';
 import { startSubtitles, subsState } from './subs.ts';
 import { listVoices } from './tts.ts';
@@ -135,6 +135,15 @@ app.post('/api/launch/files', async (req, res) => {
   } catch (e) {
     req.resume();
     answerFailure(res, e, 'launch file');
+  }
+});
+
+/** The words a staged mp4 speaks, for its `ad_script` — Whisper on this machine, one file at a time. */
+app.post('/api/launch/files/:id/transcript', async (req, res) => {
+  try {
+    res.json({ text: await transcribeStaged(req.params.id) });
+  } catch (e) {
+    answerFailure(res, e, 'launch transcript');
   }
 });
 

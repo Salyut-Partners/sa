@@ -20,7 +20,8 @@ export interface LaunchInput {
   fitToVoice: boolean;
   topicId: number;
   form: LaunchForm;
-  disk: StagedFile[];
+  /** Files from disk with the words each speaks — its `ad_script`. */
+  disk: (StagedFile & { script: string })[];
   /** The pictures behind the ticked renders, for the topic's sources folder. */
   sources: { name: string; image: string }[];
 }
@@ -102,7 +103,7 @@ export function useLaunch(): LaunchRun {
       setPhase('launch');
       return startLaunch({
         topicId: input.topicId, form: input.form, renders: ready, scripts,
-        disk: input.disk.map(d => ({ id: d.id, name: d.name })), sources: input.sources,
+        disk: input.disk.map(d => ({ id: d.id, name: d.name, script: d.script })), sources: input.sources,
       });
     };
     void (async () => {

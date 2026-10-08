@@ -165,7 +165,7 @@ export interface LaunchRequest {
   topicId: number;
   form: LaunchForm;
   renders: { job: string; name: string }[];
-  disk: { id: string; name: string }[];
+  disk: { id: string; name: string; script: string }[];
   scripts: Record<string, string>;
   sources: { name: string; image: string }[];
 }
@@ -181,3 +181,7 @@ export const stageLaunchFile = (file: File): Promise<StagedFile> =>
     headers: { 'Content-Type': 'application/octet-stream' },
     body: file,
   });
+
+/** The words a staged mp4 speaks, transcribed on this machine — the script it goes up with. */
+export const transcribeLaunchFile = (id: string): Promise<string> =>
+  ask<{ text: string }>(`/api/launch/files/${encodeURIComponent(id)}/transcript`, { method: 'POST' }).then(r => r.text);

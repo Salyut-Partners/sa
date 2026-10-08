@@ -16,7 +16,7 @@ import { safeStem } from './batch.ts';
 import { guessNiche } from './niche.ts';
 import {
   AGE_BANDS, findLanguage, findTheme, GENDERS, headlineHtml, headlineText, resolveCountry, sameTsp, tspBody,
-  type AdAccount, type BuilderBody, type BuilderLinks, type Country, type CreativeRef, type HeadlineBody, type Pixel, type PlatformBuilder,
+  type AdAccount, type BuilderBody, type BuilderLinks, type Country, type CreativeRef, type HeadlineBody, type Page, type Pixel, type PlatformBuilder,
   type PlatformCampaign, type PlatformCreative, type PlatformTopic, type PlatformTsp, type Theme, type TrafficSource, type TspBody,
   type TspFields, type TspRef, type UploadBody,
 } from './platform-model.ts';
@@ -27,6 +27,14 @@ import {
 export interface TeamDefaults {
   budget: number;
   bid: number;
+  /** Whether a profile starts tomorrow when the set's own campaign does not say. */
+  launch_tomorrow: boolean;
+  /**
+   * The identity a cabinet's ads go out under, by name, where the cabinet's
+   * business has one so called — the GB agent takes no default identity, the
+   * P agent has no «Good Life» and goes out under its default. Empty: always the default.
+   */
+  identity: string;
   rsoc_count: number;
   /** A theme id, key or title; `dark` finds the team's dark theme by its name. */
   theme: string;
@@ -42,8 +50,10 @@ export interface TeamDefaults {
 }
 
 export const TEAM_DEFAULTS: TeamDefaults = {
-  budget: 20,
-  bid: 0.45,
+  budget: 25,
+  bid: 0.3,
+  launch_tomorrow: false,
+  identity: 'Good Life',
   rsoc_count: 6,
   theme: 'dark',
   headline: 'Learn more',
@@ -67,6 +77,8 @@ export function teamDefaults(override: unknown): TeamDefaults {
   return {
     budget: num('budget') ?? TEAM_DEFAULTS.budget,
     bid: num('bid') ?? TEAM_DEFAULTS.bid,
+    launch_tomorrow: typeof o['launch_tomorrow'] === 'boolean' ? o['launch_tomorrow'] : TEAM_DEFAULTS.launch_tomorrow,
+    identity: typeof o['identity'] === 'string' ? o['identity'].trim() : TEAM_DEFAULTS.identity,
     rsoc_count: num('rsoc_count') ?? TEAM_DEFAULTS.rsoc_count,
     theme: text('theme') ?? TEAM_DEFAULTS.theme,
     headline: text('headline') ?? TEAM_DEFAULTS.headline,
@@ -97,6 +109,16 @@ export interface TopicSnapshot {
   buyerPixels: number[];
   /** The cabinets the platform lists for the topic's site and the source — a cabinet it stopped listing is dead and not offered. */
   adAccounts: AdAccount[];
+  /** The identities the source's businesses have. */
+  pages: Page[];
+  /**
+   * The topic's video by the digest of its bytes, for the files of one launch
+   * the topic holds under another name — uploaded by hand, or before the
+   * upload name was tagged. The platform drops a second upload of the same
+   * bytes without a word, so such a file is reused, never sent. Filled by the
+   * server for the launch; absent elsewhere.
+   */
+  heldByDigest?: Record<string, number>;
   themes: Theme[];
   rsocCounts: number[];
   languages: string[];
@@ -110,12 +132,14 @@ export interface LaunchForm {
   postId: number;
   /** The platform's id of the cabinet — never defaulted. */
   account: string | null;
-  /** A country code, a country name, or `All`. */
-  country: string | null;
+  /** Country codes or names — several are one multi-geo profile — or `All`; empty is a field still to fill. */
+  countries: string[];
   budget: number;
   bid: number;
   launch_tomorrow: boolean;
   pixel: string | null;
+  /** The identity's id, or null for the cabinet's default. */
+  page: string | null;
   source: TrafficSource;
   rsoc_count: number;
   /** A theme id, key or title. */
@@ -217,11 +241,12 @@ export function linksWanted(snapshot: Pick<TopicSnapshot, 'builders' | 'links' |
 
 /** What one builder says about the form, where it says anything. */
 interface Said {
-  country: string | null;
+  countries: string[];
   budget: number | null;
   bid: number | null;
   launch_tomorrow: boolean | null;
   pixel: string;
+  page: string | null;
   headline: string | null;
 }
 
@@ -236,16 +261,19 @@ function said(b: PlatformBuilder, snapshot: TopicSnapshot): Said {
   const tspId = snapshot.links[b.id]?.tsp;
   const profile = tspId == null ? undefined : snapshot.tsps.find(t => t.id === tspId);
   const listed = madeCampaign(b, snapshot.campaigns);
-  // The builder may target All while its profile targets one country — the country the campaign runs in.
+  // The builder may target All while its profile targets one country or several — the countries the campaign runs in.
   const location = profile?.fields.location ?? [];
-  const name = (b.country ?? 'All').toLowerCase() !== 'all' ? b.country! : location.length === 1 ? location[0]! : 'All';
-  const country = name.toLowerCase() === 'all' ? 'All' : snapshot.countries.find(c => c.name.toLowerCase() === name.toLowerCase())?.code ?? name;
+  const names = (b.country ?? 'All').toLowerCase() !== 'all' ? [b.country!] : location.length > 0 ? location : ['All'];
+  const countries = names.some(n => n.toLowerCase() === 'all')
+    ? ['All']
+    : names.map(name => snapshot.countries.find(c => c.name.toLowerCase() === name.toLowerCase())?.code ?? name);
   return {
-    country,
+    countries,
     budget: profile?.fields.budget ?? listed?.budget ?? null,
     bid: profile?.fields.bid ?? listed?.bid ?? null,
     launch_tomorrow: profile?.fields.launch_tomorrow ?? null,
     pixel: String(b.pixel_id),
+    page: b.page_id == null ? null : String(b.page_id),
     headline: headlineOf(b, snapshot),
   };
 }
@@ -256,10 +284,11 @@ const first = <T>(...values: (T | null | undefined)[]): T | null => values.find(
 /**
  * The topic as sets, newest first, each with the form filled from its latest
  * campaign; and the form for a new set. The cabinet is never filled — the
- * buyer picks it every time. Country comes from the set alone; budget, bid,
- * pixel and headline fall back to the topic's latest campaign, then to the
- * team — the pixel to the niche's; the start is the set's, or tomorrow. The
- * rest of the form is the team's.
+ * buyer picks it every time, and the pixel and identity are fitted to it then
+ * (`forCabinet`). Countries come from the set alone; budget, bid, pixel and
+ * headline fall back to the topic's latest campaign, then to the team — the
+ * pixel to the niche's; the start is the set's, or the team's. The rest of
+ * the form is the team's.
  */
 export function setsAndDefaults(snapshot: TopicSnapshot, team: TeamDefaults): TopicSets {
   const niche = guessNiche(snapshot.topic.name, [...new Set(Object.values(PIXEL_NICHES))]);
@@ -270,11 +299,12 @@ export function setsAndDefaults(snapshot: TopicSnapshot, team: TeamDefaults): To
 
   const base: FormDefaults = {
     account: null,
-    country: null,
+    countries: [],
     budget: first(topicFirst(s => s.budget), team.budget)!,
     bid: first(topicFirst(s => s.bid), team.bid)!,
-    launch_tomorrow: true,
+    launch_tomorrow: team.launch_tomorrow,
     pixel: first(topicFirst(s => s.pixel), nichePixel(snapshot, niche)),
+    page: null,
     source: team.source,
     rsoc_count: team.rsoc_count,
     theme: team.theme,
@@ -303,11 +333,12 @@ export function setsAndDefaults(snapshot: TopicSnapshot, team: TeamDefaults): To
       latest: latest.id,
       defaults: {
         ...base,
-        country: own.country,
+        countries: own.countries,
         budget: own.budget ?? base.budget,
         bid: own.bid ?? base.bid,
-        launch_tomorrow: own.launch_tomorrow ?? true,
+        launch_tomorrow: own.launch_tomorrow ?? team.launch_tomorrow,
         pixel: own.pixel,
+        page: own.page,
         headline: own.headline ?? base.headline,
       },
     });
@@ -328,6 +359,37 @@ export function setsAndDefaults(snapshot: TopicSnapshot, team: TeamDefaults): To
     missing,
     niche,
   };
+}
+
+/** A cabinet, pixel or identity as the form lists it: by id, with its name and business. */
+export interface Listed { id: string; name: string; business: string }
+
+/**
+ * The pixel and identity once a cabinet is picked. A cabinet sees only its own
+ * business's pixels and identities, and a pixel it cannot see goes out as no
+ * pixel at all — so a pixel of another business becomes the pixel of the same
+ * name in this one («Лонс» for «Лонс»), or nothing for the buyer to pick. The
+ * identity stays when it is this business's; otherwise it is the team's by
+ * name where the business has one so called, and the cabinet's default where not.
+ * A business the platform did not say leaves both as they are.
+ */
+export function forCabinet(
+  form: Pick<FormDefaults, 'pixel' | 'page'>, account: string | null,
+  lists: { accounts: readonly Listed[]; pixels: readonly Listed[]; pages: readonly Listed[] }, identity: string,
+): Pick<FormDefaults, 'pixel' | 'page'> {
+  const business = lists.accounts.find(a => a.id === account)?.business ?? '';
+  if (business === '') return { pixel: form.pixel, page: form.page };
+  const pixel = lists.pixels.find(p => p.id === form.pixel);
+  const same = (p: Listed): boolean => p.name.trim().toLowerCase() === pixel?.name.trim().toLowerCase();
+  const fitted = pixel === undefined || pixel.business === '' || pixel.business === business
+    ? form.pixel
+    : lists.pixels.find(p => p.business === business && same(p))?.id ?? null;
+  const page = lists.pages.find(p => p.id === form.page);
+  const wanted = identity.trim().toLowerCase();
+  const own = page !== undefined && page.business === business
+    ? page.id
+    : wanted === '' ? null : lists.pages.find(p => p.business === business && p.name.trim().toLowerCase() === wanted)?.id ?? null;
+  return { pixel: fitted, page: own };
 }
 
 // -------------------------------------------------------------- steps --
@@ -376,10 +438,11 @@ const allOnly = (list: readonly string[]): string[] => (list.length === 0 || lis
 
 /**
  * The writes one press makes, or every reason it cannot. Checked before
- * anything: the set is the topic's, the cabinet and pixel are listed, the
- * theme, RSOC count, country and language are ones the platform takes.
- * Then: every file the topic does not hold under its upload name is
- * uploaded — the same file twice is one upload — the headline is made unless
+ * anything: the set is the topic's, the cabinet and pixel are listed and of
+ * one business — the identity too — the theme, RSOC count, countries and
+ * language are ones the platform takes. Then: every file the topic does not
+ * hold, under its upload name or by its bytes, is uploaded — the same file
+ * twice is one upload — the headline is made unless
  * the topic has one with those words, the profile unless one has those fields,
  * and the builder is made last, always.
  */
@@ -396,16 +459,29 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
   if (form.pixel === null || form.pixel.trim() === '') errors.push('не вибрано піксель');
   const pixel = form.pixel === null ? undefined : snapshot.pixels.find(p => String(p.id) === form.pixel);
   if (form.pixel !== null && form.pixel.trim() !== '' && pixel === undefined) errors.push(`пікселя ${form.pixel} немає на платформі`);
+  const apart = (a: string | undefined, b: string | undefined): boolean => a !== undefined && b !== undefined && a !== '' && b !== '' && a !== b;
+  if (account !== undefined && pixel !== undefined && apart(account.business_id, pixel.business_id)) {
+    errors.push(`піксель «${pixel.name}» (${pixel.id}) з іншого бізнесу, ніж кабінет «${account.name}» — кабінет його не бачить, і кампанія піде без пікселя; оберіть «${pixel.name}» цього бізнесу`);
+  }
+  const page = form.page === null ? undefined : snapshot.pages.find(p => String(p.id) === form.page);
+  if (form.page !== null && page === undefined) errors.push(`FP ${form.page} немає на платформі`);
+  if (account !== undefined && page !== undefined && apart(account.business_id, page.business_id)) {
+    errors.push(`FP «${page.name}» з іншого бізнесу, ніж кабінет «${account.name}» — оберіть FP цього бізнесу або default`);
+  }
   const theme = findTheme(snapshot.themes, form.theme) ?? snapshot.themes.find(t => `${t.key} ${t.title}`.toLowerCase().includes(form.theme.trim().toLowerCase()));
   if (theme === undefined) errors.push(`теми «${form.theme}» немає на платформі; є: ${snapshot.themes.map(t => t.title).join(', ') || 'жодної'}`);
   if (!snapshot.rsocCounts.includes(form.rsoc_count)) errors.push(`RSOC ${form.rsoc_count} платформа не приймає; можна: ${snapshot.rsocCounts.join(', ')}`);
-  let countryName = '';
-  if (form.country === null || form.country.trim() === '') errors.push('не вибрано країну');
-  else {
-    const country = resolveCountry(form.country, snapshot.countries);
-    if (country.ok) countryName = country.value;
+  let countryNames: string[] = [];
+  const wantedCountries = form.countries.map(c => c.trim()).filter(c => c !== '');
+  if (wantedCountries.length === 0) errors.push('не вибрано країну');
+  for (const wanted of wantedCountries) {
+    const country = resolveCountry(wanted, snapshot.countries);
+    if (country.ok) countryNames.push(country.value);
     else errors.push(...country.errors);
   }
+  // All among the countries is all of them; the same country twice is once.
+  countryNames = countryNames.includes('All') ? ['All'] : [...new Set(countryNames)];
+  const geo = countryNames.join(', ');
   if (!(form.budget > 0)) errors.push('бюджет має бути більшим за нуль');
   if (!(form.bid > 0)) errors.push('бід має бути більшим за нуль');
   const language = findLanguage(snapshot.languages, form.language);
@@ -429,8 +505,8 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
   const steps: LaunchStep[] = [];
   const reused: Reused = { creatives: [], headline: null, tsp: null };
 
-  // -- creatives: what the topic holds under the upload name is reused; the same bytes twice — a
-  //    render and its copy dropped from disk, say — go up once, under the first name they came by.
+  // -- creatives: what the topic holds under the upload name, or by its bytes under any name, is reused; the
+  //    same bytes twice — a render and its copy dropped from disk, say — go up once, under the first name they came by.
   const videos = snapshot.creatives.filter(c => c.media_type === 'Video');
   const refs: CreativeRef[] = [];
   const seen = new Set<string>();
@@ -438,10 +514,10 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
     if (seen.has(file.hash)) continue;
     seen.add(file.hash);
     const upload = uploadName(file);
-    const held = videos.filter(v => v.original_filename === upload).sort((x, y) => y.id - x.id)[0];
+    const held = videos.filter(v => v.original_filename === upload).sort((x, y) => y.id - x.id)[0]?.id ?? snapshot.heldByDigest?.[file.hash];
     if (held !== undefined) {
-      reused.creatives.push({ file: file.name, id: held.id });
-      refs.push(held.id);
+      reused.creatives.push({ file: file.name, id: held });
+      refs.push(held);
       continue;
     }
     refs.push({ file: upload });
@@ -452,7 +528,7 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
       upload,
       body: {
         grade: 'New', language: 'All', ad_script: file.script.trim(), media_type: 'Video',
-        traffic_sources: [form.source], topic_ids: [topicId], countries: [countryName],
+        traffic_sources: [form.source], topic_ids: [topicId], countries: countryNames,
       },
     });
   }
@@ -470,7 +546,7 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
       label: `створити headline «${headline}»`,
       text: headline,
       body: {
-        grade: 'Strong', countries: [countryName], headlines: [headlineHtml(headline)], primary_texts: [''], descriptions: [''],
+        grade: 'Strong', countries: countryNames, headlines: [headlineHtml(headline)], primary_texts: [''], descriptions: [''],
         language: 'All', source: form.source, topic_ids: [topicId],
       },
     });
@@ -480,7 +556,7 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
   const fields: TspFields = {
     budget: form.budget,
     bid: form.bid,
-    location: [countryName],
+    location: countryNames,
     language: language!,
     gender: gender!,
     age: allOnly(form.age),
@@ -499,7 +575,7 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
     tspRef = 'new';
     steps.push({
       kind: 'tsp.create',
-      label: `створити TSP (${countryName}, бюджет ${form.budget}, бід ${form.bid}${form.launch_tomorrow ? ', старт завтра' : ''})`,
+      label: `створити TSP (${geo}, бюджет ${form.budget}, бід ${form.bid}${form.launch_tomorrow ? ', старт завтра' : ''})`,
       fields,
       body: tspBody(form.source, topicId, fields),
     });
@@ -508,10 +584,11 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
   // -- builder: always new, always last.
   steps.push({
     kind: 'builder.create',
-    label: `створити кампанію (${countryName}, ${termGroup!.name} + ${post!.title}, ${seen.size} креативів)`,
+    label: `створити кампанію (${geo}, ${termGroup!.name} + ${post!.title}, ${seen.size} креативів)`,
     body: {
       topic_id: topicId,
-      country: countryName,
+      // One country is the builder's; several are the profile's, and the builder targets All.
+      country: countryNames.length === 1 ? countryNames[0]! : 'All',
       site_id: String(site),
       post_id: post!.id,
       language: 'All',
@@ -519,6 +596,7 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
       rsoc_count: String(form.rsoc_count),
       conversion_event_type: 'Purchase',
       pixel_id: String(pixel!.id),
+      page_id: page === undefined ? null : String(page.id),
       traffic_source: form.source,
       traffic_source_profile_ids: [tspRef],
       creative_repo_ids: [headlineRef, ...refs],
@@ -533,7 +611,7 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
   const found = [
     ...reused.creatives.map(c => `${c.file} — уже в топіку (${c.id}), не вантажу`),
     ...(reused.headline === null ? [] : [`headline «${headline}» — знайдено в топіку (${reused.headline})`]),
-    ...(reused.tsp === null ? [] : [`TSP знайдено (${reused.tsp}): ${countryName}, бюджет ${form.budget}, бід ${form.bid}${form.launch_tomorrow ? ', старт завтра' : ''}`]),
+    ...(reused.tsp === null ? [] : [`TSP знайдено (${reused.tsp}): ${geo}, бюджет ${form.budget}, бід ${form.bid}${form.launch_tomorrow ? ', старт завтра' : ''}`]),
   ];
   return { ok: true, steps, reused, found, warnings };
 }

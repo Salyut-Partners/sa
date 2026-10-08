@@ -128,6 +128,42 @@ export function burnWords(input: string, output: string, style: string, wordsFil
   });
 }
 
+/**
+ * The words a video speaks, as text — the `ad_script` of a designer's file
+ * going into a launch. Whisper, so on the lane: one at a time with the tab's
+ * files. Rejects with the pipeline's last word on stderr.
+ */
+export function transcribeVideo(input: string, lang: string | null = null): Promise<string> {
+  const run = (): Promise<string> => new Promise((resolve, reject) => {
+    if (!fs.existsSync(VENV_PYTHON)) {
+      reject(new Error('транскрипт: немає venv у subs/technical — запусти ./setup.sh у корені ~/sa'));
+      return;
+    }
+    const args = [STYLER, input, '--transcript', ...(lang === null ? [] : ['--lang', lang])];
+    const child = spawn(VENV_PYTHON, args, { cwd: TECHNICAL, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('error', e => reject(new Error('не вдалось запустити розпізнавання: ' + e.message)));
+    child.on('close', code => {
+      try {
+        const parsed = JSON.parse(lastLine(stdout)) as { text?: unknown };
+        if (code === 0 && typeof parsed.text === 'string') {
+          resolve(parsed.text);
+          return;
+        }
+      } catch {
+        // falls through to the pipeline's own words
+      }
+      reject(new Error('транскрипт: ' + (lastLine(stderr) || `пайплайн вийшов із кодом ${code}`)));
+    });
+  });
+  const result = lane.then(run);
+  lane = result.then(() => {}, () => {});
+  return result;
+}
+
 export interface SubtitleRequest {
   /** The file's own name, as dropped. */
   name: string;

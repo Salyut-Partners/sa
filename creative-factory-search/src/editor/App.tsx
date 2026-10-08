@@ -11,6 +11,7 @@ import { parseRoute, routeHash, type Tab } from '../core/route.ts';
 import { buildSpec } from '../core/spec.ts';
 import { posterTime } from '../core/timing.ts';
 import type { Photo, Project, Spec } from '../core/types.ts';
+import { LaunchPanel } from './LaunchPanel.tsx';
 import { LayerBoxes } from './LayerBoxes.tsx';
 import { Clock } from './clock.ts';
 import { CreativeCell } from './CreativeCell.tsx';
@@ -27,6 +28,9 @@ import { useSubtitleQueue } from './subtitles.ts';
 import { SubtitlesTab } from './SubtitlesTab.tsx';
 import { Timeline } from './Timeline.tsx';
 import { useTranslator } from './translate.ts';
+
+/** The launch tab's project: none — it launches files from disk, and renders nothing. */
+const emptyProject = createProject();
 
 /** Width of one grid cell in CSS pixels — four of these fit the work area. */
 const CELL_WIDTH = 260;
@@ -298,6 +302,9 @@ export function App() {
           <button className={tab === 'creatives' ? 'on' : ''} onClick={() => go('creatives')}>
             Креативи
           </button>
+          <button className={tab === 'launch' ? 'on' : ''} onClick={() => go('launch')}>
+            Залив
+          </button>
           <button className={tab === 'subtitles' ? 'on' : ''} onClick={() => go('subtitles')}>
             Субтитри{subtitles.busy ? <span className="busy" title="Іде обробка" /> : null}
           </button>
@@ -361,6 +368,14 @@ export function App() {
 
       {tab === 'subtitles' ? (
         <SubtitlesTab queue={subtitles} />
+      ) : tab === 'launch' ? (
+        // A launch of files made anywhere: mp4 from disk, no project needed. Renders of the
+        // project launch from the creatives tab's «Куди», where the project is in view.
+        <main className="launch-page">
+          <div className="side launch-side">
+            <LaunchPanel project={emptyProject} translator={translator} />
+          </div>
+        </main>
       ) : (
       <main>
         <section className="stage-area">

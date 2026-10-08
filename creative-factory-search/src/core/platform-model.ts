@@ -40,6 +40,8 @@ export interface PlatformCreative {
   headline: string | null;
   status: string;
   ad_script: string | null;
+  /** Where the platform serves the file — what tells a file it holds under another name by its bytes. Null for a headline. */
+  file_url?: string | null;
 }
 
 /** What a buyer sets on a profile, normalised, so two profiles can be compared. */
@@ -84,6 +86,8 @@ export interface PlatformBuilder {
   topic_id: number;
   post_id: number;
   pixel_id: number;
+  /** The identity (a TikTok page) the ads went out under; null is the cabinet's default. */
+  page_id?: number | null;
   /** `APPROVED`, `NOT_APPROVED`, or whatever the review stage spells. */
   status: string;
   /** `tiktok` or `facebook` — the source it was built for. */
@@ -131,9 +135,17 @@ export interface PlatformCampaign {
   bid: number | null;
 }
 
-/** `ad_account_id` is the TikTok account the pixel was made under — routinely not the cabinet it is launched from, so it is shown, not checked. */
-export interface Pixel { id: number; name: string; ad_account_id: string }
-export interface AdAccount { id: number; name: string; account_id: string }
+/**
+ * A business is the source's business center: a cabinet sees only the pixels
+ * and identities of its own, so a pixel of another one goes out as no pixel at
+ * all. `ad_account_id` is the account the pixel was made under — routinely not
+ * the cabinet it is launched from, so it is shown, not checked; the business is.
+ * An empty business is one the platform did not say.
+ */
+export interface Pixel { id: number; name: string; ad_account_id: string; business_id: string }
+export interface AdAccount { id: number; name: string; account_id: string; business_id: string }
+/** An identity the ads can go out under — «Good Life» — instead of the cabinet's default. */
+export interface Page { id: number; name: string; business_id: string }
 export interface Theme { id: number; key: string; title: string }
 
 // -------------------------------------------------------------- writes --
@@ -197,6 +209,8 @@ export interface BuilderBody {
   rsoc_count: string;
   conversion_event_type: 'Purchase';
   pixel_id: string;
+  /** The identity's id, or null for the cabinet's default — then the field is not sent at all. */
+  page_id: string | null;
   traffic_source: string;
   traffic_source_profile_ids: TspRef[];
   creative_repo_ids: CreativeRef[];

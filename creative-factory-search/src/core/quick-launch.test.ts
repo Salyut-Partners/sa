@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PlatformBuilder, PlatformCampaign, PlatformTsp, TspFields } from './platform-model.ts';
 import {
-  launchSteps, linksWanted, pixelNiche, placeSources, plainFailure, setsAndDefaults, TEAM_DEFAULTS, teamDefaults, topicFolder, uploadName,
+  forCabinet, launchSteps, linksWanted, pixelNiche, placeSources, plainFailure, setsAndDefaults, TEAM_DEFAULTS, teamDefaults, topicFolder, uploadName,
   type LaunchFile, type LaunchForm, type TopicSnapshot,
 } from './quick-launch.ts';
 
@@ -32,10 +32,12 @@ const snapshot = (over: Partial<TopicSnapshot> = {}): TopicSnapshot => ({
   creatives: [],
   countries: [{ name: 'Germany', code: 'DE' }, { name: 'Austria', code: 'AT' }, { name: 'United Kingdom', code: 'GB' }],
   pixels: [
-    { id: 34040, name: 'Джобс', ad_account_id: '1' }, { id: 35967, name: 'Джобс', ad_account_id: '1' }, { id: 35968, name: 'Лонс', ad_account_id: '2' },
+    { id: 34040, name: 'Джобс', ad_account_id: '1', business_id: 'P' }, { id: 35967, name: 'Джобс', ad_account_id: '1', business_id: 'GB' },
+    { id: 35968, name: 'Лонс', ad_account_id: '2', business_id: 'GB' },
   ],
   buyerPixels: [],
-  adAccounts: [{ id: 53560, name: 'Account-7', account_id: '7' }],
+  adAccounts: [{ id: 53560, name: 'GB / Account-7', account_id: '7', business_id: 'GB' }, { id: 38341, name: 'P / Account-08', account_id: '8', business_id: 'P' }],
+  pages: [{ id: 27134, name: '1acc35', business_id: 'P' }, { id: 30040, name: 'Good Life', business_id: 'GB' }, { id: 30041, name: 'Like me', business_id: 'GB' }],
   themes: [{ id: 768, key: 'dark', title: 'Dark' }, { id: 790, key: 'light', title: 'Light' }],
   rsocCounts: [3, 4, 5, 6],
   languages: ['English', 'German'],
@@ -75,18 +77,18 @@ describe('setsAndDefaults', () => {
     });
     const [set] = setsAndDefaults(s, TEAM_DEFAULTS).sets;
     expect(set!.latest).toBe(2);
-    expect(set!.defaults.country).toBe('AT');
+    expect(set!.defaults.countries).toEqual(['AT']);
     expect(set!.campaigns).toBe(2);
   });
 
-  it('fills country, budget, bid and the start from the latest campaign\'s profile, and never the cabinet', () => {
+  it('fills countries, budget, bid, the start and the identity from the latest campaign\'s profile, and never the cabinet', () => {
     const s = snapshot({
-      builders: [builder(1)],
+      builders: [builder(1, { page_id: 30040 })],
       links: { 1: { tsp: 7, term_group: 11, ad_account: '53560' } },
-      tsps: [tsp(7, { budget: 35, bid: 0.8, launch_tomorrow: false })],
+      tsps: [tsp(7, { budget: 35, bid: 0.8, launch_tomorrow: true })],
     });
     const d = setsAndDefaults(s, TEAM_DEFAULTS).sets[0]!.defaults;
-    expect(d).toMatchObject({ country: 'DE', budget: 35, bid: 0.8, launch_tomorrow: false, pixel: '35967', account: null });
+    expect(d).toMatchObject({ countries: ['DE'], budget: 35, bid: 0.8, launch_tomorrow: true, pixel: '35967', page: '30040', account: null });
   });
 
   it('reads the country off the profile when the builder targets All', () => {
@@ -95,27 +97,36 @@ describe('setsAndDefaults', () => {
       links: { 1: { tsp: 7, term_group: 11, ad_account: null } },
       tsps: [tsp(7, { location: ['Austria'] })],
     });
-    expect(setsAndDefaults(s, TEAM_DEFAULTS).sets[0]!.defaults.country).toBe('AT');
+    expect(setsAndDefaults(s, TEAM_DEFAULTS).sets[0]!.defaults.countries).toEqual(['AT']);
   });
 
-  it('falls back to the campaign list for budget and bid when the profile is not known, and to tomorrow for the start', () => {
+  it('reads every country of a multi-geo profile', () => {
+    const s = snapshot({
+      builders: [builder(1, { country: 'All' })],
+      links: { 1: { tsp: 7, term_group: 11, ad_account: null } },
+      tsps: [tsp(7, { location: ['Austria', 'United Kingdom'] })],
+    });
+    expect(setsAndDefaults(s, TEAM_DEFAULTS).sets[0]!.defaults.countries).toEqual(['AT', 'GB']);
+  });
+
+  it('falls back to the campaign list for budget and bid when the profile is not known, and to the team\'s start — today', () => {
     const s = snapshot({ builders: [builder(1)], campaigns: [campaign(10, { budget: 25, bid: 0.5 })] });
-    expect(setsAndDefaults(s, TEAM_DEFAULTS).sets[0]!.defaults).toMatchObject({ budget: 25, bid: 0.5, launch_tomorrow: true });
+    expect(setsAndDefaults(s, TEAM_DEFAULTS).sets[0]!.defaults).toMatchObject({ budget: 25, bid: 0.5, launch_tomorrow: false });
   });
 
-  it('gives a new set the topic\'s latest budget, bid and pixel, no country, and a start tomorrow', () => {
+  it('gives a new set the topic\'s latest budget, bid and pixel, no country, and the team\'s start', () => {
     const s = snapshot({
       builders: [builder(1, { pixel_id: 40000 })],
       links: { 1: { tsp: 7, term_group: 11, ad_account: null } },
       tsps: [tsp(7, { budget: 40, bid: 0.9, launch_tomorrow: false })],
     });
-    expect(setsAndDefaults(s, TEAM_DEFAULTS).newSet).toMatchObject({ country: null, budget: 40, bid: 0.9, launch_tomorrow: true, pixel: '40000', account: null });
+    expect(setsAndDefaults(s, TEAM_DEFAULTS).newSet).toMatchObject({ countries: [], budget: 40, bid: 0.9, launch_tomorrow: false, pixel: '40000', page: null, account: null });
   });
 
   it('gives a topic without campaigns the team\'s values, and of its niche\'s pixels the one the buyer last used elsewhere', () => {
     const result = setsAndDefaults(snapshot({ buyerPixels: [35968, 35967, 34040] }), TEAM_DEFAULTS);
     expect(result.niche).toBe('jobs');
-    expect(result.newSet).toMatchObject({ budget: 20, bid: 0.45, pixel: '35967', rsoc_count: 6, theme: 'dark', headline: 'Learn more', language: 'All', source: 'tiktok' });
+    expect(result.newSet).toMatchObject({ budget: 25, bid: 0.3, launch_tomorrow: false, pixel: '35967', rsoc_count: 6, theme: 'dark', headline: 'Learn more', language: 'All', source: 'tiktok' });
   });
 
   it('leaves the pixel for the buyer when the niche cannot be read off the name, or the buyer never used its pixels', () => {
@@ -168,7 +179,9 @@ describe('linksWanted', () => {
 
 describe('teamDefaults', () => {
   it('overrides field by field and ignores what has the wrong type', () => {
-    expect(teamDefaults({ budget: 50, bid: 'x', rsoc_count: 5 })).toMatchObject({ budget: 50, bid: 0.45, rsoc_count: 5 });
+    expect(teamDefaults({ budget: 50, bid: 'x', rsoc_count: 5, launch_tomorrow: true, identity: '' })).toMatchObject({
+      budget: 50, bid: 0.3, rsoc_count: 5, launch_tomorrow: true, identity: '',
+    });
     expect(teamDefaults(null)).toBe(TEAM_DEFAULTS);
   });
 });
@@ -176,7 +189,7 @@ describe('teamDefaults', () => {
 // -------------------------------------------------------------- steps --
 
 const form = (over: Partial<LaunchForm> = {}): LaunchForm => ({
-  termGroupId: 11, postId: 501, account: '53560', country: 'DE', budget: 20, bid: 0.45, launch_tomorrow: true, pixel: '35967',
+  termGroupId: 11, postId: 501, account: '53560', countries: ['DE'], budget: 20, bid: 0.45, launch_tomorrow: true, pixel: '35967', page: null,
   source: 'tiktok', rsoc_count: 6, theme: 'dark', headline: 'Learn more', keyword_rotation: false, language: 'All',
   gender: 'All', age: ['All'], devices: ['All'], os: ['All'], end_date: null, ...over,
 });
@@ -259,7 +272,7 @@ describe('launchSteps', () => {
   });
 
   it('refuses without a cabinet, with a cabinet the platform no longer lists, and says every reason at once', () => {
-    const none = launchSteps(form({ account: null, pixel: null, country: null }), snapshot(), [file('a.mp4')]);
+    const none = launchSteps(form({ account: null, pixel: null, countries: [] }), snapshot(), [file('a.mp4')]);
     expect(none.ok).toBe(false);
     expect(!none.ok && none.errors).toEqual(expect.arrayContaining(['не вибрано кабінет', 'не вибрано піксель', 'не вибрано країну']));
     const dead = launchSteps(form({ account: '11111' }), snapshot(), [file('a.mp4')]);
@@ -274,9 +287,74 @@ describe('launchSteps', () => {
     expect(errors).toMatch(/жодного креативу/);
   });
 
+  it('launches several countries as one multi-geo profile, the builder targeting All', () => {
+    const plan = launchSteps(form({ countries: ['DE', 'AT', 'DE'] }), snapshot(), [file('a.mp4')]);
+    if (!plan.ok) throw new Error(plan.errors.join('; '));
+    const [upload, , profile, build] = plan.steps;
+    expect(upload!.kind === 'creative.upload' && upload!.body.countries).toEqual(['Germany', 'Austria']);
+    expect(profile!.kind === 'tsp.create' && [profile!.body.location, profile!.label]).toEqual([['Germany', 'Austria'], 'створити TSP (Germany, Austria, бюджет 20, бід 0.45, старт завтра)']);
+    expect(build!.kind === 'builder.create' && build!.body.country).toBe('All');
+    const all = launchSteps(form({ countries: ['DE', 'All'] }), snapshot(), [file('a.mp4')]);
+    const allProfile = all.ok ? all.steps.find(x => x.kind === 'tsp.create') : undefined;
+    expect(allProfile?.kind === 'tsp.create' && allProfile.body.location).toEqual(['All']);
+  });
+
+  it('refuses a pixel or identity of another business than the cabinet\'s — the cabinet would not see it', () => {
+    const pixel = launchSteps(form({ account: '38341', pixel: '35968' }), snapshot(), [file('a.mp4')]);
+    expect(!pixel.ok && pixel.errors.join()).toMatch(/піксель «Лонс» \(35968\) з іншого бізнесу, ніж кабінет «P \/ Account-08»/);
+    const page = launchSteps(form({ page: '27134' }), snapshot(), [file('a.mp4')]);
+    expect(!page.ok && page.errors.join()).toMatch(/FP «1acc35» з іншого бізнесу/);
+  });
+
+  it('sends the identity, and none for the cabinet\'s default', () => {
+    const build = (page: string | null) => {
+      const plan = launchSteps(form({ page }), snapshot(), [file('a.mp4')]);
+      const step = plan.ok ? plan.steps.at(-1) : undefined;
+      return step?.kind === 'builder.create' ? step.body.page_id : undefined;
+    };
+    expect(build('30040')).toBe('30040');
+    expect(build(null)).toBeNull();
+  });
+
+  it('reuses a video the topic holds under another name with the same bytes, rather than send what the platform would drop', () => {
+    const s = snapshot({
+      creatives: [{ id: 950, media_type: 'Video', original_filename: 'hand upload.mp4', headline: null, status: 'New', ad_script: 'x' }],
+      heldByDigest: { abcdef0123456789: 950 },
+    });
+    const plan = launchSteps(form(), s, [file('a.mp4')]);
+    if (!plan.ok) throw new Error(plan.errors.join('; '));
+    expect(plan.steps.some(x => x.kind === 'creative.upload')).toBe(false);
+    expect(plan.reused.creatives).toEqual([{ file: 'a.mp4', id: 950 }]);
+  });
+
   it('refuses a set the topic does not have', () => {
     const plan = launchSteps(form({ termGroupId: 99, postId: 98 }), snapshot(), [file('a.mp4')]);
     expect(!plan.ok && plan.errors).toEqual(expect.arrayContaining(['термгрупи 99 у топіку немає', 'статті 98 у топіку немає']));
+  });
+});
+
+describe('forCabinet', () => {
+  const lists = {
+    accounts: [{ id: '53560', name: 'GB / 7', business: 'GB' }, { id: '38341', name: 'P / 08', business: 'P' }, { id: '1', name: '?', business: '' }],
+    pixels: [{ id: '34086', name: 'Лонс', business: 'P' }, { id: '35968', name: 'Лонс', business: 'GB' }, { id: '35970', name: 'Еком', business: 'GB' }],
+    pages: [{ id: '27134', name: '1acc35', business: 'P' }, { id: '30040', name: 'Good Life', business: 'GB' }, { id: '30041', name: 'Like me', business: 'GB' }],
+  };
+
+  it('takes the pixel of the same name in the cabinet\'s business, and nothing when it has none', () => {
+    expect(forCabinet({ pixel: '35968', page: null }, '38341', lists, 'Good Life').pixel).toBe('34086');
+    expect(forCabinet({ pixel: '35968', page: null }, '53560', lists, 'Good Life').pixel).toBe('35968');
+    expect(forCabinet({ pixel: '35970', page: null }, '38341', lists, 'Good Life').pixel).toBeNull();
+  });
+
+  it('goes out under the team\'s identity where the business has it, the default where not, and keeps one the business owns', () => {
+    expect(forCabinet({ pixel: null, page: null }, '53560', lists, 'Good Life').page).toBe('30040');
+    expect(forCabinet({ pixel: null, page: '30040' }, '38341', lists, 'Good Life').page).toBeNull();
+    expect(forCabinet({ pixel: null, page: '30041' }, '53560', lists, 'Good Life').page).toBe('30041');
+    expect(forCabinet({ pixel: null, page: null }, '53560', lists, '').page).toBeNull();
+  });
+
+  it('leaves both alone for a cabinet whose business is not known', () => {
+    expect(forCabinet({ pixel: '35968', page: '30040' }, '1', lists, 'Good Life')).toEqual({ pixel: '35968', page: '30040' });
   });
 });
 

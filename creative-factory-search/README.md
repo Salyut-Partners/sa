@@ -80,8 +80,11 @@ no token in the config the option is not offered and the download is chosen. It
 keeps no state: the topic is read off the platform every time, and the only
 thing written to disk is the sources folder after a success.
 
-- **Topic** — the buyer's topics on the platform (`GET /topics`, narrowed to
-  the buyer the token names — `core/platform-token.ts`).
+- **Topic** — typed into a search box over the buyer's topics on the platform
+  (`GET /topics`, narrowed to the buyer the token names —
+  `core/platform-token.ts`). A topic read once this session shows at once when
+  picked again; «Оновити з платформи» reads it again after a change in the admin.
+  A launch drops what was read of its topic, so the next visit reads it fresh.
 - **Set** — a term group and an article that have had campaigns, by their
   names, newest first by their latest campaign; «+ Новий сет» picks the pair
   from the topic's term groups and articles. The campaign's name does not
@@ -90,11 +93,17 @@ thing written to disk is the sources folder after a success.
 - **Creatives** — every render the export would make, a checkbox each, and
   mp4 files from disk by button or drop, each sent to the server once when it
   is added (`POST /api/launch/files`, named by its digest) and removable with
-  a cross. Languages may be mixed in one campaign.
-- **Cabinet** (never defaulted; dead ones hidden), **country** (one; the
+  a cross. Each file from disk is transcribed on this machine by the subs
+  pipeline (`subtitle_styler.py --transcript`, `POST
+  /api/launch/files/:id/transcript`) into an editable box — its `ad_script`.
+  Languages may be mixed in one campaign. The «Залив» tab is the same form
+  with no project: files from disk only, for creatives made elsewhere.
+- **Cabinet** (never defaulted; dead ones hidden), **countries** (one or
+  several — several are one multi-geo profile and a builder on All; the
   creative's language does not decide it), **budget**, **bid**, **Launch
-  tomorrow** — the last four from the set's latest campaign.
-- **The rest** in small print — source, language, RSOC, pixel, theme,
+  tomorrow** — the last four from the set's latest campaign — and the
+  **pixel**, in plain sight: a wrong one is money on the wrong niche.
+- **The rest** in small print — source, FP (identity), language, RSOC, theme,
   headline, keyword rotation, age, gender, devices, OS, end date, schedule —
   from the team's defaults; «Редагувати» opens them into fields for this
   launch only.
@@ -106,19 +115,33 @@ then the team's; the pixel to the topic's latest, then to the pixel of the
 topic's niche (read off the topic's name by `core/niche.ts`, and off the
 pixel's name: «Джобс», «Лонс», «Авто», «Еком») that the buyer last launched
 with anywhere; the headline to the topic's latest, then «Learn more». The
-team's defaults are `TEAM_DEFAULTS` in code — RSOC 6, 20 / 0.45, the dark
-theme, TikTok, language and targeting All — and the buyer overrides fields
-of it with `launch_defaults` in `~/.config/sa/config.json`.
+team's defaults are `TEAM_DEFAULTS` in code — RSOC 6, 25 / 0.3, start today,
+identity «Good Life», the dark theme, TikTok, language and targeting All —
+and the buyer overrides fields of it with `launch_defaults` in
+`~/.config/sa/config.json`.
+
+A cabinet sees only its business's pixels and identities (the platform's
+`business_id` on cabinets, pixels and `GET /tiktok/pages`), and a pixel of
+another business goes out as no pixel at all — the same name, «Лонс», is a
+different pixel in the GB and the P business. So picking a cabinet fits both
+(`forCabinet`): the pixel becomes the one of the same name in the cabinet's
+business, or nothing for the buyer to pick; the identity stays if it is the
+business's, else becomes the team's by name where the business has one
+(«Good Life» on GB, which takes no default), else the cabinet's default
+(P). `launchSteps` refuses a pixel or identity of another business.
 
 «Залити» opens a modal with the whole summary; «Підтвердити» renders what
 changed since a render the server still has (a file's identity is its
 picture, words and length), then `POST /api/launch` with `confirm: true`.
 `launchSteps` in `core/quick-launch.ts` checks the form against the platform
-before anything — the set is the topic's, the cabinet and pixel are listed,
-the theme, RSOC count, country and language are ones it takes — and orders
-the writes: every file the topic does not already hold under its upload
-name (its own name with eight characters of its digest; the same bytes twice
-go up once), the headline unless the topic has one with those words, the
+before anything — the set is the topic's, the cabinet and pixel are listed
+and of one business, the theme, RSOC count, countries and language are ones
+it takes — and orders the writes: every file the topic does not already hold
+under its upload name (its own name with eight characters of its digest; the
+same bytes twice go up once) or by its bytes under any name — the platform
+drops a second upload of bytes it holds without a word, so the server finds
+such a file by size off the storage's headers, then by digest, and reuses
+it — the headline unless the topic has one with those words, the
 profile unless one has those fields, and the builder, always new and always
 last — so a launch that stops half-way has bought nothing, and «Спробувати
 ще», the same call again, reuses what the first attempt put up. Old

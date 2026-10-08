@@ -15,15 +15,16 @@ import {
 import { buyerIdFromToken } from '../core/platform-token.ts';
 import { DEFAULT_QUEUE, pauseBefore, type WriteKind } from '../core/queue.ts';
 import {
-  BUILDERS_URL, launchSteps, linksWanted, placeSources, plainFailure, setsAndDefaults, teamDefaults, topicFolder,
-  type LaunchForm, type LaunchStep, type TopicSets, type TopicSnapshot,
+  BUILDERS_URL, launchSteps, linksWanted, placeSources, plainFailure, setsAndDefaults, teamDefaults, topicFolder, uploadName,
+  type LaunchForm, type LaunchStep, type Listed, type TopicSets, type TopicSnapshot,
 } from '../core/quick-launch.ts';
 import type { SaConfig } from './config.ts';
 import { createJob, jobById, outputsOf, RefusedError, settleJob, type Job } from './jobs.ts';
 import { PolicyStop, writeUnderPolicy } from './policy.ts';
+import { transcribeVideo } from './subs.ts';
 import {
   createBuilder, createdId, createHeadline, createTsp, PlatformClient, platformState, readAdAccounts, readBuilderLinks, readBuilders,
-  readBuyerBuilders, readBuyerCampaigns, readBuyerTopics, readCountries, readCreatives, readLanguages, readPixels, readPost, readPosts, readRsocCounts, readTermGroups,
+  readBuyerBuilders, readBuyerCampaigns, readBuyerTopics, readCountries, readCreatives, readLanguages, readPages, readPixels, readPost, readPosts, readRsocCounts, readTermGroups,
   readThemes, readTopic, readTsps, uploadCreative, type Answer,
 } from './platform.ts';
 
@@ -54,10 +55,10 @@ async function readLinks(api: PlatformClient, ids: readonly number[], into: Reco
 export async function readTopicSnapshot(api: PlatformClient, topicId: number, source: TrafficSource): Promise<TopicSnapshot> {
   const topic = await readTopic(api, topicId);
   if (topic === null) throw new RefusedError(`топіка ${topicId} на платформі немає`);
-  const [termGroups, posts, builders, creatives, tsps, campaigns, countries, pixels, themes, rsocCounts, languages] = await Promise.all([
+  const [termGroups, posts, builders, creatives, tsps, campaigns, countries, pixels, pages, themes, rsocCounts, languages] = await Promise.all([
     readTermGroups(api, topicId), readPosts(api, topicId), readBuilders(api, topicId), readCreatives(api, topicId),
     readTsps(api, topicId, topic.user_id), readBuyerCampaigns(api, topic.user_id), readCountries(api), readPixels(api, source),
-    readThemes(api), readRsocCounts(api), readLanguages(api),
+    readPages(api, source), readThemes(api), readRsocCounts(api), readLanguages(api),
   ]);
   const sites = [...new Set(posts.map(p => p.site_id).filter(id => id > 0))];
   const adAccounts = (await Promise.all(sites.map(site => readAdAccounts(api, site, source)))).flat()
@@ -67,7 +68,7 @@ export async function readTopicSnapshot(api: PlatformClient, topicId: number, so
     .filter(b => b.traffic_source === source).sort((x, y) => y.id - x.id).map(b => b.pixel_id);
   const snapshot: TopicSnapshot = {
     topic, termGroups: termGroups.map(g => ({ id: g.id, name: g.name })), posts: posts.map(p => ({ id: p.id, title: p.title, site_id: p.site_id })),
-    builders, links: {}, tsps, campaigns, creatives, countries, pixels, buyerPixels, adAccounts, themes, rsocCounts, languages,
+    builders, links: {}, tsps, campaigns, creatives, countries, pixels, buyerPixels, adAccounts, pages, themes, rsocCounts, languages,
   };
   // Two passes: builders without a campaign first — their set is only on their page — then the newest of every set.
   for (let pass = 0; pass < 2; pass++) await readLinks(api, linksWanted(snapshot), snapshot.links);
@@ -79,8 +80,12 @@ export interface LaunchTopic extends TopicSets {
   topic: { id: number; name: string };
   source: TrafficSource;
   countries: { code: string; name: string }[];
-  pixels: { id: string; name: string }[];
-  accounts: { id: string; name: string }[];
+  /** Pixels, cabinets and identities with their business: a cabinet takes only its own business's. */
+  pixels: Listed[];
+  accounts: Listed[];
+  pages: Listed[];
+  /** The team's identity by name, for `forCabinet` when a cabinet is picked. */
+  identity: string;
   themes: { id: string; title: string }[];
   rsocCounts: number[];
 }
@@ -98,8 +103,11 @@ export async function launchTopic(config: SaConfig, topicId: number, source: str
     topic: { id: snapshot.topic.id, name: snapshot.topic.name },
     source: wanted,
     countries: snapshot.countries.map(c => ({ code: c.code, name: c.name })).sort((a, b) => a.name.localeCompare(b.name)),
-    pixels: snapshot.pixels.map(p => ({ id: String(p.id), name: p.name })),
-    accounts: snapshot.adAccounts.map(a => ({ id: String(a.id), name: a.name })).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
+    pixels: snapshot.pixels.map(p => ({ id: String(p.id), name: p.name, business: p.business_id })),
+    accounts: snapshot.adAccounts.map(a => ({ id: String(a.id), name: a.name, business: a.business_id }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
+    pages: snapshot.pages.map(p => ({ id: String(p.id), name: p.name, business: p.business_id })),
+    identity: defaultsOf(config).identity,
     themes: snapshot.themes.map(t => ({ id: String(t.id), title: t.title })),
     rsocCounts: snapshot.rsocCounts,
   };
@@ -141,7 +149,7 @@ export async function showTopic(config: SaConfig, wanted: string, source: string
     })),
     sets: sets.map(s => ({
       termGroup: s.termGroup.name, article: s.article.title, campaigns: s.campaigns, latestBuilder: s.latest,
-      country: s.defaults.country, budget: s.defaults.budget, bid: s.defaults.bid, launch_tomorrow: s.defaults.launch_tomorrow, headline: s.defaults.headline,
+      countries: s.defaults.countries, budget: s.defaults.budget, bid: s.defaults.bid, launch_tomorrow: s.defaults.launch_tomorrow, headline: s.defaults.headline,
     })),
   };
 }
@@ -199,6 +207,13 @@ const stagedPath = (id: string): string | null => {
   return fs.existsSync(file) ? file : null;
 };
 
+/** The words a staged file speaks, transcribed on this machine. */
+export async function transcribeStaged(id: string): Promise<string> {
+  const file = stagedPath(id);
+  if (file === null) throw new RefusedError('файл уже прибрано з сервера — додайте його ще раз');
+  return transcribeVideo(file);
+}
+
 // -------------------------------------------------------------- launch --
 
 export interface LaunchRequest {
@@ -206,8 +221,8 @@ export interface LaunchRequest {
   form: LaunchForm;
   /** Rendered files, each by the export job that made it and its name there. */
   renders: { job: string; name: string }[];
-  /** Files from disk, each by the id staging gave it. */
-  disk: { id: string; name: string }[];
+  /** Files from disk, each by the id staging gave it, with the words it speaks — transcribed, then read over by the buyer. */
+  disk: { id: string; name: string; script: string }[];
   /** Output name → the script that creative speaks, its `ad_script`. */
   scripts: Record<string, string>;
   /** The pictures behind the renders, as data URLs, for the topic's sources folder once the campaign is made. */
@@ -236,11 +251,73 @@ function parseRequest(body: unknown): LaunchRequest {
   if (typeof topicId !== 'number' || !Number.isInteger(topicId) || topicId <= 0) throw new RefusedError('не вибрано топік');
   if (typeof b['form'] !== 'object' || b['form'] === null) throw new RefusedError('порожня форма заливу');
   const renders = list<{ job: string; name: string }>(b['renders'], x => typeof bagOf(x)['job'] === 'string' && typeof bagOf(x)['name'] === 'string');
-  const disk = list<{ id: string; name: string }>(b['disk'], x => typeof bagOf(x)['id'] === 'string' && typeof bagOf(x)['name'] === 'string');
+  const disk = list<{ id: string; name: string; script?: unknown }>(b['disk'], x => typeof bagOf(x)['id'] === 'string' && typeof bagOf(x)['name'] === 'string')
+    .map(d => ({ id: d.id, name: d.name, script: typeof d.script === 'string' ? d.script : '' }));
   const sources = list<{ name: string; image: string }>(b['sources'], x => typeof bagOf(x)['name'] === 'string' && typeof bagOf(x)['image'] === 'string');
   if (renders.length + disk.length === 0) throw new RefusedError('немає жодного креативу — відмітьте рендер або додайте mp4 з диска');
   const scripts = typeof b['scripts'] === 'object' && b['scripts'] !== null ? b['scripts'] as Record<string, string> : {};
   return { topicId, form: b['form'] as LaunchForm, renders, disk, scripts, sources, confirm: true };
+}
+
+// ------------------------------------------------------ held by bytes --
+
+/** What the platform's storage says about a file, by its address: the files there do not change, so once asked is enough. */
+const servedSize = new Map<string, number | null>();
+const servedDigest = new Map<string, string | null>();
+
+async function sizeAt(url: string): Promise<number | null> {
+  if (!servedSize.has(url)) {
+    try {
+      const answer = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(15_000) });
+      const length = Number(answer.headers.get('content-length'));
+      servedSize.set(url, answer.ok && length > 0 ? length : null);
+    } catch {
+      return null;
+    }
+  }
+  return servedSize.get(url) ?? null;
+}
+
+async function digestAt(url: string): Promise<string | null> {
+  if (!servedDigest.has(url)) {
+    try {
+      const answer = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+      if (!answer.ok) return null;
+      servedDigest.set(url, crypto.createHash('sha256').update(Buffer.from(await answer.arrayBuffer())).digest('hex'));
+    } catch {
+      return null;
+    }
+  }
+  return servedDigest.get(url) ?? null;
+}
+
+/**
+ * The topic's videos that are the launch's files byte for byte, under whatever
+ * name. The platform drops a second upload of bytes it holds without a word,
+ * so a file the topic has from a hand upload — or from before upload names
+ * were tagged — has to be found, not sent. Asked only for files the topic
+ * does not hold under their upload name: sizes first, off the storage's
+ * headers, and only a video of the same size is fetched and digested.
+ */
+async function heldByContent(snapshot: TopicSnapshot, files: readonly { name: string; hash: string; path: string }[]): Promise<Record<string, number>> {
+  const videos = snapshot.creatives.filter(c => c.media_type === 'Video' && c.file_url != null);
+  const names = new Set(videos.map(v => v.original_filename));
+  const wanted = files.filter((f, i) => files.findIndex(g => g.hash === f.hash) === i && !names.has(uploadName(f)));
+  if (wanted.length === 0 || videos.length === 0) return {};
+  const sizes = new Map(wanted.map(f => [fs.statSync(f.path).size, f]));
+  const held: Record<string, number> = {};
+  // Newest first: of two entries with the same bytes, the later is the one the buyer last saw.
+  const ordered = [...videos].sort((x, y) => y.id - x.id);
+  for (let i = 0; i < ordered.length; i += 8) {
+    const chunk = ordered.slice(i, i + 8);
+    const read = await Promise.all(chunk.map(v => sizeAt(v.file_url!)));
+    for (const [n, size] of read.entries()) {
+      const file = size === null ? undefined : sizes.get(size);
+      if (file === undefined || file.hash in held) continue;
+      if (await digestAt(chunk[n]!.file_url!) === file.hash) held[file.hash] = chunk[n]!.id;
+    }
+  }
+  return held;
 }
 
 /** One line of the launch's progress: a write it makes, or something it found and reuses. */
@@ -272,7 +349,7 @@ export async function startLaunch(config: SaConfig, body: unknown): Promise<{ id
   for (const d of request.disk) {
     const file = stagedPath(d.id);
     if (file === null) throw new RefusedError(`${d.name} уже прибрано з сервера — додайте файл ще раз`);
-    picked.push({ name: path.basename(d.name), path: file, script: '' });
+    picked.push({ name: path.basename(d.name), path: file, script: d.script });
   }
 
   const api = client(config);
@@ -280,6 +357,7 @@ export async function startLaunch(config: SaConfig, body: unknown): Promise<{ id
   const files = picked.map(f => ({
     ...f, hash: crypto.createHash('sha256').update(fs.readFileSync(f.path)).digest('hex'),
   }));
+  snapshot.heldByDigest = await heldByContent(snapshot, files);
   const plan = launchSteps(request.form, snapshot, files);
   if (!plan.ok) throw new RefusedError(plan.errors.join('\n'));
 
@@ -416,7 +494,9 @@ async function runStep(run: Run, step: LaunchStep, made: Made): Promise<{ url: s
       await underPolicy(run, 'create', () => uploadCreative(api, fields, { name: step.upload, bytes }, progress),
         async () => uploadedId(before, await videos(), step.upload));
       const id = uploadedId(before, await videos(), step.upload);
-      if (id === null) throw new StepError(`після завантаження платформа не показує ${step.upload} у топіку — «Спробувати ще» дозавантажить`);
+      // The platform takes bytes it already holds and adds nothing — in this topic that was found before the
+      // upload, so it is another one's file, or one deleted from the repository.
+      if (id === null) throw new StepError(`після завантаження платформа не показує ${step.upload} у топіку — схоже, такий самий файл уже є на платформі в іншому топіку або видалений; змініть файл (перезбережіть) або приберіть його з цього заливу`);
       made.uploads.set(step.upload, id);
       return null;
     }

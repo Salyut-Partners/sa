@@ -5,6 +5,7 @@ describe('the address the window keeps', () => {
   it('reads the tab', () => {
     expect(parseRoute('#/subtitles')).toBe('subtitles');
     expect(parseRoute('#/creatives')).toBe('creatives');
+    expect(parseRoute('#/launch')).toBe('launch');
   });
 
   it('opens the creatives for an empty or unknown address, the old launches tab included', () => {

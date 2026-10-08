@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { batchNames, keepItems, planBatch } from '../core/batch.ts';
 import { LOCALE_NAMES } from '../core/locales.ts';
 import { FLAGS } from '../core/phrasebook.ts';
-import type { FormDefaults, LaunchForm } from '../core/quick-launch.ts';
+import { forCabinet, type FormDefaults, type LaunchForm } from '../core/quick-launch.ts';
 import type { LocaleId, Project } from '../core/types.ts';
 import { FilePicker } from './FilePicker.tsx';
 import { useLaunch } from './launch.ts';
-import { fetchLaunchTopic, fetchLaunchTopics, stageLaunchFile, type LaunchTopic, type StagedFile } from './server.ts';
+import { fetchLaunchTopic, fetchLaunchTopics, stageLaunchFile, transcribeLaunchFile, type LaunchTopic, type StagedFile } from './server.ts';
 import type { Translator } from './translate.ts';
 
 interface Props {
@@ -19,6 +19,27 @@ const mb = (bytes: number): string => (bytes / 1024 / 1024).toFixed(1);
 /** The set select's value for a term group and article with no campaign yet. */
 const NEW_SET = ' new';
 const setValue = (termGroupId: number, postId: number): string => `${termGroupId}|${postId}`;
+
+/**
+ * What was read off the platform this session, kept while the editor is open:
+ * going back to a topic shows it at once, and «Оновити з платформи» reads it
+ * again when something was changed in the admin. Keyed by topic and source.
+ */
+const topicCache = new Map<string, LaunchTopic>();
+let topicsCache: { id: number; name: string }[] | null = null;
+const cacheKey = (topicId: number, source: string): string => `${topicId}|${source}`;
+
+/** A topic as the search box shows it: its name, with the id when two of the buyer's share one. */
+const topicLabel = (t: { id: number; name: string }, all: readonly { id: number; name: string }[]): string =>
+  all.filter(x => x.name === t.name).length > 1 ? `${t.name} · ${t.id}` : t.name;
+
+/** A designer's file in the form, with the words it speaks: transcribed when added, then the buyer's to read over. */
+interface DiskFile extends StagedFile {
+  script: string;
+  /** `busy` while Whisper listens; `failed` leaves the script for the buyer to type. */
+  words: 'busy' | 'done' | 'failed';
+  note: string;
+}
 
 /** A list typed as one line: `All`, or `18-24, 25-34`. */
 const listText = (list: readonly string[]): string => list.join(', ');
@@ -37,7 +58,8 @@ export function LaunchPanel({ project, translator }: Props) {
   // and the designer's files, sent to the server as they are added.
   const renders = useMemo(() => batchNames(project), [project]);
   const [off, setOff] = useState<ReadonlySet<string>>(new Set());
-  const [disk, setDisk] = useState<StagedFile[]>([]);
+  const [disk, setDisk] = useState<DiskFile[]>([]);
+  const known = useRef(new Set<string>());
   const [staging, setStaging] = useState<string[]>([]);
   const [diskNote, setDiskNote] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -51,14 +73,26 @@ export function LaunchPanel({ project, translator }: Props) {
     for (const file of files.filter(f => /\.mp4$/i.test(f.name))) {
       setStaging(s => [...s, file.name]);
       stageLaunchFile(file)
-        .then(staged => setDisk(d => (d.some(x => x.id === staged.id) ? d : [...d, staged])))
+        .then(staged => {
+          // The same file dropped twice is in the form once, and listened to once.
+          if (known.current.has(staged.id)) return;
+          known.current.add(staged.id);
+          setDisk(d => [...d, { ...staged, script: '', words: 'busy', note: '' }]);
+          const patchFile = (change: Partial<DiskFile>): void => setDisk(d => d.map(x => (x.id === staged.id ? { ...x, ...change } : x)));
+          transcribeLaunchFile(staged.id)
+            .then(text => patchFile({ script: text, words: 'done' }))
+            .catch(e => patchFile({ words: 'failed', note: (e as Error).message }));
+        })
         .catch(e => setDiskNote((e as Error).message))
         .finally(() => setStaging(s => { const i = s.indexOf(file.name); return i < 0 ? s : [...s.slice(0, i), ...s.slice(i + 1)]; }));
     }
   };
-  const [topics, setTopics] = useState<{ id: number; name: string }[] | null>(null);
+  const [topics, setTopics] = useState<{ id: number; name: string }[] | null>(topicsCache);
   const [topicsNote, setTopicsNote] = useState('');
   const [topicId, setTopicId] = useState<number | null>(null);
+  const [topicQuery, setTopicQuery] = useState('');
+  /** Bumped by «Оновити з платформи»: the topic is read again whatever the cache holds. */
+  const [refresh, setRefresh] = useState(0);
   const [source, setSource] = useState('');
   const [data, setData] = useState<LaunchTopic | null>(null);
   const [dataNote, setDataNote] = useState('');
@@ -69,31 +103,46 @@ export function LaunchPanel({ project, translator }: Props) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
-  useEffect(() => {
+  const loadTopics = (): void => {
     fetchLaunchTopics()
-      .then(list => { setTopics(list); setTopicsNote(''); })
-      .catch(e => { setTopics([]); setTopicsNote((e as Error).message); });
-  }, []);
+      .then(list => { topicsCache = list; setTopics(list); setTopicsNote(''); })
+      .catch(e => { if (topicsCache === null) setTopics([]); setTopicsNote((e as Error).message); });
+  };
+  useEffect(() => { if (topicsCache === null) loadTopics(); }, []);
 
-  // The topic, read again whenever it or the source changes: the cabinets and pixels are the source's.
-  // The first read asks for no source and learns the team's; saying so back is not a reason to read again.
+  // The topic: from what this session already read, or off the platform — on a first visit, a new
+  // source (the cabinets and pixels are the source's), or «Оновити з платформи». The first read asks
+  // for no source and learns the team's; saying so back is not a reason to read again.
   const loaded = useRef('');
+  const refreshed = useRef(0);
   useEffect(() => {
-    if (topicId !== null && loaded.current === `${topicId}|${source}`) return;
-    setData(null);
+    const forced = refresh !== refreshed.current;
+    refreshed.current = refresh;
+    if (!forced && topicId !== null && loaded.current === cacheKey(topicId, source)) return;
     setDataNote('');
-    if (topicId === null) return;
+    if (topicId === null) { setData(null); return; }
+    const held = forced ? undefined : topicCache.get(cacheKey(topicId, source));
+    if (held !== undefined) {
+      loaded.current = cacheKey(topicId, held.source);
+      setData(held);
+      if (source === '') setSource(held.source);
+      return;
+    }
+    if (!forced) setData(null);
     let stale = false;
     fetchLaunchTopic(topicId, source)
       .then(next => {
         if (stale) return;
-        loaded.current = `${topicId}|${next.source}`;
+        topicCache.set(cacheKey(topicId, next.source), next);
+        if (source === '') topicCache.set(cacheKey(topicId, ''), next);
+        loaded.current = cacheKey(topicId, next.source);
         setData(next);
         if (source === '') setSource(next.source);
       })
       .catch(e => { if (!stale) setDataNote((e as Error).message); });
     return () => { stale = true; };
-  }, [topicId, source]);
+  }, [topicId, source, refresh]);
+  const reading = topicId !== null && dataNote === '' && (data === null || data.topic.id !== topicId);
 
   // A new topic, a new source or a new set starts the form from that set's defaults.
   useEffect(() => {
@@ -102,6 +151,23 @@ export function LaunchPanel({ project, translator }: Props) {
     const defaults = set?.defaults ?? (chosen === NEW_SET ? data.newSet : null);
     setForm(defaults === null ? null : { ...defaults, source: data.source, theme: themeId(data, defaults.theme) });
   }, [data, chosen]);
+
+  // A launch made a campaign: what this session read of the topic is behind the platform now — read it
+  // again next time it is opened. The form on screen stays, so a second country is one select and one press.
+  useEffect(() => {
+    if (run.phase !== 'done' || topicId === null) return;
+    for (const key of [...topicCache.keys()]) if (key.startsWith(`${topicId}|`)) topicCache.delete(key);
+  }, [run.phase, topicId]);
+
+  /** The cabinet, and with it the pixel and identity of its business. */
+  const pickAccount = (account: string | null): void => {
+    if (data === null) return;
+    setForm(f => (f === null ? f : { ...f, account, ...forCabinet(f, account, data, data.identity) }));
+  };
+  const business = data?.accounts.find(a => a.id === form?.account)?.business ?? '';
+  /** The pixels and identities the picked cabinet sees: its business's, or every one before a cabinet is picked. */
+  const ownBusiness = <T extends { business: string }>(list: readonly T[]): T[] =>
+    business === '' ? [...list] : list.filter(x => x.business === '' || x.business === business);
 
   const set = data?.sets.find(s => setValue(s.termGroup.id, s.article.id) === chosen) ?? null;
   const pair = set !== null ? { termGroupId: set.termGroup.id, postId: set.article.id }
@@ -112,7 +178,7 @@ export function LaunchPanel({ project, translator }: Props) {
     const out: string[] = [];
     if (full === null) return ['сет'];
     if (full.account === null) out.push('кабінет');
-    if (full.country === null) out.push('країну');
+    if (full.countries.length === 0) out.push('країну');
     if (full.pixel === null) out.push('піксель');
     return out;
   }, [full]);
@@ -125,7 +191,7 @@ export function LaunchPanel({ project, translator }: Props) {
     const names = new Set(ticked.map(r => r.name));
     const photos = new Set(ticked.map(r => r.photoId));
     const launch = (plan: ReturnType<typeof planBatch> | null, from: Project): void => run.start({
-      plan, duration: from.duration, fitToVoice: from.fitToVoice, topicId, form: full, disk,
+      plan, duration: from.duration, fitToVoice: from.fitToVoice, topicId, form: full, disk: disk.map(d => ({ id: d.id, name: d.name, size: d.size, script: d.script })),
       sources: from.photos.filter(p => photos.has(p.id)).map(p => ({ name: p.name, image: p.image })),
     });
     // Only files from disk: nothing to translate or render.
@@ -140,21 +206,43 @@ export function LaunchPanel({ project, translator }: Props) {
   };
 
   const busy = run.running || translator.busy;
-  const canLaunch = !busy && staging.length === 0 && data?.missing == null && missing.length === 0 && total > 0;
+  const listening = disk.some(d => d.words === 'busy');
+  const canLaunch = !busy && staging.length === 0 && !listening && data?.missing == null && missing.length === 0 && total > 0;
   const name = (list: { id: string; name?: string; title?: string }[] | undefined, id: string | null): string =>
     id === null ? '—' : list?.find(x => x.id === id)?.name ?? list?.find(x => x.id === id)?.title ?? id;
-  const countryName = (code: string | null): string => (code === null ? '—' : data?.countries.find(c => c.code === code)?.name ?? code);
+  const countryName = (code: string): string => (code.toLowerCase() === 'all' ? 'All' : data?.countries.find(c => c.code === code)?.name ?? code);
+  const geo = (codes: readonly string[]): string => (codes.length === 0 ? '—' : codes.map(countryName).join(', '));
+  const pageName = (id: string | null): string => (id === null ? 'default' : name(data?.pages, id));
+  // A topic the search box names exactly is the topic; anything else is still being typed.
+  const pickTopic = (text: string): void => {
+    setTopicQuery(text);
+    const hit = topics?.find(t => topicLabel(t, topics) === text.trim());
+    if (hit === undefined || hit.id === topicId) return;
+    setTopicId(hit.id);
+    setChosen('');
+    setSource('');
+  };
 
   return (
     <>
       <div className="group">
         <div className="lab">Топік</div>
-        <select value={topicId ?? ''} disabled={busy} onChange={e => { setTopicId(e.target.value === '' ? null : Number(e.target.value)); setChosen(''); setSource(''); }}>
-          <option value="" disabled>{topics === null ? 'Читаю топіки…' : '— оберіть топік —'}</option>
-          {topics?.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
+        <input
+          type="search" list="launch-topics" value={topicQuery} disabled={busy}
+          placeholder={topics === null ? 'Читаю топіки…' : 'почніть вводити назву топіка'}
+          onChange={e => pickTopic(e.target.value)}
+        />
+        <datalist id="launch-topics">
+          {topics?.map(t => <option key={t.id} value={topicLabel(t, topics)} />)}
+        </datalist>
         {topicsNote !== '' ? <div className="error">{topicsNote}</div> : null}
-        {topicId !== null && data === null && dataNote === '' ? <div className="note">Читаю топік з платформи…</div> : null}
+        {reading ? <div className="note">Читаю топік з платформи…</div> : null}
+        {topicId !== null && !reading ? (
+          <button type="button" className="link launch-refresh" disabled={busy} title="Прочитати топік з платформи ще раз — якщо щось змінили в адмінці"
+            onClick={() => { loadTopics(); setRefresh(n => n + 1); }}>
+            ↻ Оновити з платформи
+          </button>
+        ) : null}
         {dataNote !== '' ? <div className="error">{dataNote}</div> : null}
         {data?.missing != null ? <div className="warn">{data.missing} або через Claude.</div> : null}
       </div>
@@ -190,17 +278,33 @@ export function LaunchPanel({ project, translator }: Props) {
         <>
           <div className="group">
             <div className="lab">Кабінет</div>
-            <select value={form.account ?? ''} disabled={busy} onChange={e => patch({ account: e.target.value === '' ? null : e.target.value })}>
+            <select value={form.account ?? ''} disabled={busy} onChange={e => pickAccount(e.target.value === '' ? null : e.target.value)}>
               <option value="">— оберіть кабінет —</option>
               {data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </div>
           <div className="group">
-            <div className="lab">Країна</div>
-            <select value={form.country ?? ''} disabled={busy} onChange={e => patch({ country: e.target.value === '' ? null : e.target.value })}>
-              <option value="">— оберіть країну —</option>
-              {form.country !== null && !data.countries.some(c => c.code === form.country) ? <option value={form.country}>{form.country}</option> : null}
-              {data.countries.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+            <div className="lab">Країни<span className="val">{form.countries.length > 1 ? 'мультигео' : ''}</span></div>
+            {form.countries.length === 0 ? null : (
+              <div className="launch-chips">
+                {form.countries.map(code => (
+                  <span className="launch-chip" key={code}>
+                    {countryName(code)}
+                    <button type="button" className="link" title="Прибрати країну" disabled={busy}
+                      onClick={() => patch({ countries: form.countries.filter(c => c !== code) })}>✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <select value="" disabled={busy} onChange={e => {
+              const code = e.target.value;
+              if (code === '') return;
+              // All is every country: it replaces the list, and a country after it replaces All.
+              patch({ countries: code === 'All' ? ['All'] : [...form.countries.filter(c => c !== 'All' && c !== code), code] });
+            }}>
+              <option value="">{form.countries.length === 0 ? '— оберіть країну —' : '+ ще країна'}</option>
+              <option value="All">All — усі країни</option>
+              {data.countries.filter(c => !form.countries.includes(c.code)).map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
             </select>
           </div>
           <div className="group">
@@ -213,12 +317,23 @@ export function LaunchPanel({ project, translator }: Props) {
               </label>
             </div>
           </div>
+          <div className="group">
+            <div className="lab">Піксель{business === '' ? null : <span className="val">пікселі бізнесу кабінету</span>}</div>
+            <select className={form.pixel === null ? 'launch-needed' : ''} value={form.pixel ?? ''} disabled={busy}
+              onChange={e => patch({ pixel: e.target.value === '' ? null : e.target.value })}>
+              <option value="">— оберіть піксель —</option>
+              {form.pixel !== null && !ownBusiness(data.pixels).some(p => p.id === form.pixel)
+                ? <option value={form.pixel}>{name(data.pixels, form.pixel)} · інший бізнес</option> : null}
+              {ownBusiness(data.pixels).map(p => <option key={p.id} value={p.id}>{p.name} · {p.id}</option>)}
+            </select>
+            {form.pixel === null ? <div className="warn">Пікселя немає — оберіть його самі.</div> : null}
+          </div>
 
           <div className="group launch-rest">
             <div className="lab">Решта</div>
             {!editing ? (
               <div className="launch-compact">
-                {form.source === 'tiktok' ? 'TikTok' : 'Facebook'} · language {form.language} · RSOC {form.rsoc_count} · піксель {name(data.pixels, form.pixel)} ·
+                {form.source === 'tiktok' ? 'TikTok' : 'Facebook'} · FP {pageName(form.page)} · language {form.language} · RSOC {form.rsoc_count} ·
                 тема {name(data.themes, form.theme)} · headline «{form.headline}» · ротація {form.keyword_rotation ? 'on' : 'off'} ·
                 вік {listText(form.age)} · стать {form.gender} · пристрої {listText(form.devices)} · ОС {listText(form.os)} ·
                 {form.end_date === null ? ' без end date' : ` end date ${form.end_date}`} · розклад: завжди
@@ -238,10 +353,12 @@ export function LaunchPanel({ project, translator }: Props) {
                     {data.rsocCounts.map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </label>
-                <label>Піксель
-                  <select value={form.pixel ?? ''} disabled={busy} onChange={e => patch({ pixel: e.target.value === '' ? null : e.target.value })}>
-                    <option value="">— оберіть піксель —</option>
-                    {data.pixels.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                <label>FP (identity)
+                  <select value={form.page ?? ''} disabled={busy} onChange={e => patch({ page: e.target.value === '' ? null : e.target.value })}>
+                    <option value="">default</option>
+                    {form.page !== null && !ownBusiness(data.pages).some(p => p.id === form.page)
+                      ? <option value={form.page}>{pageName(form.page)} · інший бізнес</option> : null}
+                    {ownBusiness(data.pages).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </label>
                 <label>Тема
@@ -289,14 +406,26 @@ export function LaunchPanel({ project, translator }: Props) {
           </label>
         ))}
         {disk.map(d => (
-          <div className="launch-file" key={d.id}>
-            <span>💾 {d.name} <span className="muted">· {mb(d.size)} МБ</span></span>
-            <button type="button" className="link" title="Прибрати з кампанії" disabled={busy} onClick={() => setDisk(list => list.filter(x => x.id !== d.id))}>✕</button>
+          <div className="launch-disk" key={d.id}>
+            <div className="launch-file">
+              <span>💾 {d.name} <span className="muted">· {mb(d.size)} МБ</span></span>
+              <button type="button" className="link" title="Прибрати з кампанії" disabled={busy}
+                onClick={() => { known.current.delete(d.id); setDisk(list => list.filter(x => x.id !== d.id)); }}>✕</button>
+            </div>
+            {d.words === 'busy' ? <div className="note">Розпізнаю текст…</div> : (
+              <>
+                <textarea
+                  className="launch-script" rows={3} value={d.script} disabled={busy} placeholder="Текст креативу (ad_script)"
+                  onChange={e => setDisk(list => list.map(x => (x.id === d.id ? { ...x, script: e.target.value } : x)))}
+                />
+                {d.words === 'failed' ? <div className="warn">Текст не розпізнався — впишіть самі. {d.note}</div> : null}
+              </>
+            )}
           </div>
         ))}
         {staging.map((name, i) => <div className="note" key={name + i}>Беру {name}…</div>)}
         <FilePicker className="wide launch-add" accept="video/mp4,.mp4" multiple onPick={addFiles}>+ mp4 з диска</FilePicker>
-        <div className="note">або перетягніть mp4 сюди. Мови в одній кампанії можуть бути різні.</div>
+        <div className="note">або перетягніть mp4 сюди — текст кожного розпізнається сам, перевірте його. Мови в одній кампанії можуть бути різні.</div>
         {diskNote !== '' ? <div className="error">{diskNote}</div> : null}
       </div>
 
@@ -307,6 +436,7 @@ export function LaunchPanel({ project, translator }: Props) {
         </button>
         {data !== null && form !== null && missing.length > 0 ? <div className="note">Щоб залити, оберіть {missing.join(', ')}.</div> : null}
         {total === 0 ? <div className="note">Відмітьте хоча б один рендер або додайте mp4 з диска.</div> : null}
+        {listening ? <div className="note">Чекаю, поки розпізнається текст креативів з диска.</div> : null}
         {translator.busy || translator.failed ? <div className={translator.failed ? 'error' : 'note'}>{translator.note}</div> : null}
       </div>
 
@@ -320,7 +450,7 @@ export function LaunchPanel({ project, translator }: Props) {
               <dt>Топік</dt><dd>{data.topic.name}</dd>
               <dt>Сет</dt><dd>{data.termGroups.find(g => g.id === full.termGroupId)?.name} + {data.articles.find(a => a.id === full.postId)?.title}</dd>
               <dt>Кабінет</dt><dd>{name(data.accounts, full.account)}</dd>
-              <dt>Країна</dt><dd>{countryName(full.country)}</dd>
+              <dt>{full.countries.length > 1 ? 'Країни' : 'Країна'}</dt><dd>{geo(full.countries)}</dd>
               <dt>Бюджет · бід</dt><dd>${full.budget}/день · {full.bid}</dd>
               <dt>Старт</dt><dd>{full.launch_tomorrow ? 'завтра' : 'одразу після апруву'}</dd>
               <dt>Креативи</dt>
@@ -329,7 +459,8 @@ export function LaunchPanel({ project, translator }: Props) {
                 {disk.length > 0 ? `${ticked.length > 0 ? ' + ' : ''}${disk.length} з диска` : ''}
                 {ticked.length > 0 ? <div className="muted">рендер — лише того, що змінилося з останнього рендеру</div> : null}
               </dd>
-              <dt>Піксель</dt><dd>{name(data.pixels, full.pixel)}</dd>
+              <dt>Піксель</dt><dd>{name(data.pixels, full.pixel)} · {full.pixel}</dd>
+              <dt>FP</dt><dd>{pageName(full.page)}</dd>
               <dt>Решта</dt>
               <dd className="launch-compact">
                 {full.source === 'tiktok' ? 'TikTok' : 'Facebook'} · language {full.language} · RSOC {full.rsoc_count} · тема {name(data.themes, full.theme)} ·
