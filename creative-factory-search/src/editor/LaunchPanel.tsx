@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { batchNames, keepItems, planBatch } from '../core/batch.ts';
 import { LOCALE_NAMES } from '../core/locales.ts';
 import { FLAGS } from '../core/phrasebook.ts';
-import { forCabinet, type FormDefaults, type LaunchForm } from '../core/quick-launch.ts';
+import { campaignWarnings, forCabinet, nextCampaign, TEAM_DEFAULTS, type FormDefaults, type LaunchCampaign, type LaunchForm } from '../core/quick-launch.ts';
 import type { LocaleId, Project } from '../core/types.ts';
 import { FilePicker } from './FilePicker.tsx';
 import { useLaunch } from './launch.ts';
@@ -41,14 +41,30 @@ interface DiskFile extends StagedFile {
   note: string;
 }
 
+/**
+ * A campaign in the form: a cabinet with its budget and bid, and the pixel and
+ * identity fitted to its business. `made` once a launch built it and another
+ * row of the same launch failed: it is not sent again, so «Спробувати ще» makes
+ * only what is missing.
+ */
+interface Row extends LaunchCampaign {
+  key: number;
+  made: boolean;
+}
+
+const campaignOf = (row: Row): LaunchCampaign => ({ account: row.account, budget: row.budget, bid: row.bid, pixel: row.pixel, page: row.page });
+/** A number as the buyer types it, with a comma or a point. */
+const typed = (text: string): number => Number(text.replace(',', '.'));
+
 /** A list typed as one line: `All`, or `18-24, 25-34`. */
 const listText = (list: readonly string[]): string => list.join(', ');
 const textList = (text: string): string[] => text.split(',').map(s => s.trim()).filter(s => s !== '');
 
 /**
  * The launch: a topic off the platform, a set — a term group and an article —
- * and the fields, filled from the set's latest campaign; one press, a modal to
- * read it all again, and a new campaign. Nothing is kept anywhere: the next
+ * and the fields, filled from the set's latest campaign; a row per campaign —
+ * a cabinet, its budget and bid, the bids a ladder; one press, a modal to read
+ * it all again, and the new campaigns. Nothing is kept anywhere: the next
  * press reads the platform again. The form stays as it is after a launch, so
  * the same set to a second country is one select and one press.
  */
@@ -100,6 +116,14 @@ export function LaunchPanel({ project, translator }: Props) {
   const [newGroup, setNewGroup] = useState<number | null>(null);
   const [newPost, setNewPost] = useState<number | null>(null);
   const [form, setForm] = useState<FormDefaults | null>(null);
+  const [rows, setRows] = useState<Row[]>([]);
+  const nextKey = useRef(0);
+  /** How much a row added bids over the last: the team's, until the buyer types another. */
+  const [step, setStep] = useState(String(TEAM_DEFAULTS.bid_step));
+  /** The buyer chose the cabinet's default identity: a cabinet picked after keeps it, not the team's. */
+  const [plainPage, setPlainPage] = useState(false);
+  /** The rows the last press sent, by key, in the order the server numbers them. */
+  const sent = useRef<number[]>([]);
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
@@ -144,50 +168,94 @@ export function LaunchPanel({ project, translator }: Props) {
   }, [topicId, source, refresh]);
   const reading = topicId !== null && dataNote === '' && (data === null || data.topic.id !== topicId);
 
-  // A new topic, a new source or a new set starts the form from that set's defaults.
+  // A new topic, a new source or a new set starts the form from that set's defaults, and one row with no cabinet.
+  // The same one read again — «Оновити з платформи», a launch — keeps the rows: a row already made stays made,
+  // and is not sent a second time.
+  const rowsFor = useRef('');
   useEffect(() => {
-    if (data === null) { setForm(null); return; }
+    if (data === null) { setForm(null); setRows([]); rowsFor.current = ''; return; }
     const set = data.sets.find(s => setValue(s.termGroup.id, s.article.id) === chosen);
     const defaults = set?.defaults ?? (chosen === NEW_SET ? data.newSet : null);
     setForm(defaults === null ? null : { ...defaults, source: data.source, theme: themeId(data, defaults.theme) });
+    const same = `${data.topic.id}|${data.source}|${chosen}`;
+    if (defaults !== null && rowsFor.current === same) return;
+    rowsFor.current = defaults === null ? '' : same;
+    setRows(defaults === null ? [] : [{ key: nextKey.current++, account: null, budget: defaults.budget, bid: defaults.bid, pixel: defaults.pixel, page: defaults.page, made: false }]);
+    setStep(String(data.bidStep));
+    setPlainPage(false);
   }, [data, chosen]);
 
-  // A launch made a campaign: what this session read of the topic is behind the platform now — read it
+  // A launch made campaigns: what this session read of the topic is behind the platform now — read it
   // again next time it is opened. The form on screen stays, so a second country is one select and one press.
   useEffect(() => {
-    if (run.phase !== 'done' || topicId === null) return;
+    if ((run.phase !== 'done' && run.phase !== 'failed') || topicId === null || run.launch?.result == null) return;
     for (const key of [...topicCache.keys()]) if (key.startsWith(`${topicId}|`)) topicCache.delete(key);
-  }, [run.phase, topicId]);
+  }, [run.phase, run.launch, topicId]);
 
-  /** The cabinet, and with it the pixel and identity of its business. */
-  const pickAccount = (account: string | null): void => {
-    if (data === null) return;
-    setForm(f => (f === null ? f : { ...f, account, ...forCabinet(f, account, data, data.identity) }));
+  // A launch that made some campaigns and not others: the made rows are not sent again. One that made them
+  // all leaves every row to send again — the same rows to another country, say.
+  useEffect(() => {
+    if (run.phase === 'done') { setRows(list => list.map(r => (r.made ? { ...r, made: false } : r))); return; }
+    if (run.phase !== 'failed' || run.launch === null) return;
+    const finished = new Set(run.launch.finished);
+    const made = new Set(run.lines.filter(l => l.campaign !== undefined && finished.has(l.label)).map(l => sent.current[l.campaign!]));
+    setRows(list => list.map(r => (made.has(r.key) ? { ...r, made: true } : r)));
+  }, [run.phase, run.launch, run.lines]);
+
+  /** A row's pixel and identity: the form's, fitted to its cabinet's business. */
+  const fit = (row: Row, shared: Pick<FormDefaults, 'pixel' | 'page'>, plain: boolean): Row =>
+    data === null ? row : { ...row, ...forCabinet(shared, row.account, data, plain ? '' : data.identity) };
+  const patchRow = (key: number, change: (row: Row) => Row): void => setRows(list => list.map(r => (r.key === key ? change(r) : r)));
+  /** A row at the end, its bid a step over the last row's. */
+  const addRow = (account: string | null): void => {
+    if (form === null) return;
+    setRows(list => [...list, fit({
+      key: nextKey.current++, account, ...nextCampaign(list, form, typed(step) || 0), pixel: form.pixel, page: form.page, made: false,
+    }, form, plainPage)]);
   };
-  const business = data?.accounts.find(a => a.id === form?.account)?.business ?? '';
-  /** The pixels and identities the picked cabinet sees: its business's, or every one before a cabinet is picked. */
-  const ownBusiness = <T extends { business: string }>(list: readonly T[]): T[] =>
-    business === '' ? [...list] : list.filter(x => x.business === '' || x.business === business);
+  /** The pixel or identity of every campaign: the one picked, or the same name in each cabinet's business. */
+  const pickShared = (change: Partial<Pick<FormDefaults, 'pixel' | 'page'>>, plain = plainPage): void => {
+    if (form === null) return;
+    const shared = { pixel: form.pixel, page: form.page, ...change };
+    setForm({ ...form, ...change });
+    setPlainPage(plain);
+    setRows(list => list.map(r => (r.made ? r : fit(r, shared, plain))));
+  };
+  const pending = rows.filter(r => !r.made);
+  /** Why a row's campaign was not made by the last press, when it was sent and failed. */
+  const rowFailure = (key: number): string | undefined => {
+    if (run.phase !== 'failed' || run.launch === null) return undefined;
+    const line = run.lines.find(l => l.campaign !== undefined && sent.current[l.campaign] === key);
+    return line === undefined ? undefined : run.launch.errors.find(e => e.name === line.label)?.message;
+  };
+  /** What a row still lacks, said on the row. */
+  const rowNeeds = (row: Row): string | null =>
+    row.account === null ? 'оберіть кабінет' : !(row.budget > 0) ? 'бюджет має бути більшим за нуль' : !(row.bid > 0) ? 'бід має бути більшим за нуль' : null;
 
   const set = data?.sets.find(s => setValue(s.termGroup.id, s.article.id) === chosen) ?? null;
   const pair = set !== null ? { termGroupId: set.termGroup.id, postId: set.article.id }
     : chosen === NEW_SET && newGroup !== null && newPost !== null ? { termGroupId: newGroup, postId: newPost } : null;
-  const full: LaunchForm | null = form === null || pair === null ? null : { ...form, ...pair };
+  // The form's own budget, bid, pixel and identity are where rows start from; what goes is the rows'.
+  const { budget: _budget, bid: _bid, pixel: _pixel, page: _page, ...shared } = form ?? { budget: 0, bid: 0, pixel: null, page: null };
+  const full: LaunchForm | null = form === null || pair === null ? null : { ...(shared as Omit<FormDefaults, 'budget' | 'bid' | 'pixel' | 'page'>), ...pair, campaigns: pending.map(campaignOf) };
 
   const missing = useMemo(() => {
     const out: string[] = [];
     if (full === null) return ['сет'];
-    if (full.account === null) out.push('кабінет');
+    if (full.campaigns.length === 0 || full.campaigns.some(c => c.account === null)) out.push('кабінет');
     if (full.countries.length === 0) out.push('країну');
-    if (full.pixel === null) out.push('піксель');
+    if (full.campaigns.some(c => c.pixel === null)) out.push('піксель');
+    if (full.campaigns.some(c => !(c.budget > 0) || !(c.bid > 0))) out.push('бюджет і бід');
     return out;
   }, [full]);
+  const warnings = full === null ? [] : campaignWarnings(full.campaigns);
 
   const patch = (change: Partial<FormDefaults>): void => setForm(f => (f === null ? f : { ...f, ...change }));
 
   const go = (): void => {
     setConfirming(false);
     if (full === null || topicId === null) return;
+    sent.current = pending.map(r => r.key);
     const names = new Set(ticked.map(r => r.name));
     const photos = new Set(ticked.map(r => r.photoId));
     const launch = (plan: ReturnType<typeof planBatch> | null, from: Project): void => run.start({
@@ -213,6 +281,8 @@ export function LaunchPanel({ project, translator }: Props) {
   const countryName = (code: string): string => (code.toLowerCase() === 'all' ? 'All' : data?.countries.find(c => c.code === code)?.name ?? code);
   const geo = (codes: readonly string[]): string => (codes.length === 0 ? '—' : codes.map(countryName).join(', '));
   const pageName = (id: string | null): string => (id === null ? 'default' : name(data?.pages, id));
+  const accountName = (id: string | null): string => (id === null ? '—' : name(data?.accounts, id));
+  const budgets = full?.campaigns.reduce((sum, c) => sum + c.budget, 0) ?? 0;
   // A topic the search box names exactly is the topic; anything else is still being typed.
   const pickTopic = (text: string): void => {
     setTopicQuery(text);
@@ -277,11 +347,38 @@ export function LaunchPanel({ project, translator }: Props) {
       {data === null || form === null ? null : (
         <>
           <div className="group">
-            <div className="lab">Кабінет</div>
-            <select value={form.account ?? ''} disabled={busy} onChange={e => pickAccount(e.target.value === '' ? null : e.target.value)}>
-              <option value="">— оберіть кабінет —</option>
-              {data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
+            <div className="lab">Кампанії<span className="val">{rows.length > 1 ? `${rows.length} · по кабінету й біду на кожну` : 'кабінет, бюджет, бід'}</span></div>
+            {rows.map((row, i) => (
+              <div className={'launch-campaign' + (row.made ? ' made' : '')} key={row.key}>
+                <div className="launch-campaign-row">
+                  <span className="launch-campaign-n">{i + 1}</span>
+                  <select className={row.account === null ? 'launch-needed' : ''} value={row.account ?? ''} disabled={busy || row.made}
+                    onChange={e => { const account = e.target.value === '' ? null : e.target.value; patchRow(row.key, r => fit({ ...r, account }, form, plainPage)); }}>
+                    <option value="">— кабінет —</option>
+                    {data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                  <label>$<input type="text" inputMode="decimal" title="Бюджет на день" value={String(row.budget)} disabled={busy || row.made}
+                    onChange={e => patchRow(row.key, r => ({ ...r, budget: typed(e.target.value) }))} /></label>
+                  <label>бід<input type="text" inputMode="decimal" value={String(row.bid)} disabled={busy || row.made}
+                    onChange={e => patchRow(row.key, r => ({ ...r, bid: typed(e.target.value) }))} /></label>
+                  <button type="button" className="link" title="Ще кампанія в цьому кабінеті, бід на крок вище" disabled={busy || row.account === null}
+                    onClick={() => addRow(row.account)}>+</button>
+                  <button type="button" className="link" title="Прибрати кампанію" disabled={busy}
+                    onClick={() => setRows(list => list.filter(r => r.key !== row.key))}>✕</button>
+                </div>
+                <div className="launch-campaign-note">
+                  {row.made ? '✓ створено — повторно не піде' : rowNeeds(row) !== null ? <span className="warn">{rowNeeds(row)}</span> : row.pixel === null
+                    ? <span className="warn">у бізнесі кабінету немає пікселя «{name(data.pixels, form.pixel)}» — оберіть інший піксель або приберіть кампанію</span>
+                    : <>піксель {name(data.pixels, row.pixel)} · {row.pixel} · FP {pageName(row.page)}</>}
+                  {rowFailure(row.key) === undefined ? null : <div className="error">✕ не створено: {rowFailure(row.key)}</div>}
+                </div>
+              </div>
+            ))}
+            <div className="row launch-ladder">
+              <button type="button" className="launch-add" disabled={busy} onClick={() => addRow(null)}>+ кабінет</button>
+              <label>крок біда<input type="text" inputMode="decimal" value={step} disabled={busy} onChange={e => setStep(e.target.value)} /></label>
+            </div>
+            {warnings.map(w => <div className="warn" key={w}>{w}</div>)}
           </div>
           <div className="group">
             <div className="lab">Країни<span className="val">{form.countries.length > 1 ? 'мультигео' : ''}</span></div>
@@ -308,23 +405,17 @@ export function LaunchPanel({ project, translator }: Props) {
             </select>
           </div>
           <div className="group">
-            <div className="row launch-money">
-              <label>Бюджет<input type="text" inputMode="decimal" value={String(form.budget)} disabled={busy} onChange={e => patch({ budget: Number(e.target.value.replace(',', '.')) })} /></label>
-              <label>Бід<input type="text" inputMode="decimal" value={String(form.bid)} disabled={busy} onChange={e => patch({ bid: Number(e.target.value.replace(',', '.')) })} /></label>
-              <label className="check launch-tomorrow">
-                <input type="checkbox" checked={form.launch_tomorrow} disabled={busy} onChange={e => patch({ launch_tomorrow: e.target.checked })} />
-                Launch tomorrow
-              </label>
-            </div>
+            <label className="check launch-tomorrow">
+              <input type="checkbox" checked={form.launch_tomorrow} disabled={busy} onChange={e => patch({ launch_tomorrow: e.target.checked })} />
+              Launch tomorrow
+            </label>
           </div>
           <div className="group">
-            <div className="lab">Піксель{business === '' ? null : <span className="val">пікселі бізнесу кабінету</span>}</div>
+            <div className="lab">Піксель<span className="val">кожна кампанія — однойменний свого бізнесу</span></div>
             <select className={form.pixel === null ? 'launch-needed' : ''} value={form.pixel ?? ''} disabled={busy}
-              onChange={e => patch({ pixel: e.target.value === '' ? null : e.target.value })}>
+              onChange={e => pickShared({ pixel: e.target.value === '' ? null : e.target.value })}>
               <option value="">— оберіть піксель —</option>
-              {form.pixel !== null && !ownBusiness(data.pixels).some(p => p.id === form.pixel)
-                ? <option value={form.pixel}>{name(data.pixels, form.pixel)} · інший бізнес</option> : null}
-              {ownBusiness(data.pixels).map(p => <option key={p.id} value={p.id}>{p.name} · {p.id}</option>)}
+              {data.pixels.map(p => <option key={p.id} value={p.id}>{p.name} · {p.id}</option>)}
             </select>
             {form.pixel === null ? <div className="warn">Пікселя немає — оберіть його самі.</div> : null}
           </div>
@@ -333,7 +424,7 @@ export function LaunchPanel({ project, translator }: Props) {
             <div className="lab">Решта</div>
             {!editing ? (
               <div className="launch-compact">
-                {form.source === 'tiktok' ? 'TikTok' : 'Facebook'} · FP {pageName(form.page)} · language {form.language} · RSOC {form.rsoc_count} ·
+                {form.source === 'tiktok' ? 'TikTok' : 'Facebook'} · FP {plainPage ? 'default' : form.page === null ? (data.identity || 'default') : pageName(form.page)} · language {form.language} · RSOC {form.rsoc_count} ·
                 тема {name(data.themes, form.theme)} · headline «{form.headline}» · ротація {form.keyword_rotation ? 'on' : 'off'} ·
                 вік {listText(form.age)} · стать {form.gender} · пристрої {listText(form.devices)} · ОС {listText(form.os)} ·
                 {form.end_date === null ? ' без end date' : ` end date ${form.end_date}`} · розклад: завжди
@@ -353,12 +444,10 @@ export function LaunchPanel({ project, translator }: Props) {
                     {data.rsocCounts.map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </label>
-                <label>FP (identity)
-                  <select value={form.page ?? ''} disabled={busy} onChange={e => patch({ page: e.target.value === '' ? null : e.target.value })}>
+                <label>FP (identity) — кожна кампанія бере FP свого бізнесу
+                  <select value={form.page ?? ''} disabled={busy} onChange={e => { const page = e.target.value === '' ? null : e.target.value; pickShared({ page }, page === null); }}>
                     <option value="">default</option>
-                    {form.page !== null && !ownBusiness(data.pages).some(p => p.id === form.page)
-                      ? <option value={form.page}>{pageName(form.page)} · інший бізнес</option> : null}
-                    {ownBusiness(data.pages).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    {data.pages.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </label>
                 <label>Тема
@@ -445,13 +534,11 @@ export function LaunchPanel({ project, translator }: Props) {
       {!confirming || full === null || data === null ? null : (
         <div className="modal-back" onClick={() => setConfirming(false)}>
           <div className="modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
-            <h3>Залити нову кампанію?</h3>
+            <h3>{full.campaigns.length === 1 ? 'Залити нову кампанію?' : `Залити ${full.campaigns.length} нові кампанії?`}</h3>
             <dl className="launch-summary">
               <dt>Топік</dt><dd>{data.topic.name}</dd>
               <dt>Сет</dt><dd>{data.termGroups.find(g => g.id === full.termGroupId)?.name} + {data.articles.find(a => a.id === full.postId)?.title}</dd>
-              <dt>Кабінет</dt><dd>{name(data.accounts, full.account)}</dd>
               <dt>{full.countries.length > 1 ? 'Країни' : 'Країна'}</dt><dd>{geo(full.countries)}</dd>
-              <dt>Бюджет · бід</dt><dd>${full.budget}/день · {full.bid}</dd>
               <dt>Старт</dt><dd>{full.launch_tomorrow ? 'завтра' : 'одразу після апруву'}</dd>
               <dt>Креативи</dt>
               <dd>
@@ -459,8 +546,6 @@ export function LaunchPanel({ project, translator }: Props) {
                 {disk.length > 0 ? `${ticked.length > 0 ? ' + ' : ''}${disk.length} з диска` : ''}
                 {ticked.length > 0 ? <div className="muted">рендер — лише того, що змінилося з останнього рендеру</div> : null}
               </dd>
-              <dt>Піксель</dt><dd>{name(data.pixels, full.pixel)} · {full.pixel}</dd>
-              <dt>FP</dt><dd>{pageName(full.page)}</dd>
               <dt>Решта</dt>
               <dd className="launch-compact">
                 {full.source === 'tiktok' ? 'TikTok' : 'Facebook'} · language {full.language} · RSOC {full.rsoc_count} · тема {name(data.themes, full.theme)} ·
@@ -468,6 +553,20 @@ export function LaunchPanel({ project, translator }: Props) {
                 пристрої {listText(full.devices)} · ОС {listText(full.os)}{full.end_date === null ? ' · без end date' : ` · end date ${full.end_date}`}
               </dd>
             </dl>
+            <table className="launch-campaigns">
+              <thead><tr><th>#</th><th>Кабінет</th><th>Піксель</th><th>FP</th><th>Бюджет</th><th>Бід</th></tr></thead>
+              <tbody>
+                {full.campaigns.map((c, i) => (
+                  <tr key={i}>
+                    <td>{i + 1}</td><td>{accountName(c.account)}</td><td>{name(data.pixels, c.pixel)} · {c.pixel}</td>
+                    <td>{pageName(c.page)}</td><td>${c.budget}</td><td>{c.bid}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr><td colSpan={4}>{full.campaigns.length === 1 ? '1 кампанія' : `${full.campaigns.length} кампаній`}, разом</td><td colSpan={2}>${Math.round(budgets * 100) / 100}/день</td></tr></tfoot>
+            </table>
+            {warnings.map(w => <div className="warn" key={w}>{w}</div>)}
+            {rows.some(r => r.made) ? <div className="note">Кампанії, уже створені минулим заливом, повторно не підуть.</div> : null}
             <div className="modal-actions">
               <button onClick={() => setConfirming(false)}>Скасувати</button>
               <button className="primary" onClick={go}>Підтвердити</button>
@@ -493,6 +592,7 @@ function Progress({ run, onRetry }: { run: ReturnType<typeof useLaunch>; onRetry
   const render = run.render;
   const launch = run.launch;
   const failed = launch?.errors[0];
+  const errorOf = (label: string) => launch?.errors.find(e => e.name === label);
   const locales = [...new Set(run.rendering.map(r => r.locale))];
   /** How far one language's files are, 0 to 1: a finished file is whole, one in flight is its frames. */
   const share = (locale: LocaleId): number => {
@@ -523,7 +623,7 @@ function Progress({ run, onRetry }: { run: ReturnType<typeof useLaunch>; onRetry
         <ul className="launch-steps">
           {run.lines.map(line => {
             const done = line.reused || (launch?.finished.includes(line.label) ?? false);
-            const lost = failed?.name === line.label;
+            const lost = errorOf(line.label) !== undefined;
             const active = !done && !lost && launch?.state === 'running' && launch.current === line.label;
             const bytes = launch?.progress[line.label];
             return (
@@ -531,7 +631,7 @@ function Progress({ run, onRetry }: { run: ReturnType<typeof useLaunch>; onRetry
                 <span className="step-mark">{done ? '✓' : lost ? '✕' : active ? '…' : '·'}</span>
                 {line.label}
                 {active && bytes !== undefined ? <span className="muted">{mb(bytes.done)} / {mb(bytes.total)} МБ · {Math.round((bytes.done / bytes.total) * 100)}%</span> : null}
-                {lost ? <div className="error">{failed!.message}</div> : null}
+                {lost ? <div className="error">{errorOf(line.label)!.message}</div> : null}
               </li>
             );
           })}
@@ -546,7 +646,9 @@ function Progress({ run, onRetry }: { run: ReturnType<typeof useLaunch>; onRetry
       {run.phase === 'failed' ? (
         <>
           {failed === undefined ? <div className="error">{run.error}</div> : null}
-          <button className="wide" style={{ marginTop: 8 }} onClick={onRetry}>Спробувати ще</button>
+          <button className="wide" style={{ marginTop: 8 }} onClick={onRetry}>
+            {launch?.result == null ? 'Спробувати ще' : 'Спробувати ще — лише те, що не створилося'}
+          </button>
         </>
       ) : null}
     </div>

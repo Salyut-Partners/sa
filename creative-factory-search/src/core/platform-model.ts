@@ -152,8 +152,8 @@ export interface Theme { id: number; key: string; title: string }
 
 /** A creative id known now, or the one a launch uploads from that file — or the headline it makes. */
 export type CreativeRef = number | { file: string } | { headline: string };
-/** A profile id known now, or the one the launch creates. */
-export type TspRef = number | 'new';
+/** A profile id known now, or the one the launch creates under this key — one per budget and bid. */
+export type TspRef = number | { tsp: string };
 
 export interface UploadBody {
   grade: 'New';

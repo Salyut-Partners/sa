@@ -98,10 +98,16 @@ thing written to disk is the sources folder after a success.
   /api/launch/files/:id/transcript`) into an editable box — its `ad_script`.
   Languages may be mixed in one campaign. The «Залив» tab is the same form
   with no project: files from disk only, for creatives made elsewhere.
-- **Cabinet** (never defaulted; dead ones hidden), **countries** (one or
-  several — several are one multi-geo profile and a builder on All; the
-  creative's language does not decide it), **budget**, **bid**, **Launch
-  tomorrow** — the last four from the set's latest campaign — and the
+- **Campaigns** — a row each: a cabinet (never defaulted; dead ones hidden),
+  its **budget** and **bid**. A cabinet may be in several rows («+» beside a
+  row adds one more in it). The first row takes the set's budget and bid;
+  each row added after takes the last row's budget and its bid a step higher
+  (`nextCampaign`; the step is a field, the team's 0.05 — `bid_step` — until
+  typed), so the campaigns do not meet in one auction — the playbook's bid
+  grid. Every cell stays editable.
+- **Countries** (one or several — several are one multi-geo profile and a
+  builder on All; the creative's language does not decide it) and **Launch
+  tomorrow**, from the set's latest campaign, shared by every row — and the
   **pixel**, in plain sight: a wrong one is money on the wrong niche.
 - **The rest** in small print — source, FP (identity), language, RSOC, theme,
   headline, keyword rotation, age, gender, devices, OS, end date, schedule —
@@ -128,33 +134,43 @@ different pixel in the GB and the P business. So picking a cabinet fits both
 business, or nothing for the buyer to pick; the identity stays if it is the
 business's, else becomes the team's by name where the business has one
 («Good Life» on GB, which takes no default), else the cabinet's default
-(P). `launchSteps` refuses a pixel or identity of another business.
+(P). The pixel and identity are picked once and fitted to every row's
+cabinet, so one launch may go to cabinets of both businesses; a row whose
+business has no pixel of that name says so and blocks the launch.
+`launchSteps` refuses a pixel or identity of another business.
 
-«Залити» opens a modal with the whole summary; «Підтвердити» renders what
-changed since a render the server still has (a file's identity is its
-picture, words and length), then `POST /api/launch` with `confirm: true`.
+«Залити» opens a modal with the whole summary — the shared fields once, a
+table of the campaigns with each one's cabinet, pixel, FP, budget and bid, and
+the sum of the budgets — and warns, without refusing, of one bid in two
+campaigns and of more than fifteen at once (`campaignWarnings`); «Підтвердити»
+renders what changed since a render the server still has (a file's identity is
+its picture, words and length), then `POST /api/launch` with `confirm: true`.
 `launchSteps` in `core/quick-launch.ts` checks the form against the platform
-before anything — the set is the topic's, the cabinet and pixel are listed
-and of one business, the theme, RSOC count, countries and language are ones
-it takes — and orders the writes: every file the topic does not already hold
-under its upload name (its own name with eight characters of its digest; the
-same bytes twice go up once) or by its bytes under any name — the platform
+before anything — the set is the topic's, every row's cabinet and pixel are
+listed and of one business, the theme, RSOC count, countries and language are
+ones it takes — and orders the writes: every file the topic does not already
+hold under its upload name (its own name with eight characters of its digest;
+the same bytes twice go up once) or by its bytes under any name — the platform
 drops a second upload of bytes it holds without a word, so the server finds
-such a file by size off the storage's headers, then by digest, and reuses
-it — the headline unless the topic has one with those words, the
-profile unless one has those fields, and the builder, always new and always
-last — so a launch that stops half-way has bought nothing, and «Спробувати
-ще», the same call again, reuses what the first attempt put up. Old
-campaigns are never touched. The server (`server/quick-launch.ts`) runs the
-steps as a job under the queue policy and reports each: the render per
-language with its percent (frames), each upload in megabytes (the multipart
-body is handed over in slices, `server/platform.ts`), what was found and
-reused, the profile with its budget, bid and geo, the campaign with a link,
-and the sources. A failed step is red with a sentence of what to do
-(`plainFailure`). The form keeps its values after a launch, so the same set
-to a second country is one select and one press.
+such a file by size off the storage's headers, then by digest, and reuses it —
+the headline unless the topic has one with those words, a profile for every
+budget and bid unless one has those fields, and a builder per row, always new
+and always last — so a launch that stops before them has bought nothing, and
+«Спробувати ще», the same call again, reuses what the first attempt put up.
+What the campaigns share stops the launch where it fails; a builder that fails
+does not — the other rows are still built, each row's line says ✓ or why not,
+and the rows that were built are marked in the form and not sent again, so
+«Спробувати ще» makes only the missing ones. Old campaigns are never touched.
+The server (`server/quick-launch.ts`) runs the steps as a job under the queue
+policy and reports each: the render per language with its percent (frames),
+each upload in megabytes (the multipart body is handed over in slices,
+`server/platform.ts`), what was found and reused, each profile with its
+budget, bid and geo, each campaign, a link, and the sources. A failed step is
+red with a sentence of what to do (`plainFailure`). The form keeps its values
+after a launch, so the same set to a second country is one select and one
+press.
 
-After the campaign, the pictures behind the ticked renders go to
+After the campaigns — once one is made — the pictures behind the ticked renders go to
 `sources_root/<topic name>/` (`~/sa/sources` by default): flat, a picture the
 folder already holds not written again, a different one under a taken name
 suffixed `-2` (`placeSources`). A folder that will not take them is said, not
@@ -255,7 +271,8 @@ Three build units and one rule.
   never written into a project file.
 - **`src/cli`** — `sa`. Parses flags, calls the server, prints JSON; reads
   only. `core/quick-launch.ts` is the launch: the sets and their defaults off
-  a topic snapshot, the steps a filled form turns into, the sources' names,
+  a topic snapshot, the steps a filled form turns into — a builder per
+  campaign row — the bid ladder and the rows' warnings, the sources' names,
   the sentence for a failed step. `core/platform-model.ts` is the platform as
   a launch sees it — the reads' types, the writes' bodies, comparing two
   headlines or two profiles. `core/queue.ts` decides what happens to a call

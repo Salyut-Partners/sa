@@ -42,10 +42,11 @@ ffmpeg, Python 3.11, шрифт) і шаблон конфігурації. Га�
 - **`sources_root`** — куди після заливу лягають фото, з яких зроблено
   креативи: тека на топік. Можна не чіпати.
 - Необов'язкове **`launch_defaults`** — свої значення замість командних
-  (`budget`, `bid`, `launch_tomorrow`, `identity`, `rsoc_count`, `theme`,
-  `headline`, `keyword_rotation`, `source`, `language`, `gender`, `age`,
-  `devices`, `os`). Без нього — RSOC 6, 25 / 0.3, старт сьогодні, FP «Good
-  Life» на кабінетах GB, темна тема, «Learn more», TikTok, таргетинг All.
+  (`budget`, `bid`, `bid_step`, `launch_tomorrow`, `identity`, `rsoc_count`,
+  `theme`, `headline`, `keyword_rotation`, `source`, `language`, `gender`,
+  `age`, `devices`, `os`). Без нього — RSOC 6, 25 / 0.3, крок біда 0.05 між
+  кампаніями заливу, старт сьогодні, FP «Good Life» на кабінетах GB, темна
+  тема, «Learn more», TikTok, таргетинг All.
 
 Ключі редактора — спільні командні, у тімліда: `ELEVENLABS_API_KEY`
 (озвучка) і необов'язковий `DEEPL_API_KEY` (переклад скрипту) у

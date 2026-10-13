@@ -1,4 +1,4 @@
-// A launch from the creatives tab: one press, one new campaign, nothing kept.
+// A launch from the creatives tab: one press, a new campaign per row, nothing kept.
 // There is no folder and no state file — the topic is read off the platform
 // every time, and this decides the two things the press needs from it.
 //
@@ -7,9 +7,10 @@
 // each from the set's latest campaign, then the topic's, then the team's.
 // `launchSteps` turns the filled form and the rendered files into the writes
 // that make the campaign: the creatives the topic does not hold yet, the
-// headline if the topic has none with those words, the profile if none has
-// those fields, and the builder — always new, and always last, so a launch
-// that stops half-way has bought nothing.
+// headline if the topic has none with those words, a profile for every budget
+// and bid no profile has, and a builder per row — a cabinet with its own
+// budget and bid — always new, and always last, so a launch that stops before
+// them has bought nothing.
 //
 // Pure, like the rest of `core`: the server reads, runs and reports.
 import { safeStem } from './batch.ts';
@@ -27,6 +28,8 @@ import {
 export interface TeamDefaults {
   budget: number;
   bid: number;
+  /** How much each campaign added to a launch bids over the one before: a ladder, so they do not meet in one auction. */
+  bid_step: number;
   /** Whether a profile starts tomorrow when the set's own campaign does not say. */
   launch_tomorrow: boolean;
   /**
@@ -52,6 +55,7 @@ export interface TeamDefaults {
 export const TEAM_DEFAULTS: TeamDefaults = {
   budget: 25,
   bid: 0.3,
+  bid_step: 0.05,
   launch_tomorrow: false,
   identity: 'Good Life',
   rsoc_count: 6,
@@ -77,6 +81,7 @@ export function teamDefaults(override: unknown): TeamDefaults {
   return {
     budget: num('budget') ?? TEAM_DEFAULTS.budget,
     bid: num('bid') ?? TEAM_DEFAULTS.bid,
+    bid_step: num('bid_step') ?? TEAM_DEFAULTS.bid_step,
     launch_tomorrow: typeof o['launch_tomorrow'] === 'boolean' ? o['launch_tomorrow'] : TEAM_DEFAULTS.launch_tomorrow,
     identity: typeof o['identity'] === 'string' ? o['identity'].trim() : TEAM_DEFAULTS.identity,
     rsoc_count: num('rsoc_count') ?? TEAM_DEFAULTS.rsoc_count,
@@ -126,20 +131,26 @@ export interface TopicSnapshot {
 
 // --------------------------------------------------------------- sets --
 
+/** One campaign of a launch: a cabinet with its own budget and bid, and the pixel and identity of its business. */
+export interface LaunchCampaign {
+  /** The platform's id of the cabinet — never defaulted. */
+  account: string | null;
+  budget: number;
+  bid: number;
+  pixel: string | null;
+  /** The identity's id, or null for the cabinet's default. */
+  page: string | null;
+}
+
 /** Every field of the form. Null is a field the buyer still has to fill. */
 export interface LaunchForm {
   termGroupId: number;
   postId: number;
-  /** The platform's id of the cabinet — never defaulted. */
-  account: string | null;
+  /** A campaign each, built in this order; a cabinet may be in several. */
+  campaigns: LaunchCampaign[];
   /** Country codes or names — several are one multi-geo profile — or `All`; empty is a field still to fill. */
   countries: string[];
-  budget: number;
-  bid: number;
   launch_tomorrow: boolean;
-  pixel: string | null;
-  /** The identity's id, or null for the cabinet's default. */
-  page: string | null;
   source: TrafficSource;
   rsoc_count: number;
   /** A theme id, key or title. */
@@ -154,8 +165,12 @@ export interface LaunchForm {
   end_date: string | null;
 }
 
-/** The form without the set it is for. */
-export type FormDefaults = Omit<LaunchForm, 'termGroupId' | 'postId'>;
+/**
+ * The form without the set it is for, its rows not yet made: the budget and
+ * bid the first row starts from, and the pixel and identity every row's are
+ * fitted from (`forCabinet`).
+ */
+export type FormDefaults = Omit<LaunchForm, 'termGroupId' | 'postId' | 'campaigns'> & Pick<LaunchCampaign, 'budget' | 'bid' | 'pixel' | 'page'>;
 
 /** A term group and an article that have had campaigns, newest first by their latest one. */
 export interface LaunchSet {
@@ -298,7 +313,6 @@ export function setsAndDefaults(snapshot: TopicSnapshot, team: TeamDefaults): To
   const topicFirst = <T>(pick: (s: Said) => T | null): T | null => first(...topicSaid.map(pick));
 
   const base: FormDefaults = {
-    account: null,
     countries: [],
     budget: first(topicFirst(s => s.budget), team.budget)!,
     bid: first(topicFirst(s => s.bid), team.bid)!,
@@ -419,14 +433,16 @@ export const BUILDERS_URL = 'https://admin.digifor.io/acquisition/campaign-build
 export type LaunchStep =
   | { kind: 'creative.upload'; label: string; file: string; upload: string; body: UploadBody }
   | { kind: 'headline.create'; label: string; text: string; body: HeadlineBody }
-  | { kind: 'tsp.create'; label: string; fields: TspFields; body: TspBody }
-  | { kind: 'builder.create'; label: string; body: BuilderBody };
+  /** `key` is what the builders that go out on this profile name it by until it has an id. */
+  | { kind: 'tsp.create'; label: string; key: string; fields: TspFields; body: TspBody }
+  /** `campaign` is the row of the form the builder is, from 0. */
+  | { kind: 'builder.create'; label: string; campaign: number; body: BuilderBody };
 
 /** What the launch reuses rather than makes — for the modal to say, and the retry to show it duplicated nothing. */
 export interface Reused {
   creatives: { file: string; id: number }[];
   headline: number | null;
-  tsp: number | null;
+  tsps: number[];
 }
 
 export type LaunchPlan =
@@ -436,15 +452,50 @@ export type LaunchPlan =
 
 const allOnly = (list: readonly string[]): string[] => (list.length === 0 || list.some(v => v.toLowerCase() === 'all') ? ['All'] : [...list].map(s => s.trim()).sort());
 
+/** More campaigns than this at once is said: the playbook's first launch is ~6, «до 12–15 не проблема». */
+const MANY_CAMPAIGNS = 15;
+
+/**
+ * What the buyer should hear about the rows before pressing, and does not stop
+ * them: one bid in two campaigns puts them in one auction — the playbook's
+ * bid grid — and more campaigns at once than the playbook ever launches.
+ */
+export function campaignWarnings(campaigns: readonly Pick<LaunchCampaign, 'bid'>[]): string[] {
+  const out: string[] = [];
+  const byBid = new Map<number, number[]>();
+  campaigns.forEach((c, i) => byBid.set(c.bid, [...(byBid.get(c.bid) ?? []), i + 1]));
+  for (const [bid, rows] of byBid) {
+    if (rows.length > 1 && bid > 0) out.push(`бід ${bid} у кампаніях ${rows.join(', ')} — однаковий бід ставить їх в один аукціон; зробіть сітку`);
+  }
+  if (campaigns.length > MANY_CAMPAIGNS) out.push(`${campaigns.length} кампаній за раз — плейбук на перший залив радить ~6, до 12–15`);
+  return out;
+}
+
+/** A bid in cents, as the buyer would type it: 0.30000000000000004 is 0.3. */
+const cents = (n: number): number => Math.round(n * 100) / 100;
+
+/**
+ * The budget and bid of a row added to the form: the set's for the first; for
+ * the next, the last row's budget and its bid a step higher — a ladder the
+ * buyer can then change cell by cell.
+ */
+export function nextCampaign(rows: readonly Pick<LaunchCampaign, 'budget' | 'bid'>[], first: Pick<LaunchCampaign, 'budget' | 'bid'>, step: number): Pick<LaunchCampaign, 'budget' | 'bid'> {
+  const last = rows.at(-1);
+  return last === undefined ? { budget: first.budget, bid: first.bid } : { budget: last.budget, bid: cents(last.bid + step) };
+}
+
+/** The key a new profile goes by in the plan: one profile per budget and bid, the rest of its fields being the launch's. */
+const tspKey = (c: Pick<LaunchCampaign, 'budget' | 'bid'>): string => `${c.budget}|${c.bid}`;
+
 /**
  * The writes one press makes, or every reason it cannot. Checked before
- * anything: the set is the topic's, the cabinet and pixel are listed and of
- * one business — the identity too — the theme, RSOC count, countries and
- * language are ones the platform takes. Then: every file the topic does not
- * hold, under its upload name or by its bytes, is uploaded — the same file
- * twice is one upload — the headline is made unless
- * the topic has one with those words, the profile unless one has those fields,
- * and the builder is made last, always.
+ * anything: the set is the topic's, there is a row, and every row's cabinet and
+ * pixel are listed and of one business — the identity too — with a budget and
+ * bid; the theme, RSOC count, countries and language are ones the platform
+ * takes. Then: every file the topic does not hold, under its upload name or by
+ * its bytes, is uploaded — the same file twice is one upload — the headline is
+ * made unless the topic has one with those words, a profile for every budget
+ * and bid unless one has those fields, and a builder per row, last, always.
  */
 export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: readonly LaunchFile[]): LaunchPlan {
   const errors: string[] = [];
@@ -453,21 +504,30 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
   if (termGroup === undefined) errors.push(`термгрупи ${form.termGroupId} у топіку немає`);
   const post = snapshot.posts.find(p => p.id === form.postId);
   if (post === undefined) errors.push(`статті ${form.postId} у топіку немає`);
-  if (form.account === null || form.account.trim() === '') errors.push('не вибрано кабінет');
-  const account = form.account === null ? undefined : snapshot.adAccounts.find(a => String(a.id) === form.account);
-  if (form.account !== null && form.account.trim() !== '' && account === undefined) errors.push(`кабінету ${form.account} немає серед живих кабінетів платформи`);
-  if (form.pixel === null || form.pixel.trim() === '') errors.push('не вибрано піксель');
-  const pixel = form.pixel === null ? undefined : snapshot.pixels.find(p => String(p.id) === form.pixel);
-  if (form.pixel !== null && form.pixel.trim() !== '' && pixel === undefined) errors.push(`пікселя ${form.pixel} немає на платформі`);
+  if (form.campaigns.length === 0) errors.push('не додано жодної кампанії');
   const apart = (a: string | undefined, b: string | undefined): boolean => a !== undefined && b !== undefined && a !== '' && b !== '' && a !== b;
-  if (account !== undefined && pixel !== undefined && apart(account.business_id, pixel.business_id)) {
-    errors.push(`піксель «${pixel.name}» (${pixel.id}) з іншого бізнесу, ніж кабінет «${account.name}» — кабінет його не бачить, і кампанія піде без пікселя; оберіть «${pixel.name}» цього бізнесу`);
-  }
-  const page = form.page === null ? undefined : snapshot.pages.find(p => String(p.id) === form.page);
-  if (form.page !== null && page === undefined) errors.push(`FP ${form.page} немає на платформі`);
-  if (account !== undefined && page !== undefined && apart(account.business_id, page.business_id)) {
-    errors.push(`FP «${page.name}» з іншого бізнесу, ніж кабінет «${account.name}» — оберіть FP цього бізнесу або default`);
-  }
+  // One row says its reasons as they are; of several, each says whose they are.
+  const campaigns = form.campaigns.map((c, i) => {
+    const own: string[] = [];
+    if (c.account === null || c.account.trim() === '') own.push('не вибрано кабінет');
+    const account = c.account === null ? undefined : snapshot.adAccounts.find(a => String(a.id) === c.account);
+    if (c.account !== null && c.account.trim() !== '' && account === undefined) own.push(`кабінету ${c.account} немає серед живих кабінетів платформи`);
+    if (c.pixel === null || c.pixel.trim() === '') own.push('не вибрано піксель');
+    const pixel = c.pixel === null ? undefined : snapshot.pixels.find(p => String(p.id) === c.pixel);
+    if (c.pixel !== null && c.pixel.trim() !== '' && pixel === undefined) own.push(`пікселя ${c.pixel} немає на платформі`);
+    if (account !== undefined && pixel !== undefined && apart(account.business_id, pixel.business_id)) {
+      own.push(`піксель «${pixel.name}» (${pixel.id}) з іншого бізнесу, ніж кабінет «${account.name}» — кабінет його не бачить, і кампанія піде без пікселя; оберіть «${pixel.name}» цього бізнесу`);
+    }
+    const page = c.page === null ? undefined : snapshot.pages.find(p => String(p.id) === c.page);
+    if (c.page !== null && page === undefined) own.push(`FP ${c.page} немає на платформі`);
+    if (account !== undefined && page !== undefined && apart(account.business_id, page.business_id)) {
+      own.push(`FP «${page.name}» з іншого бізнесу, ніж кабінет «${account.name}» — оберіть FP цього бізнесу або default`);
+    }
+    if (!(c.budget > 0)) own.push('бюджет має бути більшим за нуль');
+    if (!(c.bid > 0)) own.push('бід має бути більшим за нуль');
+    errors.push(...(form.campaigns.length === 1 ? own : own.map(e => `кампанія ${i + 1}: ${e}`)));
+    return { ...c, account: account!, pixel: pixel!, page };
+  });
   const theme = findTheme(snapshot.themes, form.theme) ?? snapshot.themes.find(t => `${t.key} ${t.title}`.toLowerCase().includes(form.theme.trim().toLowerCase()));
   if (theme === undefined) errors.push(`теми «${form.theme}» немає на платформі; є: ${snapshot.themes.map(t => t.title).join(', ') || 'жодної'}`);
   if (!snapshot.rsocCounts.includes(form.rsoc_count)) errors.push(`RSOC ${form.rsoc_count} платформа не приймає; можна: ${snapshot.rsocCounts.join(', ')}`);
@@ -482,8 +542,6 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
   // All among the countries is all of them; the same country twice is once.
   countryNames = countryNames.includes('All') ? ['All'] : [...new Set(countryNames)];
   const geo = countryNames.join(', ');
-  if (!(form.budget > 0)) errors.push('бюджет має бути більшим за нуль');
-  if (!(form.bid > 0)) errors.push('бід має бути більшим за нуль');
   const language = findLanguage(snapshot.languages, form.language);
   if (language === undefined) errors.push(`мови «${form.language}» немає в довіднику платформи`);
   const gender = GENDERS.find(g => g.toLowerCase() === form.gender.toLowerCase());
@@ -499,11 +557,12 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
   if (errors.length > 0) return { ok: false, errors };
 
   if (form.source === 'facebook') warnings.push('Facebook: форми TSP і builder не звірені з дампами адмінки — тіла складені за TikTok; перевірте кампанію на платформі після заливу');
+  warnings.push(...campaignWarnings(form.campaigns));
   if (form.end_date !== null) warnings.push('формат end_date у запиті TSP не звірений з дампами — перевірте профіль на платформі після заливу');
 
   const topicId = snapshot.topic.id;
   const steps: LaunchStep[] = [];
-  const reused: Reused = { creatives: [], headline: null, tsp: null };
+  const reused: Reused = { creatives: [], headline: null, tsps: [] };
 
   // -- creatives: what the topic holds under the upload name, or by its bytes under any name, is reused; the
   //    same bytes twice — a render and its copy dropped from disk, say — go up once, under the first name they came by.
@@ -552,10 +611,11 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
     });
   }
 
-  // -- profile: one with the same fields is the same profile.
-  const fields: TspFields = {
-    budget: form.budget,
-    bid: form.bid,
+  // -- profiles: one per budget and bid; one with the same fields is the same profile.
+  const start = form.launch_tomorrow ? ', старт завтра' : '';
+  const found: string[] = [];
+  const tspRefs = new Map<string, TspRef>();
+  const shared: Omit<TspFields, 'budget' | 'bid'> = {
     location: countryNames,
     language: language!,
     gender: gender!,
@@ -566,54 +626,68 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
     end_date: form.end_date,
     scheduled: false,
   };
-  const alike = snapshot.tsps.filter(t => sameTsp(t.fields, fields)).sort((x, y) => x.id - y.id)[0];
-  let tspRef: TspRef;
-  if (alike !== undefined) {
-    tspRef = alike.id;
-    reused.tsp = alike.id;
-  } else {
-    tspRef = 'new';
+  for (const c of campaigns) {
+    const key = tspKey(c);
+    if (tspRefs.has(key)) continue;
+    const fields: TspFields = { budget: c.budget, bid: c.bid, ...shared };
+    const alike = snapshot.tsps.filter(t => sameTsp(t.fields, fields)).sort((x, y) => x.id - y.id)[0];
+    if (alike !== undefined) {
+      tspRefs.set(key, alike.id);
+      reused.tsps.push(alike.id);
+      found.push(`TSP знайдено (${alike.id}): ${geo}, бюджет ${c.budget}, бід ${c.bid}${start}`);
+      continue;
+    }
+    tspRefs.set(key, { tsp: key });
     steps.push({
       kind: 'tsp.create',
-      label: `створити TSP (${geo}, бюджет ${form.budget}, бід ${form.bid}${form.launch_tomorrow ? ', старт завтра' : ''})`,
+      label: `створити TSP (${geo}, бюджет ${c.budget}, бід ${c.bid}${start})`,
+      key,
       fields,
       body: tspBody(form.source, topicId, fields),
     });
   }
 
-  // -- builder: always new, always last.
-  steps.push({
-    kind: 'builder.create',
-    label: `створити кампанію (${geo}, ${termGroup!.name} + ${post!.title}, ${seen.size} креативів)`,
-    body: {
-      topic_id: topicId,
-      // One country is the builder's; several are the profile's, and the builder targets All.
-      country: countryNames.length === 1 ? countryNames[0]! : 'All',
-      site_id: String(site),
-      post_id: post!.id,
-      language: 'All',
-      monetization_type: 'RSOC',
-      rsoc_count: String(form.rsoc_count),
-      conversion_event_type: 'Purchase',
-      pixel_id: String(pixel!.id),
-      page_id: page === undefined ? null : String(page.id),
-      traffic_source: form.source,
-      traffic_source_profile_ids: [tspRef],
-      creative_repo_ids: [headlineRef, ...refs],
-      term_group_ids: [termGroup!.id],
-      ad_account_ids: [String(account!.id)],
-      use_ad_title_as_referrer_ad_text: '0',
-      use_keyword_rotation: form.keyword_rotation ? '1' : '0',
-      themes: [String(theme!.id)],
-    },
-  });
+  // -- builders: a row each, always new, always last.
+  for (const [i, c] of campaigns.entries()) {
+    steps.push({
+      kind: 'builder.create',
+      label: `кампанія ${i + 1}/${campaigns.length}: ${c.account.name}, бюджет ${c.budget}, бід ${c.bid} (${geo}, ${termGroup!.name} + ${post!.title}, ${seen.size} креативів)`,
+      campaign: i,
+      body: {
+        topic_id: topicId,
+        // One country is the builder's; several are the profile's, and the builder targets All.
+        country: countryNames.length === 1 ? countryNames[0]! : 'All',
+        site_id: String(site),
+        post_id: post!.id,
+        language: 'All',
+        monetization_type: 'RSOC',
+        rsoc_count: String(form.rsoc_count),
+        conversion_event_type: 'Purchase',
+        pixel_id: String(c.pixel.id),
+        page_id: c.page === undefined ? null : String(c.page.id),
+        traffic_source: form.source,
+        traffic_source_profile_ids: [tspRefs.get(tspKey(c))!],
+        creative_repo_ids: [headlineRef, ...refs],
+        term_group_ids: [termGroup!.id],
+        ad_account_ids: [String(c.account.id)],
+        use_ad_title_as_referrer_ad_text: '0',
+        use_keyword_rotation: form.keyword_rotation ? '1' : '0',
+        themes: [String(theme!.id)],
+      },
+    });
+  }
 
-  const found = [
-    ...reused.creatives.map(c => `${c.file} — уже в топіку (${c.id}), не вантажу`),
-    ...(reused.headline === null ? [] : [`headline «${headline}» — знайдено в топіку (${reused.headline})`]),
-    ...(reused.tsp === null ? [] : [`TSP знайдено (${reused.tsp}): ${geo}, бюджет ${form.budget}, бід ${form.bid}${form.launch_tomorrow ? ', старт завтра' : ''}`]),
-  ];
-  return { ok: true, steps, reused, found, warnings };
+  return {
+    ok: true,
+    steps,
+    reused,
+    found: [
+      ...reused.creatives.map(c => `${c.file} — уже в топіку (${c.id}), не вантажу`),
+      ...(reused.headline === null ? [] : [`headline «${headline}» — знайдено в топіку (${reused.headline})`]),
+      ...found,
+    ],
+    warnings,
+  };
 }
 
 /**

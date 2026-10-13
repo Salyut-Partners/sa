@@ -86,6 +86,8 @@ export interface LaunchTopic extends TopicSets {
   pages: Listed[];
   /** The team's identity by name, for `forCabinet` when a cabinet is picked. */
   identity: string;
+  /** How much each row added to the form bids over the one before. */
+  bidStep: number;
   themes: { id: string; title: string }[];
   rsocCounts: number[];
 }
@@ -108,6 +110,7 @@ export async function launchTopic(config: SaConfig, topicId: number, source: str
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
     pages: snapshot.pages.map(p => ({ id: String(p.id), name: p.name, business: p.business_id })),
     identity: defaultsOf(config).identity,
+    bidStep: defaultsOf(config).bid_step,
     themes: snapshot.themes.map(t => ({ id: String(t.id), title: t.title })),
     rsocCounts: snapshot.rsocCounts,
   };
@@ -250,6 +253,7 @@ function parseRequest(body: unknown): LaunchRequest {
   const topicId = b['topicId'];
   if (typeof topicId !== 'number' || !Number.isInteger(topicId) || topicId <= 0) throw new RefusedError('не вибрано топік');
   if (typeof b['form'] !== 'object' || b['form'] === null) throw new RefusedError('порожня форма заливу');
+  if (!Array.isArray(bagOf(b['form'])['campaigns'])) throw new RefusedError('у формі немає кампаній — оновіть сторінку редактора');
   const renders = list<{ job: string; name: string }>(b['renders'], x => typeof bagOf(x)['job'] === 'string' && typeof bagOf(x)['name'] === 'string');
   const disk = list<{ id: string; name: string; script?: unknown }>(b['disk'], x => typeof bagOf(x)['id'] === 'string' && typeof bagOf(x)['name'] === 'string')
     .map(d => ({ id: d.id, name: d.name, script: typeof d.script === 'string' ? d.script : '' }));
@@ -324,6 +328,8 @@ async function heldByContent(snapshot: TopicSnapshot, files: readonly { name: st
 export interface LaunchLine {
   label: string;
   reused: boolean;
+  /** For a campaign's builder, its row in the form, from 0. */
+  campaign?: number;
 }
 
 /** The step after the campaign: the pictures into the topic's sources folder. */
@@ -375,7 +381,13 @@ export async function startLaunch(config: SaConfig, body: unknown): Promise<{ id
   void runLaunch({ api, job, topicId: snapshot.topic.id, userId: snapshot.topic.user_id, local, sources: request.sources, folder }, plan.steps);
   return {
     id: job.id,
-    lines: [...plan.found.map(label => ({ label, reused: true })), ...labels.map(label => ({ label, reused: false }))],
+    lines: [
+      ...plan.found.map(label => ({ label, reused: true })),
+      ...labels.map(label => {
+        const step = plan.steps.find(s => s.label === label);
+        return step?.kind === 'builder.create' ? { label, reused: false, campaign: step.campaign } : { label, reused: false };
+      }),
+    ],
     warnings: plan.warnings,
   };
 }
@@ -392,15 +404,25 @@ interface Run {
   folder: string;
 }
 
-/** What this launch's own steps made, for the builder's refs. */
+/** What this launch's own steps made, for the builders' refs. */
 interface Made {
   uploads: Map<string, number>;
   headline: number | null;
-  tsp: number | null;
+  /** A new profile's key in the plan → its id. */
+  tsps: Map<string, number>;
 }
 
+/**
+ * The steps in order. What the campaigns share — creatives, headline, profiles —
+ * stops the launch where it fails: no campaign is made without them. A builder
+ * that fails does not: the campaigns are apart, and one dead cabinet is no
+ * reason to leave the rest unmade. Done when every campaign is there; failed
+ * when one is not — the editor sends those rows again, and only those.
+ */
 async function runLaunch(run: Run, steps: readonly LaunchStep[]): Promise<void> {
-  const made: Made = { uploads: new Map(), headline: null, tsp: null };
+  const made: Made = { uploads: new Map(), headline: null, tsps: new Map() };
+  const builders: number[] = [];
+  const wanted = steps.filter(s => s.kind === 'builder.create').length;
   let crashed: Error | null = null;
   try {
     for (const [index, step] of steps.entries()) {
@@ -410,17 +432,20 @@ async function runLaunch(run: Run, steps: readonly LaunchStep[]): Promise<void> 
       run.job.active.clear();
       run.job.active.add(step.label);
       try {
-        const result = await runStep(run, step, made);
+        const builder = await runStep(run, step, made);
         run.job.outputs.push({ name: step.label, file: '' });
-        if (result !== null) run.job.result = result;
+        if (builder !== null) {
+          builders.push(builder);
+          run.job.result = { url: BUILDERS_URL, label: `${wanted === 1 ? 'кампанія створена' : `кампаній створено ${builders.length} з ${wanted}`} — builder ${builders.join(', ')}` };
+        }
       } catch (e) {
         if (!(e instanceof Cancelled)) run.job.errors.push({ name: step.label, message: plainFailure(step.kind, (e as Error).message) });
-        break;
+        if (e instanceof Cancelled || step.kind !== 'builder.create') break;
       } finally {
         run.job.progress.delete(step.label);
       }
     }
-    // The campaign is there: the sources follow it, and a folder that will not take them is said, not a failed launch.
+    // A campaign is there: the sources follow it, and a folder that will not take them is said, not a failed launch.
     if (run.job.result !== null && run.sources.length > 0) {
       const label = sourcesLabel(run.folder);
       run.job.active.clear();
@@ -430,15 +455,15 @@ async function runLaunch(run: Run, steps: readonly LaunchStep[]): Promise<void> 
         run.job.outputs.push({ name: label, file: '' });
         run.job.result = { ...run.job.result, label: `${run.job.result.label} · ісходників нових: ${written}` };
       } catch (e) {
-        run.job.errors.push({ name: label, message: `кампанію створено, а ісходники не лягли в ${run.folder}: ${(e as Error).message}` });
+        run.job.errors.push({ name: label, message: `кампанії створено, а ісходники не лягли в ${run.folder}: ${(e as Error).message}` });
       }
     }
   } catch (e) {
     crashed = e as Error;
   }
   settleJob(run.job, crashed);
-  // A launch is done when the campaign is there, and failed when it is not — however many steps went through.
-  if (!run.job.cancelled) run.job.state = run.job.result !== null ? 'done' : 'failed';
+  // A launch is done when every campaign is there, and failed when one is not — however many steps went through.
+  if (!run.job.cancelled && crashed === null) run.job.state = builders.length === wanted ? 'done' : 'failed';
 }
 
 /** The pictures into the topic's folder, flat, as `placeSources` lays them. Answers how many were new. */
@@ -481,8 +506,8 @@ const freshIn = (before: readonly number[], now: readonly number[]): number | nu
   return fresh.length === 0 ? null : Math.max(...fresh);
 };
 
-/** One step. Answers the new campaign for the builder, null for the rest. */
-async function runStep(run: Run, step: LaunchStep, made: Made): Promise<{ url: string; label: string } | null> {
+/** One step. Answers the new builder's id for a builder, null for the rest. */
+async function runStep(run: Run, step: LaunchStep, made: Made): Promise<number | null> {
   const { api, topicId } = run;
   switch (step.kind) {
     case 'creative.upload': {
@@ -517,7 +542,7 @@ async function runStep(run: Run, step: LaunchStep, made: Made): Promise<{ url: s
       const { id } = await underPolicy(run, 'create', () => createTsp(api, { ...step.body, topic_id: topicId }), async () => freshIn(before, await list()));
       const tspId = id ?? freshIn(before, await list());
       if (tspId === null) throw new StepError('TSP відправлено, але платформа його не показує серед профілів');
-      made.tsp = tspId;
+      made.tsps.set(step.key, tspId);
       return null;
     }
     case 'builder.create': {
@@ -533,8 +558,9 @@ async function runStep(run: Run, step: LaunchStep, made: Made): Promise<{ url: s
       };
       const profile = (ref: TspRef): number => {
         if (typeof ref === 'number') return ref;
-        if (made.tsp === null) throw new StepError('TSP ще не створено');
-        return made.tsp;
+        const id = made.tsps.get(ref.tsp);
+        if (id === undefined) throw new StepError('TSP ще не створено');
+        return id;
       };
       const creativeIds = step.body.creative_repo_ids.map(creative);
       const fields = {
@@ -552,7 +578,7 @@ async function runStep(run: Run, step: LaunchStep, made: Made): Promise<{ url: s
       const { answer, id } = await underPolicy(run, 'create', () => createBuilder(api, fields), async () => freshIn(before, await list()));
       const builderId = createdId(answer ?? { status: 'timeout' }, 'campaignBuilder') ?? id;
       if (builderId === null) throw new StepError('кампанію відправлено, але платформа не повернула її id і не показує її');
-      return { url: BUILDERS_URL, label: `кампанія створена — builder ${builderId}` };
+      return builderId;
     }
   }
 }

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { PlatformBuilder, PlatformCampaign, PlatformTsp, TspFields } from './platform-model.ts';
 import {
-  forCabinet, launchSteps, linksWanted, pixelNiche, placeSources, plainFailure, setsAndDefaults, TEAM_DEFAULTS, teamDefaults, topicFolder, uploadName,
-  type LaunchFile, type LaunchForm, type TopicSnapshot,
+  campaignWarnings, forCabinet, launchSteps, nextCampaign, linksWanted, pixelNiche, placeSources, plainFailure, setsAndDefaults, TEAM_DEFAULTS, teamDefaults, topicFolder, uploadName,
+  type LaunchCampaign, type LaunchFile, type LaunchForm, type TopicSnapshot,
 } from './quick-launch.ts';
 
 const builder = (id: number, over: Partial<PlatformBuilder> = {}): PlatformBuilder => ({
@@ -88,7 +88,7 @@ describe('setsAndDefaults', () => {
       tsps: [tsp(7, { budget: 35, bid: 0.8, launch_tomorrow: true })],
     });
     const d = setsAndDefaults(s, TEAM_DEFAULTS).sets[0]!.defaults;
-    expect(d).toMatchObject({ countries: ['DE'], budget: 35, bid: 0.8, launch_tomorrow: true, pixel: '35967', page: '30040', account: null });
+    expect(d).toMatchObject({ countries: ['DE'], budget: 35, bid: 0.8, launch_tomorrow: true, pixel: '35967', page: '30040' });
   });
 
   it('reads the country off the profile when the builder targets All', () => {
@@ -120,7 +120,7 @@ describe('setsAndDefaults', () => {
       links: { 1: { tsp: 7, term_group: 11, ad_account: null } },
       tsps: [tsp(7, { budget: 40, bid: 0.9, launch_tomorrow: false })],
     });
-    expect(setsAndDefaults(s, TEAM_DEFAULTS).newSet).toMatchObject({ countries: [], budget: 40, bid: 0.9, launch_tomorrow: false, pixel: '40000', page: null, account: null });
+    expect(setsAndDefaults(s, TEAM_DEFAULTS).newSet).toMatchObject({ countries: [], budget: 40, bid: 0.9, launch_tomorrow: false, pixel: '40000', page: null });
   });
 
   it('gives a topic without campaigns the team\'s values, and of its niche\'s pixels the one the buyer last used elsewhere', () => {
@@ -183,13 +183,17 @@ describe('teamDefaults', () => {
       budget: 50, bid: 0.3, rsoc_count: 5, launch_tomorrow: true, identity: '',
     });
     expect(teamDefaults(null)).toBe(TEAM_DEFAULTS);
+    expect(TEAM_DEFAULTS.bid_step).toBe(0.05);
+    expect(teamDefaults({ bid_step: 0.01 }).bid_step).toBe(0.01);
   });
 });
 
 // -------------------------------------------------------------- steps --
 
+const row = (over: Partial<LaunchCampaign> = {}): LaunchCampaign => ({ account: '53560', budget: 20, bid: 0.45, pixel: '35967', page: null, ...over });
+
 const form = (over: Partial<LaunchForm> = {}): LaunchForm => ({
-  termGroupId: 11, postId: 501, account: '53560', countries: ['DE'], budget: 20, bid: 0.45, launch_tomorrow: true, pixel: '35967', page: null,
+  termGroupId: 11, postId: 501, campaigns: [row()], countries: ['DE'], launch_tomorrow: true,
   source: 'tiktok', rsoc_count: 6, theme: 'dark', headline: 'Learn more', keyword_rotation: false, language: 'All',
   gender: 'All', age: ['All'], devices: ['All'], os: ['All'], end_date: null, ...over,
 });
@@ -217,7 +221,7 @@ describe('launchSteps', () => {
       topic_id: 107567, country: 'Germany', site_id: '182', post_id: 501, rsoc_count: '6', pixel_id: '35967', ad_account_ids: ['53560'],
       term_group_ids: [11], themes: ['768'], traffic_source: 'tiktok', use_keyword_rotation: '0',
       creative_repo_ids: [{ headline: 'Learn more' }, { file: 'a-en-11111111.mp4' }, { file: 'a-de-22222222.mp4' }],
-      traffic_source_profile_ids: ['new'],
+      traffic_source_profile_ids: [{ tsp: '20|0.45' }],
     });
   });
 
@@ -238,7 +242,7 @@ describe('launchSteps', () => {
     const plan = launchSteps(form(), s, [file('a.mp4')]);
     if (!plan.ok) throw new Error(plan.errors.join('; '));
     expect(plan.steps.map(x => x.kind)).toEqual(['builder.create']);
-    expect(plan.reused).toEqual({ creatives: [{ file: 'a.mp4', id: 900 }], headline: 901, tsp: 7 });
+    expect(plan.reused).toEqual({ creatives: [{ file: 'a.mp4', id: 900 }], headline: 901, tsps: [7] });
     expect(plan.found).toEqual([
       'a.mp4 — уже в топіку (900), не вантажу',
       'headline «Learn more» — знайдено в топіку (901)',
@@ -272,10 +276,10 @@ describe('launchSteps', () => {
   });
 
   it('refuses without a cabinet, with a cabinet the platform no longer lists, and says every reason at once', () => {
-    const none = launchSteps(form({ account: null, pixel: null, countries: [] }), snapshot(), [file('a.mp4')]);
+    const none = launchSteps(form({ campaigns: [row({ account: null, pixel: null })], countries: [] }), snapshot(), [file('a.mp4')]);
     expect(none.ok).toBe(false);
     expect(!none.ok && none.errors).toEqual(expect.arrayContaining(['не вибрано кабінет', 'не вибрано піксель', 'не вибрано країну']));
-    const dead = launchSteps(form({ account: '11111' }), snapshot(), [file('a.mp4')]);
+    const dead = launchSteps(form({ campaigns: [row({ account: '11111' })] }), snapshot(), [file('a.mp4')]);
     expect(!dead.ok && dead.errors.join()).toMatch(/кабінету 11111/);
   });
 
@@ -300,15 +304,15 @@ describe('launchSteps', () => {
   });
 
   it('refuses a pixel or identity of another business than the cabinet\'s — the cabinet would not see it', () => {
-    const pixel = launchSteps(form({ account: '38341', pixel: '35968' }), snapshot(), [file('a.mp4')]);
+    const pixel = launchSteps(form({ campaigns: [row({ account: '38341', pixel: '35968' })] }), snapshot(), [file('a.mp4')]);
     expect(!pixel.ok && pixel.errors.join()).toMatch(/піксель «Лонс» \(35968\) з іншого бізнесу, ніж кабінет «P \/ Account-08»/);
-    const page = launchSteps(form({ page: '27134' }), snapshot(), [file('a.mp4')]);
+    const page = launchSteps(form({ campaigns: [row({ page: '27134' })] }), snapshot(), [file('a.mp4')]);
     expect(!page.ok && page.errors.join()).toMatch(/FP «1acc35» з іншого бізнесу/);
   });
 
   it('sends the identity, and none for the cabinet\'s default', () => {
     const build = (page: string | null) => {
-      const plan = launchSteps(form({ page }), snapshot(), [file('a.mp4')]);
+      const plan = launchSteps(form({ campaigns: [row({ page })] }), snapshot(), [file('a.mp4')]);
       const step = plan.ok ? plan.steps.at(-1) : undefined;
       return step?.kind === 'builder.create' ? step.body.page_id : undefined;
     };
@@ -330,6 +334,67 @@ describe('launchSteps', () => {
   it('refuses a set the topic does not have', () => {
     const plan = launchSteps(form({ termGroupId: 99, postId: 98 }), snapshot(), [file('a.mp4')]);
     expect(!plan.ok && plan.errors).toEqual(expect.arrayContaining(['термгрупи 99 у топіку немає', 'статті 98 у топіку немає']));
+  });
+
+  it('builds a campaign per row, last, each with its cabinet, pixel, identity and profile — one profile per budget and bid', () => {
+    const rows = [
+      row({ bid: 0.3 }),
+      row({ account: '38341', pixel: '34040', page: '27134', bid: 0.35 }),
+      row({ budget: 30, bid: 0.4 }),
+      row({ account: '38341', pixel: '34040', bid: 0.35 }),
+    ];
+    const plan = launchSteps(form({ campaigns: rows }), snapshot(), [file('a.mp4')]);
+    if (!plan.ok) throw new Error(plan.errors.join('; '));
+    expect(plan.steps.map(s => s.kind)).toEqual([
+      'creative.upload', 'headline.create', 'tsp.create', 'tsp.create', 'tsp.create', 'builder.create', 'builder.create', 'builder.create', 'builder.create',
+    ]);
+    const profiles = plan.steps.flatMap(s => (s.kind === 'tsp.create' ? [[s.key, s.body.budget, s.body.bid]] : []));
+    expect(profiles).toEqual([['20|0.3', 20, '0.3'], ['20|0.35', 20, '0.35'], ['30|0.4', 30, '0.4']]);
+    const builds = plan.steps.flatMap(s => (s.kind === 'builder.create'
+      ? [[s.campaign, s.body.ad_account_ids, s.body.pixel_id, s.body.page_id, s.body.traffic_source_profile_ids]] : []));
+    expect(builds).toEqual([
+      [0, ['53560'], '35967', null, [{ tsp: '20|0.3' }]],
+      [1, ['38341'], '34040', '27134', [{ tsp: '20|0.35' }]],
+      [2, ['53560'], '35967', null, [{ tsp: '30|0.4' }]],
+      [3, ['38341'], '34040', null, [{ tsp: '20|0.35' }]],
+    ]);
+    const labels = plan.steps.filter(s => s.kind === 'builder.create').map(s => s.label);
+    expect(new Set(labels).size).toBe(4);
+    expect(labels[1]).toMatch(/^кампанія 2\/4: P \/ Account-08, бюджет 20, бід 0\.35/);
+  });
+
+  it('reuses a profile the topic holds for one row and makes one for another', () => {
+    const plan = launchSteps(form({ campaigns: [row(), row({ bid: 0.5 })] }), snapshot({ tsps: [tsp(7, { budget: 20, bid: 0.45, launch_tomorrow: true, os: [] })] }), [file('a.mp4')]);
+    if (!plan.ok) throw new Error(plan.errors.join('; '));
+    expect(plan.steps.filter(s => s.kind === 'tsp.create').map(s => s.kind === 'tsp.create' && s.key)).toEqual(['20|0.5']);
+    expect(plan.steps.flatMap(s => (s.kind === 'builder.create' ? [s.body.traffic_source_profile_ids] : []))).toEqual([[7], [{ tsp: '20|0.5' }]]);
+    expect(plan.found).toContain('TSP знайдено (7): Germany, бюджет 20, бід 0.45, старт завтра');
+  });
+
+  it('refuses a row without a cabinet, a pixel or a bid, naming the row, and a launch with no row', () => {
+    const plan = launchSteps(form({ campaigns: [row(), row({ account: null, pixel: null }), row({ account: '38341', pixel: '35968', bid: 0 })] }), snapshot(), [file('a.mp4')]);
+    expect(!plan.ok && plan.errors).toEqual(expect.arrayContaining([
+      'кампанія 2: не вибрано кабінет', 'кампанія 2: не вибрано піксель', 'кампанія 3: бід має бути більшим за нуль',
+    ]));
+    expect(!plan.ok && plan.errors.join()).toMatch(/кампанія 3: піксель «Лонс» \(35968\) з іншого бізнесу/);
+    const none = launchSteps(form({ campaigns: [] }), snapshot(), [file('a.mp4')]);
+    expect(!none.ok && none.errors).toContain('не додано жодної кампанії');
+  });
+
+  it('warns of one bid in two campaigns — one auction — and of more than fifteen at once, without refusing', () => {
+    const same = launchSteps(form({ campaigns: [row({ bid: 0.3 }), row({ bid: 0.35 }), row({ account: '38341', pixel: '34040', bid: 0.3 })] }), snapshot(), [file('a.mp4')]);
+    expect(same.ok && same.warnings.join()).toMatch(/бід 0\.3 у кампаніях 1, 3/);
+    const many = launchSteps(form({ campaigns: Array.from({ length: 16 }, (_, i) => row({ bid: 0.3 + i / 100 })) }), snapshot(), [file('a.mp4')]);
+    expect(many.ok && many.warnings.join()).toMatch(/16 кампаній/);
+    expect(campaignWarnings([row({ bid: 0.3 }), row({ bid: 0.35 })])).toEqual([]);
+  });
+});
+
+describe('nextCampaign', () => {
+  it('starts from the set\'s budget and bid, then climbs the bid a step at a time from the last row, keeping its budget', () => {
+    expect(nextCampaign([], { budget: 25, bid: 0.3 }, 0.05)).toEqual({ budget: 25, bid: 0.3 });
+    expect(nextCampaign([row({ budget: 40, bid: 0.3 })], { budget: 25, bid: 0.3 }, 0.05)).toEqual({ budget: 40, bid: 0.35 });
+    expect(nextCampaign([row({ bid: 0.1 }), row({ bid: 0.15 })], { budget: 25, bid: 0.3 }, 0.05)).toEqual({ budget: 20, bid: 0.2 });
   });
 });
 

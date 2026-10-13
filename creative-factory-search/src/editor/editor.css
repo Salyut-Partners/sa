@@ -346,12 +346,27 @@ textarea.mixed::placeholder { color: var(--warn); font-style: italic; }
 }
 .export-progress .note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* The launch form: money in one row, the rest folded into a line of small
+/* The launch form: a row per campaign, the rest folded into a line of small
    print until «Редагувати» opens it into fields. */
 .launch-new-set { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-.launch-money { align-items: flex-end; }
-.launch-money label:not(.check) { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); flex: 1; min-width: 0; }
-.launch-money .launch-tomorrow { margin-bottom: 8px; font-size: 12px; white-space: nowrap; flex: none; }
+.launch-tomorrow { font-size: 12px; }
+/* A row per campaign: a cabinet, its budget and bid; the pixel and identity of its business under it. */
+.launch-campaign { margin-bottom: 8px; }
+.launch-campaign-row { display: flex; align-items: center; gap: 6px; }
+.launch-campaign-row select { flex: 1; min-width: 0; }
+.launch-campaign-row label { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); flex: none; }
+.launch-campaign-row input { width: 52px; }
+.launch-campaign-n { flex: none; width: 14px; font-size: 11px; color: var(--muted); text-align: right; }
+.launch-campaign-note { margin: 2px 0 0 20px; font-size: 11px; color: var(--muted); }
+.launch-campaign.made { opacity: .6; }
+.launch-ladder { align-items: center; gap: 10px; }
+.launch-ladder .launch-add { margin-top: 0; }
+.launch-ladder label { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.launch-ladder input { width: 52px; }
+.launch-campaigns { width: 100%; border-collapse: collapse; font-size: 12px; margin: 0 0 12px; }
+.launch-campaigns th { text-align: left; color: var(--muted); font-weight: normal; }
+.launch-campaigns th, .launch-campaigns td { padding: 3px 6px 3px 0; border-bottom: 1px solid var(--line); }
+.launch-campaigns tfoot td { border-bottom: none; color: var(--muted); }
 .launch-compact { font-size: 11px; line-height: 1.5; color: var(--muted); }
 .launch-edit-toggle { margin-top: 8px; font-size: 12px; padding: 6px 10px; }
 .launch-edit { display: flex; flex-direction: column; gap: 8px; }
