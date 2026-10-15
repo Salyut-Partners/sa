@@ -91,9 +91,9 @@ thing written to disk is the sources folder after a success.
   matter. A topic with no term group or no article says so and launches
   nothing.
 - **Creatives** — every render the export would make, a checkbox each, and
-  mp4 files from disk by button or drop, each sent to the server once when it
+  mp4s and images (jpg, png, webp) from disk by button or drop, each sent to the server once when it
   is added (`POST /api/launch/files`, named by its digest) and removable with
-  a cross. Each file from disk is transcribed on this machine by the subs
+  a cross. Each video from disk is transcribed on this machine by the subs
   pipeline (`subtitle_styler.py --transcript`, `POST
   /api/launch/files/:id/transcript`) into an editable box — its `ad_script`.
   Languages may be mixed in one campaign. The «Залив» tab is the same form
@@ -176,9 +176,50 @@ folder already holds not written again, a different one under a taken name
 suffixed `-2` (`placeSources`). A folder that will not take them is said, not
 a failed launch.
 
-Facebook: every request body was taken from TikTok dumps of the admin, so a
-launch on Facebook warns and sends the TikTok shape until dumps of a Facebook
-profile and builder are taken (`core/platform-model.ts`, where the bodies are).
+**Images.** jpg, png and webp from disk sit in the same list as renders and
+mp4s — «+ файли з диска» and a drop take both. An image goes up as it is
+(no crop, no compression, no text) with `media_type: Image`, its own mime and
+no `ad_script`, under its name with the digest tag and its own extension; it
+is not transcribed. The list shows a preview and its proportion and warns,
+without refusing, of one unusual for the source (`ratioWarning`: 9:16 on
+TikTok; 9:16, 4:5, 1:1, 1.91:1 on Facebook). Staging checks the bytes'
+signature against the extension. Every creative — image or video — is its own
+ad in every campaign. On TikTok a static image is untested: it may be refused
+or delivered only on Pangle, and the launch says so.
+
+**Facebook.** The same form with «Джерело» on Facebook (`core/platform-model.ts`
+has both bodies, from the admin's dumps of 2026-10-15):
+
+- the profile is the FB form's — performance goal (Number / Value of
+  Conversions), bid strategy (Bid Cap, the default, keeps the ladder; Lowest
+  cost hides the bid column, sends no bid and groups profiles by budget alone),
+  placements (Advantage+ / Facebook Only), age from–to (18–65+), attribution
+  always 7-1-1; the start is «Одразу» or «Завтра о HH:MM» (00:00 by default),
+  and is part of the profile;
+- the page (FP) is required: the set's latest FB campaign's, else the buyer's
+  latest page in the cabinet's business (`recentPages`), else the buyer picks;
+  a page of another business is refused, one the platform links to none is taken;
+- one FB pixel is a platform row per cabinet (`ad_pixel_id`): the select shows
+  it once per business, and each row gets the row bound to its cabinet, else
+  a neighbour's of the business with a warning, else the same name there;
+- primary text sits under the headline, from the set's latest FB headline;
+  both go as plain `<p>`, the description empty; a headline is reused only
+  when its title and primary text match. The modal reminds to check the
+  primary text against `CMP-*`.
+
+On a topic with both sources the sets come from both; the form's defaults,
+and the profiles and headlines reused, only from the source launched; media
+with the same bytes are reused from either. Team defaults are per source
+(`teamDefaults(config, source)`): Facebook 20 / 0.3, step 0.05, Bid Cap,
+Number of Conversions, Advantage+, 18–65+, start now.
+
+Not yet checked on a live launch — said in the modal and the progress
+(`uncheckedOnFacebook`), struck off after the first test: `placements` for
+Facebook Only (`facebook` is a guess); `bid` as text under Bid Cap; whether the
+creative-repo list says an entry's sources and a headline's primary text (if
+not, nothing is ruled out); whether a builder takes a creative marked for the
+other source; `account_id` with or without `act_`; a neighbour cabinet's pixel
+row; a static image on TikTok.
 
 ### Subtitles for a video from elsewhere
 
@@ -190,7 +231,7 @@ pipeline's own stages, a cancel, and the error under the file that failed. The
 six styles are read off the pipeline's `--list-styles`, never listed here, and
 its `--check` says what the machine is missing before the first file rather
 than on it. The mono-repo's `setup.sh` installs the lot. To launch the result,
-add it in the launch form with «+ mp4 з диска».
+add it in the launch form with «+ файли з диска».
 
 The editor's tools — undo, open, save, new, the photo count — are in the
 header of the creatives tab only; the subtitles tab keeps the theme switch and

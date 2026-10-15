@@ -378,6 +378,14 @@ textarea.mixed::placeholder { color: var(--warn); font-style: italic; }
 .launch-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }
 .launch-needed { outline: 2px solid var(--warn); outline-offset: 1px; }
 .launch-disk { margin-bottom: 8px; }
+.launch-file > span { flex: 1; }
+.launch-thumb { flex: none; width: 36px; height: 36px; object-fit: contain; border: 1px solid var(--line); border-radius: 4px; background: var(--line); }
+.launch-start .check { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.launch-start input[type="time"] { width: 90px; }
+.launch-texts { display: flex; flex-direction: column; gap: 8px; }
+.launch-texts label, .launch-fb-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
+.launch-fb-field { margin-top: 8px; }
+.launch-texts textarea { width: 100%; box-sizing: border-box; font-size: 12px; resize: vertical; }
 .launch-script { width: 100%; box-sizing: border-box; font-size: 12px; resize: vertical; margin-top: 4px; }
 .launch-steps { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12px; }
 .launch-steps li { padding: 3px 0; color: var(--muted); }

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { PlatformBuilder, PlatformCampaign, PlatformTsp, TspFields } from './platform-model.ts';
+import type { FacebookSettings, PlatformBuilder, PlatformCampaign, PlatformCreative, PlatformTsp, TspFields } from './platform-model.ts';
 import {
-  campaignWarnings, forCabinet, launchSteps, nextCampaign, linksWanted, pixelNiche, placeSources, plainFailure, setsAndDefaults, TEAM_DEFAULTS, teamDefaults, topicFolder, uploadName,
-  type LaunchCampaign, type LaunchFile, type LaunchForm, type TopicSnapshot,
+  campaignWarnings, FB_TEAM_DEFAULTS, forCabinet, launchSteps, nextCampaign, linksWanted, pixelNiche, placeSources, plainFailure, ratioWarning, setsAndDefaults,
+  TEAM_DEFAULTS, teamDefaults, topicFolder, uploadName,
+  type LaunchCampaign, type LaunchFile, type LaunchForm, type LaunchStep, type TopicSnapshot,
 } from './quick-launch.ts';
 
 const builder = (id: number, over: Partial<PlatformBuilder> = {}): PlatformBuilder => ({
@@ -15,13 +16,14 @@ const campaign = (id: number, over: Partial<PlatformCampaign> = {}): PlatformCam
 });
 
 const fields = (over: Partial<TspFields> = {}): TspFields => ({
-  budget: 30, bid: 0.6, location: ['Germany'], language: 'All', gender: 'All', age: ['All'], devices: ['All'], os: [],
+  source: 'tiktok', facebook: null, budget: 30, bid: 0.6, location: ['Germany'], language: 'All', gender: 'All', age: ['All'], devices: ['All'], os: [],
   launch_tomorrow: false, end_date: null, scheduled: false, ...over,
 });
 
 const tsp = (id: number, over: Partial<TspFields> = {}): PlatformTsp => ({ id, name: `tsp-${id}`, topic_id: 107567, fields: fields(over) });
 
 const snapshot = (over: Partial<TopicSnapshot> = {}): TopicSnapshot => ({
+  source: 'tiktok',
   topic: { id: 107567, name: 'AIjobsDEwh', internal_name: 'AIjobsDEwh', user_id: 1099 },
   termGroups: [{ id: 11, name: 'tg-wh' }, { id: 12, name: 'tg-forklift' }],
   posts: [{ id: 501, title: 'Warehouse Jobs', site_id: 182 }, { id: 502, title: 'Forklift Jobs', site_id: 182 }],
@@ -32,10 +34,11 @@ const snapshot = (over: Partial<TopicSnapshot> = {}): TopicSnapshot => ({
   creatives: [],
   countries: [{ name: 'Germany', code: 'DE' }, { name: 'Austria', code: 'AT' }, { name: 'United Kingdom', code: 'GB' }],
   pixels: [
-    { id: 34040, name: 'Джобс', ad_account_id: '1', business_id: 'P' }, { id: 35967, name: 'Джобс', ad_account_id: '1', business_id: 'GB' },
-    { id: 35968, name: 'Лонс', ad_account_id: '2', business_id: 'GB' },
+    { id: 34040, name: 'Джобс', ad_pixel_id: '', ad_account_id: '1', business_id: 'P' }, { id: 35967, name: 'Джобс', ad_pixel_id: '', ad_account_id: '1', business_id: 'GB' },
+    { id: 35968, name: 'Лонс', ad_pixel_id: '', ad_account_id: '2', business_id: 'GB' },
   ],
   buyerPixels: [],
+  buyerPages: [],
   adAccounts: [{ id: 53560, name: 'GB / Account-7', account_id: '7', business_id: 'GB' }, { id: 38341, name: 'P / Account-08', account_id: '8', business_id: 'P' }],
   pages: [{ id: 27134, name: '1acc35', business_id: 'P' }, { id: 30040, name: 'Good Life', business_id: 'GB' }, { id: 30041, name: 'Like me', business_id: 'GB' }],
   themes: [{ id: 768, key: 'dark', title: 'Dark' }, { id: 790, key: 'light', title: 'Light' }],
@@ -164,6 +167,8 @@ describe('pixelNiche', () => {
   it('reads the niche off the pixel name as the team writes it, on either source', () => {
     expect(['Джобс', 'Лонс', 'Авто', 'Еком', 'ДЖОБС1', 'ЛОНС1'].map(pixelNiche)).toEqual(['jobs', 'credits', 'auto', 'ecommerce', 'jobs', 'credits']);
     expect(pixelNiche('Кредити')).toBeNull();
+    expect(['AUTO', 'LONS', 'loans', 'credit', 'JOBS', 'Job', 'ECOM', 'АВТО1', 'AUTO 2'].map(pixelNiche))
+      .toEqual(['auto', 'credits', 'credits', 'credits', 'jobs', 'jobs', 'ecommerce', 'auto', 'auto']);
   });
 });
 
@@ -178,6 +183,22 @@ describe('linksWanted', () => {
 });
 
 describe('teamDefaults', () => {
+  it('reads a block per source, the flat config as TikTok\'s, and the top-level source as the one to open with', () => {
+    expect(teamDefaults({ budget: 50 }).budget).toBe(50);
+    expect(teamDefaults({ budget: 50 }, 'facebook')).toEqual(FB_TEAM_DEFAULTS);
+    const config = { source: 'facebook', budget: 50, tiktok: { budget: 40 }, facebook: { budget: 30, bid_strategy: 'LOWEST_COST_WITHOUT_CAP', launch_time: '00:00', age_from: 25 } };
+    expect(teamDefaults(config)).toMatchObject({ source: 'facebook', budget: 30, facebook: { bid_strategy: 'LOWEST_COST_WITHOUT_CAP', launch_time: '00:00', age_from: 25, age_to: 65 } });
+    expect(teamDefaults(config, 'tiktok')).toMatchObject({ source: 'tiktok', budget: 40 });
+    expect(teamDefaults({ facebook: { launch_time: '25:99', placements: 'nowhere' } }, 'facebook').facebook).toEqual(FB_TEAM_DEFAULTS.facebook);
+  });
+
+  it('gives Facebook the team\'s numbers: 20, 0.3, step 0.05, Bid Cap, Number of Conversions, Advantage+, 18–65+, start now, no team page', () => {
+    expect(FB_TEAM_DEFAULTS).toMatchObject({
+      source: 'facebook', budget: 20, bid: 0.3, bid_step: 0.05, identity: '',
+      facebook: { bid_strategy: 'LOWEST_COST_WITH_BID_CAP', performance_goal: 'MAXIMIZE_NUMBER_OF_CONVERSIONS', placements: 'advantage', age_from: 18, age_to: 65, launch_time: null },
+    });
+  });
+
   it('overrides field by field and ignores what has the wrong type', () => {
     expect(teamDefaults({ budget: 50, bid: 'x', rsoc_count: 5, launch_tomorrow: true, identity: '' })).toMatchObject({
       budget: 50, bid: 0.3, rsoc_count: 5, launch_tomorrow: true, identity: '',
@@ -194,7 +215,8 @@ const row = (over: Partial<LaunchCampaign> = {}): LaunchCampaign => ({ account: 
 
 const form = (over: Partial<LaunchForm> = {}): LaunchForm => ({
   termGroupId: 11, postId: 501, campaigns: [row()], countries: ['DE'], launch_tomorrow: true,
-  source: 'tiktok', rsoc_count: 6, theme: 'dark', headline: 'Learn more', keyword_rotation: false, language: 'All',
+  source: 'tiktok', rsoc_count: 6, theme: 'dark', headline: 'Learn more', primary_text: '', facebook: FB_TEAM_DEFAULTS.facebook,
+  keyword_rotation: false, language: 'All',
   gender: 'All', age: ['All'], devices: ['All'], os: ['All'], end_date: null, ...over,
 });
 
@@ -420,6 +442,284 @@ describe('forCabinet', () => {
 
   it('leaves both alone for a cabinet whose business is not known', () => {
     expect(forCabinet({ pixel: '35968', page: '30040' }, '1', lists, 'Good Life')).toEqual({ pixel: '35968', page: '30040' });
+  });
+});
+
+// ------------------------------------------------------------ Facebook --
+
+const fbSettings = (over: Partial<FacebookSettings> = {}): FacebookSettings => ({ ...FB_TEAM_DEFAULTS.facebook, ...over });
+
+const fbFields = (over: Partial<TspFields> = {}): TspFields => ({
+  ...fields({ launch_tomorrow: false, os: [], budget: 20, bid: 0.3 }), source: 'facebook', facebook: fbSettings(), ...over,
+});
+
+/** A Facebook topic: two businesses, a pixel as a row per cabinet that holds it, pages with and without a business. */
+const fbSnapshot = (over: Partial<TopicSnapshot> = {}): TopicSnapshot => snapshot({
+  source: 'facebook',
+  topic: { id: 107990, name: 'AIautoDEfb', internal_name: 'AIautoDEfb', user_id: 1099 },
+  adAccounts: [
+    { id: 70001, name: 'FB / Agency-1', account_id: 'act_1201', business_id: '9001' },
+    { id: 70002, name: 'FB / Agency-2', account_id: '1202', business_id: '9001' },
+    { id: 70003, name: 'FB / Other-1', account_id: '1301', business_id: '9002' },
+    { id: 70004, name: 'FB / Agency-3', account_id: '1203', business_id: '9001' },
+  ],
+  pixels: [
+    { id: 61001, name: 'АВТО1', ad_pixel_id: '880011', ad_account_id: '1201', business_id: '9001' },
+    { id: 61002, name: 'АВТО1', ad_pixel_id: '880011', ad_account_id: 'act_1202', business_id: '9001' },
+    { id: 61003, name: 'АВТО1', ad_pixel_id: '880099', ad_account_id: '1301', business_id: '9002' },
+    { id: 61004, name: 'ЛОНС1', ad_pixel_id: '880022', ad_account_id: '1201', business_id: '9001' },
+  ],
+  pages: [{ id: 501, name: 'Good Life', business_id: '9001' }, { id: 502, name: 'Fresh Page', business_id: '' }, { id: 503, name: 'Other Page', business_id: '9002' }],
+  ...over,
+});
+
+const fbRow = (over: Partial<LaunchCampaign> = {}): LaunchCampaign => ({ account: '70001', budget: 20, bid: 0.3, pixel: '61001', page: '501', ...over });
+
+const fbForm = (over: Partial<LaunchForm> = {}): LaunchForm => form({
+  source: 'facebook', campaigns: [fbRow()], launch_tomorrow: false, primary_text: 'Find work near you', facebook: fbSettings(), ...over,
+});
+
+const ok = (plan: ReturnType<typeof launchSteps>) => {
+  if (!plan.ok) throw new Error(plan.errors.join('; '));
+  return plan;
+};
+const kinds = <K extends LaunchStep['kind']>(steps: readonly LaunchStep[], kind: K) => steps.filter((s): s is Extract<LaunchStep, { kind: K }> => s.kind === kind);
+
+const headlineEntry = (id: number, html: string, over: Partial<PlatformCreative> = {}): PlatformCreative =>
+  ({ id, media_type: 'Headline', original_filename: null, headline: html, status: 'New', ad_script: null, ...over });
+
+describe('launchSteps on Facebook', () => {
+  it('sends the profile as the Facebook form does, bid capped, starting at once', () => {
+    const plan = ok(launchSteps(fbForm(), fbSnapshot(), [file('a.mp4')]));
+    const [profile] = kinds(plan.steps, 'tsp.create');
+    expect(profile!.body).toMatchObject({
+      traffic_source: 'facebook', bid: '0.3', budget: 20, bid_strategy: 'LOWEST_COST_WITH_BID_CAP', performance_goal: 'MAXIMIZE_NUMBER_OF_CONVERSIONS',
+      placements: 'advantage', age_from: '18', age_to: '65', launch_time: null, pixel_attribution: '7-1-1', lunch_tomorrow: 0,
+    });
+    expect(profile!.label).toBe('створити TSP (Germany, бюджет 20, бід 0.3, старт одразу)');
+    const [build] = kinds(plan.steps, 'builder.create');
+    expect(build!.body).toMatchObject({ traffic_source: 'facebook', page_id: '501', pixel_id: '61001', ad_account_ids: ['70001'] });
+  });
+
+  it('starts tomorrow at the time, ages from–to, and Value of Conversions when asked', () => {
+    const plan = ok(launchSteps(fbForm({ facebook: fbSettings({ launch_time: '00:00', age_from: 25, age_to: 54, performance_goal: 'MAXIMIZE_VALUE_OF_CONVERSIONS' }) }), fbSnapshot(), [file('a.mp4')]));
+    const [profile] = kinds(plan.steps, 'tsp.create');
+    expect(profile!.body).toMatchObject({ launch_type: 'tomorrow', launch_time: '00:00', age_from: '25', age_to: '54', performance_goal: 'MAXIMIZE_VALUE_OF_CONVERSIONS' });
+    expect(profile!.label).toMatch(/старт завтра о 00:00/);
+  });
+
+  it('refuses a start time that is not a time, and ages Facebook does not offer', () => {
+    const plan = launchSteps(fbForm({ facebook: fbSettings({ launch_time: '24:30', age_from: 40, age_to: 30 }) }), fbSnapshot(), [file('a.mp4')]);
+    expect(!plan.ok && plan.errors.join('\n')).toMatch(/час старту «24:30»/);
+    expect(!plan.ok && plan.errors.join('\n')).toMatch(/вік від 40 до 30/);
+  });
+
+  it('without a cap sends no bid, wants none, and makes one profile per budget', () => {
+    const rows = [fbRow({ bid: 0.3 }), fbRow({ bid: 0.35, account: '70002', pixel: '61002' }), fbRow({ budget: 30, bid: 0 })];
+    const plan = ok(launchSteps(fbForm({ campaigns: rows, facebook: fbSettings({ bid_strategy: 'LOWEST_COST_WITHOUT_CAP' }) }), fbSnapshot(), [file('a.mp4')]));
+    const profiles = kinds(plan.steps, 'tsp.create');
+    expect(profiles.map(p => [p.key, p.body.budget, 'bid' in p.body])).toEqual([['20', 20, false], ['30', 30, false]]);
+    expect(profiles[0]!.label).toBe('створити TSP (Germany, бюджет 20, без капу, старт одразу)');
+    expect(kinds(plan.steps, 'builder.create').map(b => b.body.traffic_source_profile_ids)).toEqual([[{ tsp: '20' }], [{ tsp: '20' }], [{ tsp: '30' }]]);
+    expect(plan.warnings.join()).not.toMatch(/однаковий бід/);
+  });
+
+  it('wants an FP on every campaign', () => {
+    const plan = launchSteps(fbForm({ campaigns: [fbRow({ page: null })] }), fbSnapshot(), [file('a.mp4')]);
+    expect(!plan.ok && plan.errors).toContain('не вибрано FP — на Facebook оголошення без сторінки не існує');
+  });
+
+  it('refuses a page of another business naming both, and takes one the platform links to no business', () => {
+    const other = launchSteps(fbForm({ campaigns: [fbRow({ page: '503' })] }), fbSnapshot(), [file('a.mp4')]);
+    expect(!other.ok && other.errors.join()).toMatch(/FP «Other Page» з іншого бізнесу, ніж кабінет «FB \/ Agency-1»/);
+    expect(launchSteps(fbForm({ campaigns: [fbRow({ page: '502' })] }), fbSnapshot(), [file('a.mp4')]).ok).toBe(true);
+  });
+
+  it('warns when the pixel\'s row is another cabinet\'s of the same business, and says nothing when it is the cabinet\'s own', () => {
+    const neighbour = ok(launchSteps(fbForm({ campaigns: [fbRow({ account: '70004' })] }), fbSnapshot(), [file('a.mp4')]));
+    expect(neighbour.warnings.join()).toMatch(/піксель «АВТО1» \(61001\) прив'язаний не до кабінету «FB \/ Agency-3»/);
+    const own = ok(launchSteps(fbForm({ campaigns: [fbRow({ account: '70002', pixel: '61002' })] }), fbSnapshot(), [file('a.mp4')]));
+    expect(own.warnings.join()).not.toMatch(/прив'язаний не до кабінету/);
+  });
+
+  it('makes the headline with its primary text as plain paragraphs, the description empty', () => {
+    const plan = ok(launchSteps(fbForm(), fbSnapshot(), [file('a.mp4')]));
+    const [headline] = kinds(plan.steps, 'headline.create');
+    expect(headline!.body).toMatchObject({
+      headlines: ['<p>Learn more</p>'], primary_texts: ['<p>Find work near you</p>'], descriptions: [''], source: 'facebook',
+    });
+    expect(headline!.label).toBe('створити headline «Learn more» · primary text «Find work near you»');
+  });
+
+  it('reuses a headline only of its own source and with the same title and primary text', () => {
+    const files = [file('a.mp4')];
+    const made = (creatives: PlatformCreative[]) => ok(launchSteps(fbForm(), fbSnapshot({ creatives }), files)).reused.headline;
+    expect(made([headlineEntry(901, '<p><strong>Learn more</strong></p>', { traffic_sources: ['tiktok'] })])).toBeNull();
+    expect(made([headlineEntry(902, '<p>Learn more</p>', { traffic_sources: ['facebook'], primary_text: '<p>Other text</p>' })])).toBeNull();
+    expect(made([headlineEntry(903, '<p>Learn more</p>', { traffic_sources: ['facebook'], primary_text: '<p>Find work near you</p>' })])).toBe(903);
+    // A list that says neither rules nothing out.
+    expect(made([headlineEntry(904, '<p>Learn more</p>')])).toBe(904);
+  });
+
+  it('reuses a profile only of its own source', () => {
+    const tiktokTwin = tsp(7, { budget: 20, bid: 0.3, launch_tomorrow: false, os: [] });
+    const fbOwn: PlatformTsp = { id: 8, name: 'fb', topic_id: 107990, fields: fbFields() };
+    expect(ok(launchSteps(fbForm(), fbSnapshot({ tsps: [tiktokTwin] }), [file('a.mp4')])).reused.tsps).toEqual([]);
+    expect(ok(launchSteps(fbForm(), fbSnapshot({ tsps: [tiktokTwin, fbOwn] }), [file('a.mp4')])).reused.tsps).toEqual([8]);
+    expect(ok(launchSteps(form({ launch_tomorrow: false, campaigns: [row({ bid: 0.3 })] }), snapshot({ tsps: [{ ...fbOwn, topic_id: 107567 }] }), [file('a.mp4')])).reused.tsps).toEqual([]);
+  });
+
+  it('reuses a video the topic holds from TikTok as it is', () => {
+    const s = fbSnapshot({ creatives: [{ id: 900, media_type: 'Video', original_filename: 'a-abcdef01.mp4', headline: null, status: 'New', ad_script: 'x', traffic_sources: ['tiktok'] }] });
+    expect(ok(launchSteps(fbForm(), s, [file('a.mp4')])).reused.creatives).toEqual([{ file: 'a.mp4', id: 900 }]);
+  });
+
+  it('lists what has not been checked on a live launch instead of saying the bodies are not', () => {
+    const plan = ok(launchSteps(fbForm({ facebook: fbSettings({ placements: 'facebook' }) }), fbSnapshot(), [file('a.mp4')]));
+    const said = plan.warnings.join('\n');
+    expect(said).not.toMatch(/не звірені з дампами адмінки/);
+    expect(said).toMatch(/Facebook Only/);
+    expect(said).toMatch(/bid рядком при Bid Cap/);
+    expect(ok(launchSteps(form(), snapshot(), [file('a.mp4')])).warnings.join()).not.toMatch(/не звірено/);
+  });
+});
+
+describe('images', () => {
+  const images = [file('Banner 1.PNG', '1111aaaa2222', ''), file('photo.jpeg', '3333bbbb4444', ''), file('x.webp', '5555cccc6666', '')];
+
+  it('go up as images under their own extension and mime, with no script, each its own ad beside the videos', () => {
+    const plan = ok(launchSteps(form(), snapshot(), [file('a.mp4'), ...images]));
+    const uploads = kinds(plan.steps, 'creative.upload');
+    expect(uploads.map(u => [u.upload, u.mime, u.body.media_type, 'ad_script' in u.body])).toEqual([
+      ['a-abcdef01.mp4', 'video/mp4', 'Video', true],
+      ['Banner_1-1111aaaa.png', 'image/png', 'Image', false],
+      ['photo-3333bbbb.jpeg', 'image/jpeg', 'Image', false],
+      ['x-5555cccc.webp', 'image/webp', 'Image', false],
+    ]);
+    expect(uploads[1]!.body).toMatchObject({ grade: 'New', traffic_sources: ['tiktok'], topic_ids: [107567], countries: ['Germany'] });
+    expect(kinds(plan.steps, 'builder.create')[0]!.body.creative_repo_ids).toHaveLength(5);
+    expect(plan.steps.find(s => s.kind === 'builder.create')!.label).toMatch(/1 відео, 3 картинки/);
+  });
+
+  it('are reused when the topic holds them under the upload name or by their bytes, and the same image twice goes up once', () => {
+    const s = snapshot({
+      creatives: [{ id: 960, media_type: 'Image', original_filename: 'Banner_1-1111aaaa.png', headline: null, status: 'New', ad_script: null }],
+      heldByDigest: { '3333bbbb4444': 961 },
+    });
+    const plan = ok(launchSteps(form(), s, [...images, file('copy.png', '5555cccc6666', '')]));
+    expect(plan.reused.creatives).toEqual([{ file: 'Banner 1.PNG', id: 960 }, { file: 'photo.jpeg', id: 961 }]);
+    expect(kinds(plan.steps, 'creative.upload').map(u => u.upload)).toEqual(['x-5555cccc.webp']);
+  });
+
+  it('refuse a file that is neither mp4 nor a supported image', () => {
+    const plan = launchSteps(form(), snapshot(), [file('anim.gif', '7777dddd', '')]);
+    expect(!plan.ok && plan.errors).toContain('anim.gif — не mp4 і не картинка jpg, png чи webp');
+  });
+
+  it('warn on TikTok that a static creative may be refused or shown only on Pangle', () => {
+    expect(ok(launchSteps(form(), snapshot(), images)).warnings.join()).toMatch(/Pangle/);
+    expect(ok(launchSteps(fbForm(), fbSnapshot(), images)).warnings.join()).not.toMatch(/Pangle/);
+  });
+});
+
+describe('ratioWarning', () => {
+  it('says an unusual proportion for the source, and nothing for the usual ones', () => {
+    expect(ratioWarning(1080, 1920, 'tiktok')).toBeNull();
+    expect(ratioWarning(1080, 1080, 'tiktok')).toMatch(/1:1.*TikTok.*9:16/);
+    expect([[1080, 1920], [1080, 1350], [1080, 1080], [1200, 628]].map(([w, h]) => ratioWarning(w!, h!, 'facebook'))).toEqual([null, null, null, null]);
+    expect(ratioWarning(1600, 900, 'facebook')).toMatch(/16:9/);
+  });
+});
+
+describe('a topic with campaigns of both sources', () => {
+  const mixed = (source: 'tiktok' | 'facebook') => (source === 'facebook' ? fbSnapshot : snapshot)({
+    builders: [
+      builder(1, { traffic_source: 'tiktok', pixel_id: 35967, page_id: 30040, country: 'Germany', creative_ids: [901] }),
+      builder(2, { traffic_source: 'facebook', pixel_id: 61001, page_id: 501, country: 'Austria', creative_ids: [902] }),
+      builder(3, { traffic_source: 'tiktok', post_id: 502, country: 'United Kingdom', campaigns: [{ id: 30, name: 'x', term_group_id: 12, ad_account: null }] }),
+    ],
+    links: { 1: { tsp: 7, term_group: 11, ad_account: null }, 2: { tsp: 8, term_group: 11, ad_account: null }, 3: { tsp: 9, term_group: 12, ad_account: null } },
+    tsps: [
+      tsp(7, { budget: 35, bid: 0.8, launch_tomorrow: true }),
+      { id: 8, name: 'fb', topic_id: 107990, fields: fbFields({ budget: 40, bid: 0.5, facebook: fbSettings({ launch_time: '00:00', placements: 'facebook', age_from: 25 }) }) },
+      tsp(9, { budget: 50, bid: 0.9, location: ['United Kingdom'] }),
+    ],
+    creatives: [
+      headlineEntry(901, '<p><strong>Mehr erfahren</strong></p>', { traffic_sources: ['tiktok'] }),
+      headlineEntry(902, '<p>Jetzt ansehen</p>', { traffic_sources: ['facebook'], primary_text: '<p>Autos ab 99 €</p>' }),
+    ],
+    buyerPages: [503, 501, 502],
+  });
+
+  it('offers the sets of both sources', () => {
+    expect(setsAndDefaults(mixed('facebook'), FB_TEAM_DEFAULTS).sets.map(s => s.termGroup.name)).toEqual(['tg-forklift', 'tg-wh']);
+  });
+
+  it('fills a Facebook launch from the set\'s Facebook campaign only — its pixel, page, numbers, profile fields, headline and primary text', () => {
+    const { sets } = setsAndDefaults(mixed('facebook'), FB_TEAM_DEFAULTS);
+    const wh = sets.find(s => s.termGroup.id === 11)!.defaults;
+    expect(wh).toMatchObject({
+      countries: ['AT'], budget: 40, bid: 0.5, pixel: '61001', page: '501', headline: 'Jetzt ansehen', primary_text: 'Autos ab 99 €', source: 'facebook',
+      facebook: { launch_time: '00:00', placements: 'facebook', age_from: 25 },
+    });
+  });
+
+  it('fills a set with no Facebook campaign from the topic\'s Facebook one, its countries from its own campaign', () => {
+    const { sets, newSet } = setsAndDefaults(mixed('facebook'), FB_TEAM_DEFAULTS);
+    const forklift = sets.find(s => s.termGroup.id === 12)!.defaults;
+    expect(forklift).toMatchObject({ countries: ['GB'], budget: 40, bid: 0.5, pixel: '61001', page: null, headline: 'Jetzt ansehen', primary_text: 'Autos ab 99 €' });
+    expect(newSet).toMatchObject({ budget: 40, pixel: '61001', page: null });
+  });
+
+  it('fills a TikTok launch from TikTok campaigns only', () => {
+    const wh = setsAndDefaults(mixed('tiktok'), TEAM_DEFAULTS).sets.find(s => s.termGroup.id === 11)!.defaults;
+    expect(wh).toMatchObject({ countries: ['AT'], budget: 35, bid: 0.8, launch_tomorrow: true, pixel: '35967', page: '30040', headline: 'Mehr erfahren', primary_text: '' });
+  });
+
+  it('falls to the team for a Facebook launch on a topic with TikTok campaigns only', () => {
+    const tiktokOnly = { ...mixed('facebook'), builders: mixed('facebook').builders.filter(b => b.traffic_source === 'tiktok') };
+    expect(setsAndDefaults(tiktokOnly, FB_TEAM_DEFAULTS).newSet).toMatchObject({ budget: 20, bid: 0.3, headline: 'Learn more', primary_text: '', page: null, facebook: FB_TEAM_DEFAULTS.facebook });
+  });
+
+  it('gives the buyer\'s recent pages, the topic\'s first', () => {
+    expect(setsAndDefaults(mixed('facebook'), FB_TEAM_DEFAULTS).recentPages).toEqual(['501', '503', '502']);
+  });
+
+  it('reads the links of the newest campaign of each set and of the newest of its own source', () => {
+    const s = { ...mixed('facebook'), links: {}, builders: [...mixed('facebook').builders, builder(4, { traffic_source: 'tiktok' })] };
+    expect(linksWanted(s)).toEqual([4, 3, 2]);
+  });
+});
+
+describe('forCabinet on Facebook', () => {
+  const lists = {
+    accounts: [
+      { id: '70001', name: 'FB / Agency-1', business: '9001', account: 'act_1201' }, { id: '70002', name: 'FB / Agency-2', business: '9001', account: '1202' },
+      { id: '70003', name: 'FB / Other-1', business: '9002', account: '1301' }, { id: '70004', name: 'FB / Agency-3', business: '9001', account: '1203' },
+      { id: '70005', name: 'FB / Bare', business: '9003', account: '1401' },
+    ],
+    pixels: [
+      { id: '61001', name: 'АВТО1', business: '9001', account: '1201', pixel: '880011' }, { id: '61002', name: 'АВТО1', business: '9001', account: 'act_1202', pixel: '880011' },
+      { id: '61003', name: 'АВТО1', business: '9002', account: '1301', pixel: '880099' },
+    ],
+    pages: [{ id: '501', name: 'Good Life', business: '9001' }, { id: '502', name: 'Fresh Page', business: '' }, { id: '503', name: 'Other Page', business: '9002' }],
+  };
+  const fit = (pixel: string | null, page: string | null, account: string, recent: string[] = []) =>
+    forCabinet({ pixel, page }, account, lists, 'Good Life', { recentPages: recent });
+
+  it('takes the pixel\'s row bound to the cabinet, then the business\'s, then the same name there, then none', () => {
+    expect(fit('61001', null, '70002').pixel).toBe('61002');
+    expect(fit('61002', null, '70001').pixel).toBe('61001');
+    expect(fit('61001', null, '70004').pixel).toBe('61001');
+    expect(fit('61001', null, '70003').pixel).toBe('61003');
+    expect(fit('61001', null, '70005').pixel).toBeNull();
+  });
+
+  it('keeps a page of the cabinet\'s business or of none, then takes the latest recent one there, and never the team\'s page by name', () => {
+    expect(fit(null, '501', '70002').page).toBe('501');
+    expect(fit(null, '502', '70003').page).toBe('502');
+    expect(fit(null, '501', '70003', ['501', '503']).page).toBe('503');
+    expect(fit(null, null, '70001').page).toBeNull();
   });
 });
 

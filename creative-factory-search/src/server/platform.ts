@@ -8,9 +8,11 @@
 // `core/queue.ts` reads outcomes: a timeout is a fact to reason about, not an
 // exception to unwind.
 import crypto from 'node:crypto';
-import type {
-  AdAccount, BuilderLinks, Country, HeadlineBody, Page, Pixel, PlatformBuilder, PlatformCampaign, PlatformCreative, PlatformPost, PlatformPostDetail,
-  PlatformTermGroup, PlatformTopic, PlatformTsp, Rejection, ReviewVerdict, Theme, TspBody, TspFields,
+import {
+  bag, listOf, num, parseCreatives, parsePages, parsePixels, parseTsp, str,
+  type AdAccount, type BuilderLinks, type Country, type HeadlineBody, type Page, type Pixel, type PlatformBuilder, type PlatformCampaign,
+  type PlatformCreative, type PlatformPost, type PlatformPostDetail, type PlatformTermGroup, type PlatformTopic, type PlatformTsp, type Rejection,
+  type ReviewVerdict, type Theme, type TspBody,
 } from '../core/platform-model.ts';
 import type { SaConfig } from './config.ts';
 
@@ -142,12 +144,6 @@ export class PlatformClient {
 /** A read that must succeed to go on: the sentence names the call that did not. */
 export class PlatformReadError extends Error {}
 
-const bag = (v: unknown): Record<string, unknown> =>
-  (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>;
-
-const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v));
-const str = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v));
-
 function need(answer: Answer, what: string): unknown {
   if (answer.status === 'ok') return answer.body;
   const why = answer.status === 'timeout' ? 'не відповіла вчасно' : `відповіла ${answer.code}: ${answer.text}`;
@@ -233,33 +229,17 @@ export async function readCountries(client: PlatformClient): Promise<Country[]> 
   });
 }
 
-const listOf = (body: unknown, key: string): unknown[] => {
-  const b = bag(body);
-  return Array.isArray(b[key]) ? b[key] : Array.isArray(body) ? body : [];
-};
-
 // -- the directories the builder is filled from
 
+/** The source's pixels; on Facebook one pixel is a row per cabinet that holds it. */
 export async function readPixels(client: PlatformClient, trafficSource: string): Promise<Pixel[]> {
-  const body = need(await client.get('/pixels', { traffic_source: trafficSource }), 'GET /pixels');
-  return listOf(body, 'pixels').map(raw => {
-    const p = bag(raw);
-    return { id: num(p['id']), name: str(p['name']), ad_account_id: str(p['ad_account_id']), business_id: str(p['business_id'] ?? '') };
-  });
+  return parsePixels(need(await client.get('/pixels', { traffic_source: trafficSource }), 'GET /pixels'));
 }
 
-/**
- * The identities ads can go out under, every business's. TikTok's only: where
- * Facebook keeps them is not known yet, and its launch goes out under the
- * cabinet's default.
- */
+/** What ads go out under, every business's: TikTok's identities, Facebook's pages. */
 export async function readPages(client: PlatformClient, trafficSource: string): Promise<Page[]> {
-  if (trafficSource !== 'tiktok') return [];
-  const body = need(await client.get('/tiktok/pages'), 'GET /tiktok/pages');
-  return listOf(body, 'pages').map(raw => {
-    const p = bag(raw);
-    return { id: num(p['id']), name: str(p['page_name']), business_id: str(p['business_id'] ?? '') };
-  }).filter(p => p.id > 0);
+  const where = trafficSource === 'facebook' ? '/facebook/pages' : '/tiktok/pages';
+  return parsePages(need(await client.get(where), `GET ${where}`));
 }
 
 export async function readAdAccounts(client: PlatformClient, siteId: number, trafficSource: string): Promise<AdAccount[]> {
@@ -292,79 +272,37 @@ export async function readLanguages(client: PlatformClient): Promise<string[]> {
 
 // -- what the topic holds for its campaigns
 
-/** Every creative repo entry attached to the topic, videos and headlines alike. */
+/** Every creative repo entry attached to the topic: videos, images and headlines alike. */
 export async function readCreatives(client: PlatformClient, topicId: number): Promise<PlatformCreative[]> {
-  const body = need(await client.get('/creative-repo', { topic_id: topicId }), 'GET /creative-repo');
-  return listOf(body, 'creativeRepos').map(raw => {
-    const c = bag(raw);
-    return {
-      id: num(c['id']),
-      media_type: str(c['media_type']),
-      original_filename: c['original_filename'] == null ? null : str(c['original_filename']),
-      headline: c['headline'] == null ? null : str(c['headline']),
-      status: str(c['status']),
-      ad_script: c['ad_script'] == null ? null : str(c['ad_script']),
-      file_url: c['file_path_url'] == null || c['file_path_url'] === '' ? null : str(c['file_path_url']),
-    };
-  });
+  return parseCreatives(need(await client.get('/creative-repo', { topic_id: topicId }), 'GET /creative-repo'));
 }
-
-/** A JSON list the platform stores as text (`age_from`), or as a list, or as one word. */
-const listField = (v: unknown): string[] => {
-  if (Array.isArray(v)) return v.map(str);
-  if (typeof v === 'string' && v.startsWith('[')) {
-    try {
-      const parsed: unknown = JSON.parse(v);
-      return Array.isArray(parsed) ? parsed.map(str) : [];
-    } catch {
-      return [];
-    }
-  }
-  return v == null || v === '' ? [] : [str(v)];
-};
-
-/** The schedule is a row per day with `checked`; a row of unticked days is what the admin sends for none. */
-const anyDayTicked = (v: unknown): boolean => {
-  let rows: unknown = v;
-  if (typeof v === 'string') {
-    try {
-      rows = JSON.parse(v);
-    } catch {
-      return false;
-    }
-  }
-  return Array.isArray(rows) && rows.some(r => bag(r)['checked'] === true);
-};
-
-const toTspFields = (t: Record<string, unknown>): TspFields => {
-  const endDate = str(t['end_date'] ?? '');
-  return {
-    budget: num(t['budget']),
-    bid: num(t['bid']),
-    location: listField(t['location']),
-    language: str(t['language'] ?? 'All'),
-    gender: str(t['gender'] ?? 'All'),
-    age: listField(t['age_from']).length === 0 ? ['All'] : listField(t['age_from']),
-    devices: listField(t['devices']).length === 0 ? ['All'] : listField(t['devices']),
-    os: listField(t['device_os']),
-    launch_tomorrow: num(t['lunch_tomorrow'] ?? 0) === 1,
-    end_date: endDate === '' || endDate === '0' ? null : endDate,
-    scheduled: anyDayTicked(t['schedule']),
-  };
-};
 
 /**
  * The topic's profiles. The list does not filter by topic on its own, but by
  * the buyer it does — and the topic knows its buyer — so the read is the
  * buyer's profiles, narrowed here.
  */
-export async function readTsps(client: PlatformClient, topicId: number, userId: number): Promise<PlatformTsp[]> {
+export async function readTsps(client: PlatformClient, topicId: number, userId: number, ownPages = false): Promise<PlatformTsp[]> {
   const query = userId > 0 ? { user_id: userId } : {};
   const body = need(await client.get('/traffic-source-profiles', query), 'GET /traffic-source-profiles');
-  return listOf(body, 'trafficSourceProfiles').map(raw => {
-    const t = bag(raw);
-    return { id: num(t['id']), name: str(t['name']), topic_id: num(t['topic_id']), fields: toTspFields(t) };
-  }).filter(t => t.topic_id === topicId);
+  const listed = listOf(body, 'trafficSourceProfiles').filter(raw => num(bag(raw)['topic_id']) === topicId);
+  // A profile's own page says its source and Facebook's fields; whether the list does is not seen yet — for Facebook
+  // (`ownPages`) one that does not say its source is read again by its id, as the topic has only a handful.
+  const out: PlatformTsp[] = [];
+  for (const raw of listed) {
+    const said = !ownPages || 'traffic_source' in bag(raw);
+    out.push(said ? parseTsp(raw) : (await readTsp(client, num(bag(raw)['id']))) ?? parseTsp(raw));
+  }
+  return out;
+}
+
+/** One profile off its own page (`GET /traffic-source-profiles/<id>`): its source, and Facebook's fields where it is Facebook's. */
+export async function readTsp(client: PlatformClient, id: number): Promise<PlatformTsp | null> {
+  const answer = await client.get(`/traffic-source-profiles/${id}`);
+  if (answer.status === 'error' && answer.code === 404) return null;
+  const body = bag(need(answer, `GET /traffic-source-profiles/${id}`));
+  const raw = body['trafficSourceProfile'] ?? body['traffic_source_profile'] ?? body['data'] ?? body;
+  return 'id' in bag(raw) ? parseTsp(raw) : null;
 }
 
 /**
@@ -538,28 +476,30 @@ export function createdId(answer: Answer, key: 'campaignBuilder'): number | null
 export interface UploadFields {
   grade: string;
   language: string;
-  ad_script: string;
+  /** Not sent for an image. */
+  ad_script?: string;
   media_type: string;
   traffic_sources: string[];
   topic_ids: string[];
   countries: string[];
 }
 
-/** One video into the repository, the admin's form part for part, the file last. */
+/** One video or image into the repository, the admin's form part for part, the file last under its own mime. */
 export const uploadCreative = (
-  client: PlatformClient, fields: UploadFields, file: { name: string; bytes: Buffer }, onProgress?: (sent: number, total: number) => void,
+  client: PlatformClient, { ad_script: script, ...fields }: UploadFields, file: { name: string; bytes: Buffer; mime: string },
+  onProgress?: (sent: number, total: number) => void,
 ): Promise<Answer> =>
-  client.postForm('/creative-repo', { ...fields }, { field: 'file', name: file.name, bytes: file.bytes, mime: 'video/mp4' }, onProgress);
+  client.postForm('/creative-repo', script === undefined ? { ...fields } : { ...fields, ad_script: script }, { field: 'file', ...file }, onProgress);
 
-/** The admin sends every list twice — once plain, once as `name[]` — and so does this. */
+/** The admin sends every list twice — once plain, the list's first, once as `name[]` — and so does this. */
 export const createHeadline = (client: PlatformClient, body: Omit<HeadlineBody, 'topic_ids'> & { topic_ids: string[] }): Promise<Answer> =>
   client.postForm('/creative-repo/headline', {
     topic_ids: body.topic_ids[0] ?? '',
     grade: body.grade,
     countries: body.countries[0] ?? 'All',
     headlines: body.headlines[0] ?? '',
-    primary_texts: '',
-    descriptions: '',
+    primary_texts: body.primary_texts[0] ?? '',
+    descriptions: body.descriptions[0] ?? '',
     language: body.language,
     source: body.source,
     'topic_ids[]': body.topic_ids,
