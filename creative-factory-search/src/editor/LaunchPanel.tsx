@@ -347,11 +347,19 @@ export function LaunchPanel({ project, translator }: Props) {
     if (hit === undefined || hit.id === topicId) return;
     setTopicId(hit.id);
     setChosen('');
-    setSource('');
   };
 
   return (
     <>
+      <div className="group">
+        <div className="lab">Джерело</div>
+        <select value={source} disabled={busy} onChange={e => setSource(e.target.value)}>
+          {source === '' ? <option value="">за замовчуванням команди</option> : null}
+          <option value="tiktok">TikTok</option>
+          <option value="facebook">Facebook</option>
+        </select>
+      </div>
+
       <div className="group">
         <div className="lab">Топік</div>
         <input
@@ -536,12 +544,6 @@ export function LaunchPanel({ project, translator }: Props) {
               </div>
             ) : (
               <div className="launch-edit">
-                <label>Джерело
-                  <select value={form.source} disabled={busy} onChange={e => setSource(e.target.value)}>
-                    <option value="tiktok">TikTok</option>
-                    <option value="facebook">Facebook</option>
-                  </select>
-                </label>
                 <label>Language<input type="text" value={form.language} disabled={busy} onChange={e => patch({ language: e.target.value })} /></label>
                 <label>RSOC
                   <select value={form.rsoc_count} disabled={busy} onChange={e => patch({ rsoc_count: Number(e.target.value) })}>
