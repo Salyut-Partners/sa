@@ -6,7 +6,7 @@ import {
 } from './selection.ts';
 import type { Project } from './types.ts';
 
-const photo = (id: string) => ({ id, name: id + '.jpg', image: 'data:,' + id });
+const photo = (id: string) => ({ id, name: id + '.jpg', image: 'data:,' + id, canvas: { width: 1080, height: 1920 } });
 
 const withPhotos = (...ids: string[]): Project =>
   apply(createProject(), { type: 'photo/add', photos: ids.map(photo) });
@@ -143,7 +143,7 @@ describe('reading a template across the selection', () => {
   const batch = (): Project => {
     let p = ['a', 'b'].reduce(
       (acc, id) => apply(acc, {
-        type: 'photo/add', photos: [{ id, name: id, image: 'data:,' + id }],
+        type: 'photo/add', photos: [{ id, name: id, image: 'data:,' + id, canvas: { width: 1080, height: 1920 } }],
       }),
       createProject(),
     );

@@ -126,14 +126,19 @@ function dressTemplate(spec: Spec, root: HTMLElement): TemplatePlace | null {
   const frame = layer.querySelector<HTMLElement>('.cf-tpl-frame')!;
   // Every template is written against one frame size and scaled to the canvas,
   // so a second output size is this line rather than four re-measured layouts.
+  // A canvas of another shape than 9:16 — a square or landscape photo — gets
+  // the frame whole, as large as fits and centred: a layout cut off at the
+  // edges loses its words, and a squashed one is not the layout any more.
   //
   // The nudge is written after the scale, which puts it in the frame's own
   // 1080x1920 units: the same figure then means the same place on the picture
   // whatever size the canvas turns out to be. Percent of the frame rather than
   // pixels for the same reason.
-  const fit = spec.canvas.width / DESIGN.width;
+  const fit = Math.min(spec.canvas.width / DESIGN.width, spec.canvas.height / DESIGN.height);
+  const dx = (spec.canvas.width - DESIGN.width * fit) / 2;
+  const dy = (spec.canvas.height - DESIGN.height * fit) / 2;
   const lift = DESIGN.height * (spec.template.offsetY / 100);
-  frame.style.transform = `scale(${fit}) translateY(${lift}px)`;
+  frame.style.transform = `translate(${dx}px, ${dy}px) scale(${fit}) translateY(${lift}px)`;
 
   return {
     spec: spec.template,

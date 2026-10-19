@@ -5,7 +5,7 @@ import type { Project } from './types.ts';
 
 function projectWithButton(): Project {
   let p = apply(createProject(), {
-    type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:image/jpeg;base64,zz' }],
+    type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:image/jpeg;base64,zz', canvas: { width: 1080, height: 1920 } }],
   });
   p = apply(p, { type: 'photo/patch', ids: ['a'], patch: { accent: '#123456', pushIn: false } });
   return apply(p, {
@@ -36,11 +36,15 @@ describe('buildSpec', () => {
     expect(spec.buttons[0]!.rect).toEqual({ x: 108, y: 960, w: 540, h: 192 });
   });
 
-  it('follows the canvas when it changes instead of assuming 1080x1920', () => {
+  it("renders at the photo's own frame, not the project's", () => {
     const p = apply(projectWithButton(), {
-      type: 'project/patch', patch: { canvas: { width: 540, height: 960 } },
+      type: 'photo/replace', id: 'a', name: 'square.jpg', image: 'data:,sq',
+      canvas: { width: 1080, height: 1080 },
     });
-    expect(buildSpec(p, 'a')!.buttons[0]!.rect).toEqual({ x: 54, y: 480, w: 270, h: 96 });
+    const spec = buildSpec(p, 'a')!;
+    expect(spec.canvas).toEqual({ width: 1080, height: 1080 });
+    // Same percent, resolved against the square frame.
+    expect(spec.buttons[0]!.rect).toEqual({ x: 108, y: 540, w: 540, h: 108 });
   });
 
   it('carries the text, colour, font and timing of each button', () => {

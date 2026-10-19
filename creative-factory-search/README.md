@@ -9,7 +9,10 @@ the launch in [`.scratch/prd-quick-launch.md`](.scratch/prd-quick-launch.md).
 
 ## What works today (stage E6)
 
-Import a batch of 9:16 photos at once — the ones that do not fit are listed with
+Import a batch of photos of any shape at once — each creative renders at its
+own photo's proportions (short side 1080, long side at most 1920: 1080×1920,
+1080×1080, 1080×1350, 1920×1080), and a template is fitted whole into the
+middle of a frame that is not 9:16; a file that is not an image is listed with
 a reason rather than failing the import. The batch lays out four to a row; a
 click picks the photo the panel edits, ⌘-click adds another, ⌘A takes all of
 them, and every change is written to the whole selection at once. Where the

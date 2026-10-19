@@ -1,23 +1,39 @@
-// Photos are accepted only at the aspect ratio the templates are built for.
-// Cropping is deliberately not offered: a silently re-framed photo is worse
-// than a rejected one, because it reaches the export looking almost right.
-export const TARGET_RATIO = 9 / 16;
-export const RATIO_TOLERANCE = 0.01;
-export const FULL_WIDTH = 1080;
-export const FULL_HEIGHT = 1920;
+// Photos of any shape are accepted, and each creative is rendered at the shape
+// of its own photo — a square photo makes a square video, a landscape one a
+// landscape video. Nothing is cropped to 9:16 and nothing is letterboxed.
+import type { CanvasSize } from './types.ts';
+
+/** The short side of a frame, as long as the long side fits under `LONG_SIDE`. */
+export const SHORT_SIDE = 1080;
+/** The long side of a frame never goes past this — 1080x1920 for 9:16. */
+export const LONG_SIDE = 1920;
+
+export type ImageWarning = 'low-resolution';
 
 export type ImageCheck =
-  | { ok: true; warning: 'low-resolution' | null }
-  | { ok: false; reason: 'ratio' };
+  | { ok: true; canvas: CanvasSize; warning: ImageWarning | null }
+  | { ok: false; reason: 'unreadable' };
+
+/**
+ * The frame a photo of this size is rendered at: its own proportions, the short
+ * side at 1080 — 1080x1920, 1080x1080, 1080x1350, 1920x1080 for the usual four —
+ * unless that would take the long side past 1920, in which case the long side
+ * is 1920. Both sides even, because H.264 at 4:2:0 refuses an odd one.
+ */
+export function frameFor(width: number, height: number): CanvasSize {
+  const scale = Math.min(SHORT_SIDE / Math.min(width, height), LONG_SIDE / Math.max(width, height));
+  const even = (n: number): number => Math.max(2, Math.round((n * scale) / 2) * 2);
+  return { width: even(width), height: even(height) };
+}
 
 export function checkImage(width: number, height: number): ImageCheck {
-  if (!(width > 0) || !(height > 0)) return { ok: false, reason: 'ratio' };
+  if (!(width > 0) || !(height > 0)) return { ok: false, reason: 'unreadable' };
 
-  const drift = Math.abs(width / height / TARGET_RATIO - 1);
-  if (drift > RATIO_TOLERANCE) return { ok: false, reason: 'ratio' };
-
-  const small = width < FULL_WIDTH || height < FULL_HEIGHT;
-  return { ok: true, warning: small ? 'low-resolution' : null };
+  const canvas = frameFor(width, height);
+  // A frame larger than the photo is the photo upscaled; past a pixel or so of
+  // rounding the video goes soft.
+  const small = width < canvas.width * 0.99 || height < canvas.height * 0.99;
+  return { ok: true, canvas, warning: small ? 'low-resolution' : null };
 }
 
 // --------------------------------------------------------- importing a batch --
@@ -39,11 +55,12 @@ interface FileRef {
 }
 
 export interface AcceptedPhoto extends FileRef {
-  warning: 'low-resolution' | null;
+  canvas: CanvasSize;
+  warning: ImageWarning | null;
 }
 
 export interface RejectedPhoto extends FileRef {
-  reason: 'unreadable' | 'ratio' | 'no-room';
+  reason: 'unreadable' | 'no-room';
 }
 
 export interface ImportPlan {
@@ -66,14 +83,14 @@ export function planImport(candidates: readonly Candidate[], room: number): Impo
     }
     const check = checkImage(candidate.size.width, candidate.size.height);
     if (!check.ok) {
-      plan.rejected.push({ index, name: candidate.name, reason: 'ratio' });
+      plan.rejected.push({ index, name: candidate.name, reason: check.reason });
       return;
     }
     if (plan.accepted.length >= room) {
       plan.rejected.push({ index, name: candidate.name, reason: 'no-room' });
       return;
     }
-    plan.accepted.push({ index, name: candidate.name, warning: check.warning });
+    plan.accepted.push({ index, name: candidate.name, canvas: check.canvas, warning: check.warning });
   });
 
   return plan;

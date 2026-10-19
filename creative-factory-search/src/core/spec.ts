@@ -29,7 +29,7 @@ export function buildSpec(
     fontId: b.fontId,
     text: b.text,
     color: b.color,
-    rect: toPixels(b.rect, project.canvas),
+    rect: toPixels(b.rect, photo.canvas),
     timing: { ...b.timing },
   }));
 
@@ -47,7 +47,7 @@ export function buildSpec(
     };
 
   return {
-    canvas: { ...project.canvas },
+    canvas: { ...photo.canvas },
     duration: project.duration,
     fps: project.fps,
     image: photo.image,

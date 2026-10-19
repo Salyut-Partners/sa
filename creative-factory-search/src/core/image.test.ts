@@ -1,41 +1,56 @@
 import { describe, expect, it } from 'vitest';
-import { checkImage, planImport } from './image.ts';
+import { checkImage, frameFor, planImport } from './image.ts';
 
-describe('checkImage', () => {
-  it('accepts an exact 9:16 photo at full resolution', () => {
-    expect(checkImage(1080, 1920)).toEqual({ ok: true, warning: null });
+describe('frameFor', () => {
+  it('keeps 9:16 at 1080x1920', () => {
+    expect(frameFor(1080, 1920)).toEqual({ width: 1080, height: 1920 });
+    expect(frameFor(2160, 3840)).toEqual({ width: 1080, height: 1920 });
   });
 
-  it('accepts a larger 9:16 photo', () => {
-    expect(checkImage(2160, 3840)).toEqual({ ok: true, warning: null });
+  it('renders a square photo square', () => {
+    expect(frameFor(3000, 3000)).toEqual({ width: 1080, height: 1080 });
+  });
+
+  it('renders 4:5 at 1080x1350', () => {
+    expect(frameFor(1600, 2000)).toEqual({ width: 1080, height: 1350 });
+  });
+
+  it('renders a landscape photo landscape', () => {
+    expect(frameFor(3840, 2160)).toEqual({ width: 1920, height: 1080 });
+  });
+
+  it('caps the long side at 1920 for a photo longer than 16:9', () => {
+    expect(frameFor(2520, 1080)).toEqual({ width: 1920, height: 822 });
+  });
+
+  it('keeps both sides even, which H.264 needs', () => {
+    const { width, height } = frameFor(1001, 1333);
+    expect(width % 2).toBe(0);
+    expect(height % 2).toBe(0);
+  });
+});
+
+describe('checkImage', () => {
+  it('accepts a 9:16 photo at full resolution', () => {
+    expect(checkImage(1080, 1920)).toEqual({ ok: true, canvas: { width: 1080, height: 1920 }, warning: null });
   });
 
   it('tolerates rounding in the source file', () => {
-    expect(checkImage(1079, 1919).ok).toBe(true);
+    expect(checkImage(1079, 1919)).toMatchObject({ ok: true, warning: null });
   });
 
-  it('accepts a smaller photo but flags the resolution', () => {
-    expect(checkImage(720, 1280)).toEqual({ ok: true, warning: 'low-resolution' });
+  it('accepts a photo of any shape at its own proportions', () => {
+    expect(checkImage(1920, 1080)).toEqual({ ok: true, canvas: { width: 1920, height: 1080 }, warning: null });
+    expect(checkImage(1080, 1080)).toEqual({ ok: true, canvas: { width: 1080, height: 1080 }, warning: null });
   });
 
-  it('rejects a square photo', () => {
-    expect(checkImage(1080, 1080)).toEqual({ ok: false, reason: 'ratio' });
+  it('flags a photo smaller than its frame', () => {
+    expect(checkImage(720, 1280)).toEqual({ ok: true, canvas: { width: 1080, height: 1920 }, warning: 'low-resolution' });
+    expect(checkImage(800, 800)).toMatchObject({ ok: true, warning: 'low-resolution' });
   });
 
-  it('rejects a landscape photo', () => {
-    expect(checkImage(1920, 1080)).toEqual({ ok: false, reason: 'ratio' });
-  });
-
-  it('accepts a photo just inside the one-percent tolerance', () => {
-    expect(checkImage(1080, 1910).ok).toBe(true);
-  });
-
-  it('rejects a photo just outside the one-percent tolerance', () => {
-    expect(checkImage(1080, 1900).ok).toBe(false);
-  });
-
-  it('rejects a photo with no dimensions rather than dividing by zero', () => {
-    expect(checkImage(0, 0)).toEqual({ ok: false, reason: 'ratio' });
+  it('turns away a photo with no dimensions rather than dividing by zero', () => {
+    expect(checkImage(0, 0)).toEqual({ ok: false, reason: 'unreadable' });
   });
 });
 
@@ -48,13 +63,14 @@ describe('planImport', () => {
     expect(plan.rejected).toEqual([]);
   });
 
-  it('keeps the good ones when one photo in the batch is the wrong shape', () => {
+  it('takes a photo of another shape with a frame of that shape', () => {
     const plan = planImport(
-      [good('a.jpg'), { name: 'wide.jpg', size: { width: 1920, height: 1080 } }, good('c.jpg')],
+      [good('a.jpg'), { name: 'wide.jpg', size: { width: 3840, height: 2160 } }],
       12,
     );
-    expect(plan.accepted.map(a => a.name)).toEqual(['a.jpg', 'c.jpg']);
-    expect(plan.rejected).toEqual([{ index: 1, name: 'wide.jpg', reason: 'ratio' }]);
+    expect(plan.accepted.map(a => a.name)).toEqual(['a.jpg', 'wide.jpg']);
+    expect(plan.accepted[1]).toMatchObject({ canvas: { width: 1920, height: 1080 }, warning: null });
+    expect(plan.rejected).toEqual([]);
   });
 
   it('names the file that could not be read at all', () => {
@@ -64,7 +80,7 @@ describe('planImport', () => {
   });
 
   it('points back at the candidate it accepted, so the caller can pair the image up', () => {
-    const plan = planImport([{ name: 'wide.jpg', size: { width: 100, height: 100 } }, good('b.jpg')], 12);
+    const plan = planImport([{ name: 'notes.pdf', size: null }, good('b.jpg')], 12);
     expect(plan.accepted[0]!.index).toBe(1);
   });
 
@@ -81,10 +97,7 @@ describe('planImport', () => {
   });
 
   it('does not let a rejected photo take up room', () => {
-    const plan = planImport(
-      [{ name: 'wide.jpg', size: { width: 1920, height: 1080 } }, good('b.jpg')],
-      1,
-    );
+    const plan = planImport([{ name: 'notes.pdf', size: null }, good('b.jpg')], 1);
     expect(plan.accepted.map(a => a.name)).toEqual(['b.jpg']);
   });
 

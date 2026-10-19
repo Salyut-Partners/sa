@@ -4,7 +4,7 @@ import { apply, createProject, defaultButton } from './project.ts';
 import type { LocaleId, Project } from './types.ts';
 
 const photos = (...names: string[]) =>
-  names.map((name, i) => ({ id: 'p' + i, name, image: 'data:image/jpeg;base64,' + i }));
+  names.map((name, i) => ({ id: 'p' + i, name, image: 'data:image/jpeg;base64,' + i, canvas: { width: 1080, height: 1920 } }));
 
 function batchOf(...names: string[]): Project {
   const project = apply(createProject(), { type: 'photo/add', photos: photos(...names) });
@@ -106,8 +106,8 @@ describe('planBatch and the shared video', () => {
 
   it('groups two photos that really are the same picture', () => {
     const same = [
-      { id: 'p0', name: 'a.jpg', image: 'data:image/jpeg;base64,x' },
-      { id: 'p1', name: 'b.jpg', image: 'data:image/jpeg;base64,x' },
+      { id: 'p0', name: 'a.jpg', image: 'data:image/jpeg;base64,x', canvas: { width: 1080, height: 1920 } },
+      { id: 'p1', name: 'b.jpg', image: 'data:image/jpeg;base64,x', canvas: { width: 1080, height: 1920 } },
     ];
     let project = apply(createProject(), { type: 'photo/add', photos: same });
     project = apply(project, { type: 'selection/all' });

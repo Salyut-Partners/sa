@@ -157,7 +157,7 @@ describe('timingIssues', () => {
 
 describe('photoTimings', () => {
   const base = (over: Partial<Photo> = {}): Photo => ({
-    id: 'a', name: 'a.jpg', image: 'data:,a', accent: '#1fa94b',
+    id: 'a', name: 'a.jpg', image: 'data:,a', canvas: { width: 1080, height: 1920 }, accent: '#1fa94b',
     pushIn: true, glare: true, template: null, buttons: [], ...over,
   });
 

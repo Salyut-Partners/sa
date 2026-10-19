@@ -5,7 +5,7 @@ import { newLocale } from './locales.ts';
 import { templateById, templateMoves } from './templates.ts';
 import { DEFAULT_MODEL_ID } from './voice.ts';
 import type {
-  ButtonLayer, FieldValue, Locale, LocaleId, Photo, Project, Rect, Timing, TranslatedFrom,
+  ButtonLayer, CanvasSize, FieldValue, Locale, LocaleId, Photo, Project, Rect, Timing, TranslatedFrom,
 } from './types.ts';
 
 export const DEFAULT_CANVAS = { width: 1080, height: 1920 } as const;
@@ -39,6 +39,7 @@ export interface NewPhoto {
   id: string;
   name: string;
   image: string;
+  canvas: CanvasSize;
 }
 
 export type PhotoPatch = Partial<Pick<Photo, 'name' | 'image' | 'accent' | 'pushIn' | 'glare'>>;
@@ -78,7 +79,7 @@ export interface LocaleWrite {
 export type Command =
   | { type: 'photo/add'; photos: readonly NewPhoto[] }
   | { type: 'photo/remove'; id: string }
-  | { type: 'photo/replace'; id: string; name: string; image: string }
+  | { type: 'photo/replace'; id: string; name: string; image: string; canvas: CanvasSize }
   | { type: 'photo/activate'; id: string }
   | { type: 'photo/toggle'; id: string }
   | { type: 'selection/all' }
@@ -151,6 +152,7 @@ function newPhoto(input: NewPhoto): Photo {
     id: input.id,
     name: input.name,
     image: input.image,
+    canvas: { ...input.canvas },
     accent: DEFAULT_ACCENT,
     pushIn: true,
     glare: true,
@@ -250,6 +252,9 @@ export function apply(project: Project, command: Command): Project {
         ...p,
         name: command.name,
         image: command.image,
+        // Buttons are in percent of the frame, so they keep their place on the
+        // picture when a photo of another shape takes over.
+        canvas: { ...command.canvas },
       }));
 
     case 'photo/activate': {
@@ -321,7 +326,7 @@ export function apply(project: Project, command: Command): Project {
       return mapPhotos(project, command.ids, p => {
         const button = p.buttons[command.index];
         if (button === undefined) return p;
-        const rect = nudgeRect(button.rect, command.by, project.canvas, MIN_BUTTON_SIZE);
+        const rect = nudgeRect(button.rect, command.by, p.canvas, MIN_BUTTON_SIZE);
         return {
           ...p,
           buttons: p.buttons.map((b, i) => (i === command.index ? { ...b, rect } : b)),

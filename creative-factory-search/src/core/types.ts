@@ -98,6 +98,12 @@ export interface Photo {
   name: string;
   /** data: URL. Kept in the model so a project is one self-contained document. */
   image: string;
+  /**
+   * The frame this creative renders at — the photo's own proportions, see
+   * `frameFor`. On the photo rather than the project: a batch can mix a 9:16
+   * photo with a square one, and each goes out in its own shape.
+   */
+  canvas: CanvasSize;
   accent: string;
   pushIn: boolean;
   glare: boolean;

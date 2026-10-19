@@ -96,7 +96,7 @@ export function SidePanel(props: Props) {
             this is only the way in by clicking. */}
         <FilePicker className="drop" accept="image/*" multiple onPick={props.onFiles}>
           <span className="t">Перетягніть або натисніть</span>
-          <span className="s">одразу декілька, вертикальні 9:16</span>
+          <span className="s">одразу декілька, будь-якого формату</span>
         </FilePicker>
         {props.report.rejected.map(line => <div className="error" key={line}>{line}</div>)}
         {props.report.warnings.map(line => <div className="warn" key={line}>{line}</div>)}
@@ -149,7 +149,7 @@ export function SidePanel(props: Props) {
             <div className="lab">Шаблон</div>
             <TemplateLibrary
               selectedId={templateChoice(project, targets)}
-              canvas={project.canvas}
+              canvas={photo.canvas}
               color={photo.accent}
               locale={activeLocale(project)}
               onPick={definitionId =>

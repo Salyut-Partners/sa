@@ -96,6 +96,8 @@ const isButton = (v: unknown): v is ButtonLayer =>
 
 const isPhoto = (v: unknown): v is Photo =>
   isBag(v) && isText(v['id']) && isText(v['name']) && isText(v['image']) &&
+  // Absent in every file written while the whole project had one frame size.
+  (v['canvas'] === undefined || isCanvas(v['canvas'])) &&
   isText(v['accent']) && typeof v['pushIn'] === 'boolean' && typeof v['glare'] === 'boolean' &&
   // Absent is a valid answer, and the one a version 1 file gives.
   (v['template'] == null || isTemplate(v['template'])) &&
@@ -131,10 +133,12 @@ export function fromFile(data: unknown): LoadResult {
   // still had a layer of catalogue objects carries `props`, and copying the
   // photo whole would carry that into a model that has no such field. Every
   // photo comes back with exactly the shape the rest of the app assumes.
+  const shared = isCanvas(data['canvas']) ? data['canvas'] : DEFAULT_CANVAS;
   const photos: Photo[] = stored.map(p => ({
     id: p.id,
     name: p.name,
     image: p.image,
+    canvas: { ...(p.canvas ?? shared) },
     accent: p.accent,
     pushIn: p.pushIn,
     glare: p.glare,

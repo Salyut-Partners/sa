@@ -5,7 +5,7 @@ import {
 import { templateById } from './templates.ts';
 import type { Project } from './types.ts';
 
-const photo = (id: string) => ({ id, name: id + '.jpg', image: 'data:image/jpeg;base64,' + id });
+const photo = (id: string) => ({ id, name: id + '.jpg', image: 'data:image/jpeg;base64,' + id, canvas: { width: 1080, height: 1920 } });
 
 const withPhotos = (...ids: string[]): Project =>
   ids.reduce((p, id) => apply(p, { type: 'photo/add', photos: [photo(id)] }), createProject());
@@ -414,7 +414,7 @@ describe('importing a batch', () => {
       type: 'button/add', ids: ['a'], index: 0, button: defaultButton('btn', 'glow', 0, '#1fa94b'),
     });
     const p = apply(built, {
-      type: 'photo/replace', id: 'a', name: 'new.jpg', image: 'data:image/jpeg;base64,new',
+      type: 'photo/replace', id: 'a', name: 'new.jpg', image: 'data:image/jpeg;base64,new', canvas: { width: 1080, height: 1920 },
     });
     expect(p.photos[0]!.name).toBe('new.jpg');
     expect(p.photos[0]!.image).toBe('data:image/jpeg;base64,new');

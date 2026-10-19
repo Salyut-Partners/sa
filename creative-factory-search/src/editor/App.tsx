@@ -5,12 +5,12 @@ import {
 } from '../core/history.ts';
 import { activeLocale } from '../core/locales.ts';
 import {
-  apply, createProject, MAX_PHOTOS, photoTimings, type Command,
+  apply, createProject, MAX_PHOTOS, photoById, photoTimings, type Command,
 } from '../core/project.ts';
 import { parseRoute, routeHash, type Tab } from '../core/route.ts';
 import { buildSpec } from '../core/spec.ts';
 import { posterTime } from '../core/timing.ts';
-import type { Photo, Project, Spec } from '../core/types.ts';
+import type { CanvasSize, Photo, Project, Spec } from '../core/types.ts';
 import { LaunchPanel } from './LaunchPanel.tsx';
 import { LayerBoxes } from './LayerBoxes.tsx';
 import { Clock } from './clock.ts';
@@ -152,7 +152,9 @@ export function App() {
   }, [project.photos, project.locales, settings, store]);
   useEffect(() => store.stop, [store]);
 
-  const scale = CELL_WIDTH / project.canvas.width;
+  const active = project.activeId === null ? null : photoById(project, project.activeId);
+  /** Every cell is the same width; its height follows its own photo's shape. */
+  const scaleOf = (canvas: CanvasSize): number => CELL_WIDTH / canvas.width;
   const selected = useMemo(() => new Set(project.selection), [project.selection]);
 
   // A cell rebuilds its whole DOM when its Spec changes, so a Spec must not be
@@ -201,7 +203,7 @@ export function App() {
     if (!file || id === null) return;
     const result = await importReplacement(file);
     setReport(result.ok ? NOTHING_IMPORTED : { warnings: [], rejected: [result.reason] });
-    if (result.ok) dispatch({ type: 'photo/replace', id, name: result.name, image: result.image });
+    if (result.ok) dispatch({ type: 'photo/replace', id, name: result.name, image: result.image, canvas: result.canvas });
   }, [dispatch]);
 
   /** The button being edited, as the keyboard needs it: outside React's render. */
@@ -360,8 +362,9 @@ export function App() {
               : saveState === 'pending' ? 'збереження…' : 'збережено'}
           </div>
           <div className="hint">
-            {project.photos.length}/{MAX_PHOTOS} фото · {project.canvas.width} ×{' '}
-            {project.canvas.height} · {project.fps} fps · {project.duration.toFixed(1)} с
+            {project.photos.length}/{MAX_PHOTOS} фото
+            {active === null ? null : <> · {active.canvas.width} × {active.canvas.height}</>}
+            {' '}· {project.fps} fps · {project.duration.toFixed(1)} с
           </div>
         </>)}
       </header>
@@ -382,7 +385,7 @@ export function App() {
           {cells.length === 0 ? (
             <div className="empty">
               <b>Завантажте фото</b>
-              <span>JPG або PNG, вертикальне 9:16 — можна одразу пачку</span>
+              <span>JPG або PNG будь-якого формату — відео вийде в пропорціях фото; можна одразу пачку</span>
             </div>
           ) : (
             <div className="grid">
@@ -390,7 +393,7 @@ export function App() {
                 <CreativeCell
                   key={photo.id}
                   spec={spec}
-                  scale={scale}
+                  scale={scaleOf(photo.canvas)}
                   animate={selected.has(photo.id)}
                   clock={clock}
                   posterAt={poster}
@@ -409,7 +412,7 @@ export function App() {
                         layers={photo.buttons}
                         activeIndex={activeButton}
                         cellWidth={CELL_WIDTH}
-                        cellHeight={project.canvas.height * scale}
+                        cellHeight={photo.canvas.height * scaleOf(photo.canvas)}
                         onSelect={setActiveButton}
                         onChange={rect =>
                           dispatch({

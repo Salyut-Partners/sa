@@ -9,8 +9,8 @@ function sample(): Project {
   let p = apply(createProject(), {
     type: 'photo/add',
     photos: [
-      { id: 'a', name: 'a.jpg', image: 'data:image/jpeg;base64,aa' },
-      { id: 'b', name: 'b.jpg', image: 'data:image/jpeg;base64,bb' },
+      { id: 'a', name: 'a.jpg', image: 'data:image/jpeg;base64,aa', canvas: { width: 1080, height: 1920 } },
+      { id: 'b', name: 'b.jpg', image: 'data:image/jpeg;base64,bb', canvas: { width: 1080, height: 1920 } },
     ],
   });
   p = apply(p, { type: 'photo/patch', ids: ['a'], patch: { accent: '#ff0000' } });
@@ -94,7 +94,7 @@ describe('opening something else', () => {
 describe('a project file carrying templates', () => {
   const saved = (): Project => {
     let p = apply(createProject(), {
-      type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:,a' }],
+      type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:,a', canvas: { width: 1080, height: 1920 } }],
     });
     p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-panel' });
     p = apply(p, { type: 'locale/field', id: 'en', key: 'headline', value: 'Робота' });
@@ -185,7 +185,7 @@ describe('a project file carrying templates', () => {
 describe('a project file carrying languages', () => {
   const saved = (): Project => {
     let p = apply(createProject(), {
-      type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:,a' }],
+      type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:,a', canvas: { width: 1080, height: 1920 } }],
     });
     p = apply(p, { type: 'locale/add', id: 'de' });
     p = apply(p, { type: 'locale/patch', id: 'de', patch: { script: 'Hallo.' } });

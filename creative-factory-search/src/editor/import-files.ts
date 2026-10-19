@@ -2,6 +2,7 @@
 // happen here because they need the browser; every decision about what is
 // acceptable belongs to the core, so this file makes none of its own.
 import { planImport, type Candidate, type RejectedPhoto } from '../core/image.ts';
+import type { CanvasSize } from '../core/types.ts';
 import { MAX_PHOTOS, type NewPhoto } from '../core/project.ts';
 
 /** What an import has to say for itself, in lines the panel prints as they are. */
@@ -52,8 +53,6 @@ function explain(reason: RejectedPhoto['reason'], size: Candidate['size']): stri
   switch (reason) {
     case 'unreadable':
       return 'не вдалось прочитати як зображення';
-    case 'ratio':
-      return `потрібне вертикальне 9:16, а тут ${size?.width}×${size?.height}`;
     case 'no-room':
       // Not "N places were left": by the time this is read the earlier files of
       // the same batch have taken them, and a number that is already spent reads
@@ -72,12 +71,13 @@ export async function importFiles(files: readonly File[], room: number): Promise
       id: crypto.randomUUID(),
       name: a.name,
       image: opened[a.index]!.image,
+      canvas: a.canvas,
     })),
     warnings: plan.accepted
       .filter(a => a.warning !== null)
       .map(a => {
         const size = opened[a.index]!.candidate.size;
-        return `${a.name}: ${size?.width}×${size?.height} — менше за 1080×1920, відео буде м'яким`;
+        return `${a.name}: ${size?.width}×${size?.height} — менше за кадр ${a.canvas.width}×${a.canvas.height}, відео буде м'яким`;
       }),
     rejected: plan.rejected.map(r =>
       `${r.name}: ${explain(r.reason, opened[r.index]!.candidate.size)}`),
@@ -91,10 +91,10 @@ export async function importFiles(files: readonly File[], room: number): Promise
  */
 export async function importReplacement(
   file: File,
-): Promise<{ ok: true; image: string; name: string } | { ok: false; reason: string }> {
+): Promise<{ ok: true; image: string; name: string; canvas: CanvasSize } | { ok: false; reason: string }> {
   const batch = await importFiles([file], 1);
   const photo = batch.photos[0];
   return photo === undefined
     ? { ok: false, reason: batch.rejected[0] ?? file.name }
-    : { ok: true, image: photo.image, name: photo.name };
+    : { ok: true, image: photo.image, name: photo.name, canvas: photo.canvas };
 }

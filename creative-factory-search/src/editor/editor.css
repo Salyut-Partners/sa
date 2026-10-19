@@ -113,7 +113,7 @@ main { flex: 1; display: flex; min-height: 0; }
   flex: 1; min-width: 0; overflow: auto; padding: 20px;
   display: flex; flex-direction: column; align-items: center; gap: 14px;
 }
-.grid { display: grid; grid-template-columns: repeat(4, max-content); gap: 16px; }
+.grid { display: grid; grid-template-columns: repeat(4, max-content); gap: 16px; align-items: start; }
 
 .cell {
   position: relative; border-radius: 10px; overflow: hidden;
