@@ -32,10 +32,15 @@ under the grid stops the selected cells on a second, so you can check what is on
 screen at it without waiting for a render — ⌘A first, to hold the whole batch to
 the same clock.
 
-A photo also wears at most one template, chosen from a library of five whose
-chips are whole frames drawn by the same renderer: a banner listing the
-vacancies, three versions of the offer card — pills, panel, and a sheet that
-unrolls from the top — and the rate list. The form under the library is built
+A photo wears at most one template, and over it at most one overlay — a second
+layout drawn on top, under the buttons: a news strip over a card, a notification
+over a headline. Both are chosen from one library whose chips are whole frames
+drawn by the same renderer: the job banners and offer cards, the rate list, the
+donor rows and the payment slider, news strips, poster headlines, a photo with a
+teaser panel or a guide cover, wrong-and-right pills, option tiles, steps, a
+before-and-after gauge, and three notifications — a banner, a dialog and a
+comment reply, whose icons are letters and marks rather than logos or faces, so
+none of them can pose as a real app. The form under the library is built
 from the template's own schema rather than laid out by hand, so every field it
 carries is editable, lists a line to an item. The template has the same window as
 a button — appears at, hides at, entrance — and lands over the same warnings.

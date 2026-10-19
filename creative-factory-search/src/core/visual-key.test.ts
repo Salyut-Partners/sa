@@ -13,6 +13,7 @@ const spec = (over: Partial<Spec> = {}): Spec => ({
   pushIn: true,
   glare: true,
   template: null,
+  overlay: null,
   buttons: [{
     styleId: 'glow',
     fontId: 'anton',
@@ -40,7 +41,7 @@ describe('visualKey', () => {
     // split a group the moment a spec arrived over the wire.
     const b: Spec = {
       modelId: a.modelId, voiceId: a.voiceId, script: a.script, locale: a.locale,
-      buttons: a.buttons, template: a.template, glare: a.glare, pushIn: a.pushIn,
+      buttons: a.buttons, overlay: a.overlay, template: a.template, glare: a.glare, pushIn: a.pushIn,
       image: a.image, fps: a.fps, duration: a.duration, canvas: a.canvas,
     };
     expect(visualKey(b)).toBe(visualKey(a));
@@ -153,6 +154,20 @@ describe('visualKey', () => {
       expect(visualKey(withTemplate({
         timing: { appearAt: 2, hideAt: null, enter: 'none', enterDuration: 0.6 },
       }))).not.toBe(visualKey(withTemplate()));
+    });
+
+    it('by the overlay drawn over it', () => {
+      const base = withTemplate();
+      expect(visualKey({ ...base, overlay: base.template })).not.toBe(visualKey(base));
+    });
+
+    it('and tells the layout from the overlay, which sit in different layers', () => {
+      // The same layout under one and over the other is two different frames:
+      // what is painted on top of what changes.
+      const layout = withTemplate().template!;
+      const strip = { ...layout, definitionId: 'news-tab' };
+      expect(visualKey(spec({ template: layout, overlay: strip })))
+        .not.toBe(visualKey(spec({ template: strip, overlay: layout })));
     });
   });
 });

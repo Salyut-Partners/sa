@@ -1,13 +1,11 @@
 import type { BatchPlan } from '../core/batch.ts';
 import { activeLocale, editedFieldCount, LOCALE_NAMES } from '../core/locales.ts';
 import {
-  defaultButton, nextSlot, photoById, TEMPLATE_LIFT, type ButtonPatch, type Command,
+  defaultButton, nextSlot, photoById, type ButtonPatch, type Command,
 } from '../core/project.ts';
 import {
-  buttonCount, buttonField, buttonRectField, buttonTimingField, photoField, templateChoice,
-  templateOffsetField, templateTimingField,
+  buttonCount, buttonField, buttonRectField, buttonTimingField, photoField,
 } from '../core/selection.ts';
-import { templateMoves } from '../core/templates.ts';
 import type { Project } from '../core/types.ts';
 import { BUTTON_STYLES, FONTS } from '../renderer/index.ts';
 import type { ExportRun } from './export.ts';
@@ -19,8 +17,7 @@ import {
 } from './fields.tsx';
 import { describeTranslator, type VoiceCatalogue } from './server.ts';
 import { StyleLibrary } from './StylePreview.tsx';
-import { TemplateFields } from './TemplateFields.tsx';
-import { TemplateLibrary } from './TemplatePreview.tsx';
+import { TemplateSlotPanel } from './TemplateSlot.tsx';
 import { TimingFields } from './TimingFields.tsx';
 import type { Translator } from './translate.ts';
 import { VoicePanel } from './VoicePanel.tsx';
@@ -145,95 +142,33 @@ export function SidePanel(props: Props) {
 
           <hr />
 
-          <div className="group">
-            <div className="lab">Шаблон</div>
-            <TemplateLibrary
-              selectedId={templateChoice(project, targets)}
-              canvas={photo.canvas}
-              color={photo.accent}
-              locale={activeLocale(project)}
-              onPick={definitionId =>
-                dispatch({ type: 'template/set', ids: targets, definitionId })}
-            />
-          </div>
+          <TemplateSlotPanel project={project} dispatch={dispatch} slot="template" />
 
-          {photo.template ? (
-            // Keyed by which template is being edited, so swapping layout builds
-            // the boxes afresh rather than leaving a half-typed draft sitting in
-            // a box that now belongs to a different field.
-            <div key={`${project.activeId}:${photo.template.definitionId}`}>
-              {templateMoves(photo.template.definitionId) ? (
-                <div className="group">
-                  <div className="lab">
-                    Положення <span className="val">% висоти кадру</span>
-                  </div>
-                  <div className="row">
-                    <NumberField
-                      value={templateOffsetField(project, targets)}
-                      onChange={offsetY =>
-                        dispatch({ type: 'template/patch', ids: targets, patch: { offsetY } })}
-                      min={TEMPLATE_LIFT.min}
-                      max={TEMPLATE_LIFT.max}
-                      step={1}
-                      suffix="↕"
-                    />
-                    <button
-                      className="wide"
-                      onClick={() => dispatch({
-                        type: 'template/patch', ids: targets, patch: { offsetY: 0 },
-                      })}
-                    >
-                      На місце
-                    </button>
-                  </div>
-                  <div className="note">
-                    Від'ємне — вгору. Тільки ця смуга рухається: решта шаблонів
-                    затемнює все фото, і зсув потягнув би затемнення за край.
-                  </div>
-                </div>
-              ) : null}
+          <hr />
 
-              <div className="group">
-                <div className="lab">Час на екрані шаблону</div>
-                <TimingFields
-                  read={key => templateTimingField(project, targets, key)}
-                  onChange={timing =>
-                    dispatch({ type: 'template/patch', ids: targets, patch: { timing } })}
-                  timing={photo.template.timing}
-                  duration={project.duration}
-                />
-                <div className="note">
-                  Шаблон приходить своєю анімацією; ця — понад неї.
-                </div>
+          <TemplateSlotPanel project={project} dispatch={dispatch} slot="overlay" />
+
+          {photo.template || photo.overlay ? (
+            <div className="group">
+              <div className="lab">
+                Тексти
+                <span className="val">{LOCALE_NAMES[project.activeLocale]}</span>
               </div>
-
-              <div className="group">
-                <div className="lab">
-                  Тексти
-                  <span className="val">{LOCALE_NAMES[project.activeLocale]}</span>
-                </div>
-                <div className="note">
-                  Текст належить мові, не фото: правка лягає на всю пачку в цій мові.
-                </div>
-                <button
-                  className="wide"
-                  style={{ marginTop: 8 }}
-                  disabled={
-                    props.translator.busy || project.locales.length < 2 || noTranslator !== ''
-                  }
-                  onClick={props.translator.translateFields}
-                >
-                  Перекласти правки на решту мов
-                  <span className="val"> {editedFieldCount(project)}</span>
-                </button>
-                {noTranslator === '' ? null : <div className="warn">{noTranslator}</div>}
+              <div className="note">
+                Текст належить мові, не фото: правка лягає на всю пачку в цій мові.
               </div>
-
-              <TemplateFields
-                project={project}
-                definitionId={photo.template.definitionId}
-                dispatch={dispatch}
-              />
+              <button
+                className="wide"
+                style={{ marginTop: 8 }}
+                disabled={
+                  props.translator.busy || project.locales.length < 2 || noTranslator !== ''
+                }
+                onClick={props.translator.translateFields}
+              >
+                Перекласти правки на решту мов
+                <span className="val"> {editedFieldCount(project)}</span>
+              </button>
+              {noTranslator === '' ? null : <div className="warn">{noTranslator}</div>}
             </div>
           ) : null}
 

@@ -109,6 +109,12 @@ export interface Photo {
   glare: boolean;
   /** At most one. A photo either wears a template or it does not. */
   template: TemplateLayer | null;
+  /**
+   * A second layout drawn over the first — a news strip over a card, a
+   * notification over a headline. Also at most one: two layers is what the
+   * sketches combine, and a stack of them would be a panel nobody could read.
+   */
+  overlay: TemplateLayer | null;
   buttons: ButtonLayer[];
 }
 
@@ -222,6 +228,8 @@ export interface Spec {
   pushIn: boolean;
   glare: boolean;
   template: TemplateSpec | null;
+  /** Drawn over the template, under the buttons. See `Photo.overlay`. */
+  overlay: TemplateSpec | null;
   buttons: ButtonSpec[];
   /** Which language this one is. Not visual: the words are already resolved. */
   locale: LocaleId;

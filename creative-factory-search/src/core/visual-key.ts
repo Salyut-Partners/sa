@@ -5,7 +5,7 @@
 // language, and the only difference between its German and its Polish is the
 // soundtrack. This key is what lets the export notice — it walks the frames
 // once per distinct picture and muxes the rest.
-import type { FieldValue, Spec, Timing } from './types.ts';
+import type { FieldValue, Spec, TemplateSpec, Timing } from './types.ts';
 
 /**
  * Everything about a Spec that reaches the frame, written down in a fixed order.
@@ -18,21 +18,12 @@ import type { FieldValue, Spec, Timing } from './types.ts';
  * a mistake this file is meant to make visible.
  */
 function visualParts(spec: Spec): unknown[] {
-  const { canvas, template } = spec;
+  const { canvas } = spec;
   return [
     canvas.width, canvas.height, spec.duration, spec.fps,
     spec.image, spec.pushIn, spec.glare,
-    template === null ? null : [
-      template.definitionId,
-      template.color,
-      // Where on the frame it sits. Two photos identical but for this are two
-      // pictures, and leaving it out would have them share one frame walk.
-      template.offsetY,
-      timingParts(template.timing),
-      // Sorted, because a field bag is a map and a map has no order — the same
-      // two fields written the other way round are the same frame.
-      Object.keys(template.fields).sort().map(k => [k, flatten(template.fields[k]!)]),
-    ],
+    templateParts(spec.template),
+    templateParts(spec.overlay),
     spec.buttons.map(b => [
       b.styleId, b.fontId, b.text, b.color,
       b.rect.x, b.rect.y, b.rect.w, b.rect.h,
@@ -40,6 +31,19 @@ function visualParts(spec: Spec): unknown[] {
     ]),
   ];
 }
+
+const templateParts = (template: TemplateSpec | null): unknown[] | null =>
+  template === null ? null : [
+    template.definitionId,
+    template.color,
+    // Where on the frame it sits. Two photos identical but for this are two
+    // pictures, and leaving it out would have them share one frame walk.
+    template.offsetY,
+    timingParts(template.timing),
+    // Sorted, because a field bag is a map and a map has no order — the same
+    // two fields written the other way round are the same frame.
+    Object.keys(template.fields).sort().map(k => [k, flatten(template.fields[k]!)]),
+  ];
 
 const timingParts = (t: Timing): unknown[] => [t.appearAt, t.hideAt, t.enter, t.enterDuration];
 

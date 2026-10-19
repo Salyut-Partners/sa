@@ -50,6 +50,7 @@ export function previewSpec(
       timing: { appearAt: 0, hideAt: null, enter: 'none', enterDuration: 0 },
     }],
     template: null,
+    overlay: null,
     locale: 'en',
     ...SILENT,
   };
@@ -95,6 +96,7 @@ export function templatePreviewSpec(
       offsetY: 0,
       timing,
     },
+    overlay: null,
     locale: locale.id,
     ...SILENT,
   };

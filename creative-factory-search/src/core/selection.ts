@@ -2,7 +2,7 @@
 // branch inside every control: the panel asks for a field over the selection and
 // gets back either a value it can show or `mixed`, and it writes through the same
 // commands whichever it got.
-import { photoById } from './project.ts';
+import { photoById, type TemplateSlot } from './project.ts';
 import type {
   ButtonLayer, Photo, Project, Rect, TemplateLayer, Timing,
 } from './types.ts';
@@ -126,17 +126,22 @@ export function buttonCount(project: Project, ids: readonly string[]): Shared<nu
  */
 export const NO_TEMPLATE = '';
 
-export function templateChoice(project: Project, ids: readonly string[]): Shared<string> {
+export function templateChoice(
+  project: Project,
+  ids: readonly string[],
+  slot: TemplateSlot = 'template',
+): Shared<string> {
   const photos = ids.map(id => photoById(project, id));
   if (photos.some(p => p === null)) return MIXED;
-  return shared(photos.map(p => p!.template?.definitionId ?? NO_TEMPLATE));
+  return shared(photos.map(p => p![slot]?.definitionId ?? NO_TEMPLATE));
 }
 
 const templatesOf = (
   project: Project,
   ids: readonly string[],
+  slot: TemplateSlot,
 ): readonly TemplateLayer[] | null => {
-  const layers = ids.map(id => photoById(project, id)?.template);
+  const layers = ids.map(id => photoById(project, id)?.[slot]);
   return layers.every((l): l is TemplateLayer => l != null) ? layers : null;
 };
 
@@ -144,8 +149,9 @@ const templatesOf = (
 export function templateOffsetField(
   project: Project,
   ids: readonly string[],
+  slot: TemplateSlot = 'template',
 ): Shared<number> {
-  const layers = templatesOf(project, ids);
+  const layers = templatesOf(project, ids, slot);
   return layers === null ? MIXED : shared(layers.map(l => l.offsetY));
 }
 
@@ -153,7 +159,8 @@ export function templateTimingField<K extends FlatKeys<Timing>>(
   project: Project,
   ids: readonly string[],
   key: K,
+  slot: TemplateSlot = 'template',
 ): Shared<Timing[K]> {
-  const layers = templatesOf(project, ids);
+  const layers = templatesOf(project, ids, slot);
   return layers === null ? MIXED : shared(layers.map(l => l.timing[key]));
 }

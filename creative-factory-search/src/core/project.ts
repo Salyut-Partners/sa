@@ -55,6 +55,12 @@ export type ButtonPatch =
 export type ProjectPatch =
   Partial<Pick<Project, 'duration' | 'fps' | 'canvas' | 'voiceId' | 'modelId' | 'fitToVoice' | 'subtitles'>>;
 export type TemplatePatch = { timing?: Partial<Timing>; offsetY?: number };
+/**
+ * Which of a photo's two template layers a command is about: the layout, or
+ * the one drawn over it. Absent means the layout, which is what every command
+ * meant before there were two.
+ */
+export type TemplateSlot = 'template' | 'overlay';
 export type LocalePatch = Partial<Pick<Locale, 'script' | 'include' | 'subtitles'>>;
 
 /**
@@ -91,8 +97,8 @@ export type Command =
   | { type: 'button/nudge'; ids: readonly string[]; index: number; by: { x: number; y: number } }
   | { type: 'button/move'; ids: readonly string[]; from: number; to: number }
   | { type: 'button/duplicate'; ids: readonly string[]; index: number; id: string }
-  | { type: 'template/set'; ids: readonly string[]; definitionId: string | null }
-  | { type: 'template/patch'; ids: readonly string[]; patch: TemplatePatch }
+  | { type: 'template/set'; ids: readonly string[]; definitionId: string | null; slot?: TemplateSlot }
+  | { type: 'template/patch'; ids: readonly string[]; patch: TemplatePatch; slot?: TemplateSlot }
   | { type: 'locale/add'; id: LocaleId }
   | { type: 'locale/remove'; id: LocaleId }
   | { type: 'locale/activate'; id: LocaleId }
@@ -157,6 +163,7 @@ function newPhoto(input: NewPhoto): Photo {
     pushIn: true,
     glare: true,
     template: null,
+    overlay: null,
     buttons: [],
   };
 }
@@ -365,9 +372,10 @@ export function apply(project: Project, command: Command): Project {
 
     case 'template/set': {
       const { definitionId } = command;
+      const slot = command.slot ?? 'template';
       if (definitionId === null) {
         return mapPhotos(project, command.ids, p =>
-          p.template === null ? p : { ...p, template: null });
+          p[slot] === null ? p : { ...p, [slot]: null });
       }
       const info = templateById(definitionId);
       // A layout nobody carries is refused rather than stored: unlike a button
@@ -379,23 +387,25 @@ export function apply(project: Project, command: Command): Project {
         // The window survives the swap, and so does the text — which is not
         // here to survive, being the locale's. The three card versions are one
         // offer in three layouts, and trying the next one must not cost the offer.
-        template: {
+        [slot]: {
           definitionId,
           // Not carried across the swap, unlike the window and the text: an
           // offset is a place on the frame that one layout has and the next
           // one may not, so a layout arrives where it draws itself.
           offsetY: 0,
-          timing: p.template?.timing ?? { ...info.defaultTiming },
+          timing: p[slot]?.timing ?? { ...info.defaultTiming },
         },
       }));
     }
 
-    case 'template/patch':
+    case 'template/patch': {
+      const slot = command.slot ?? 'template';
       return mapPhotos(project, command.ids, p => {
-        if (p.template === null) return p;
+        const layer = p[slot];
+        if (layer === null) return p;
         const { timing, offsetY } = command.patch;
         if (timing === undefined && offsetY === undefined) return p;
-        const template = { ...p.template };
+        const template = { ...layer };
         if (timing !== undefined) template.timing = { ...template.timing, ...timing };
         // Refused rather than clamped for a layout that does not move: a figure
         // stored on one is a nudge nothing in the panel can show and nothing on
@@ -403,8 +413,9 @@ export function apply(project: Project, command: Command): Project {
         if (offsetY !== undefined && templateMoves(template.definitionId)) {
           template.offsetY = clamp(offsetY, TEMPLATE_LIFT.min, TEMPLATE_LIFT.max);
         }
-        return { ...p, template };
+        return { ...p, [slot]: template };
       });
+    }
 
     case 'locale/add': {
       if (project.locales.some(l => l.id === command.id)) return project;
@@ -528,5 +539,6 @@ export const photoById = (project: Project, id: string | null): Photo | null =>
  */
 export const photoTimings = (photo: Photo): Timing[] => [
   ...(photo.template === null ? [] : [photo.template.timing]),
+  ...(photo.overlay === null ? [] : [photo.overlay.timing]),
   ...photo.buttons.map(b => b.timing),
 ];

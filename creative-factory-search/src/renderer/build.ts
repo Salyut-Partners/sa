@@ -27,7 +27,7 @@ const ARROW_SVG =
   '<svg class="cf-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" ' +
   'stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>';
 
-/** The template layer, if the photo wears one. */
+/** A template layer — the photo's layout, or the overlay drawn over it. */
 interface TemplatePlace {
   spec: TemplateSpec;
   layer: HTMLElement;
@@ -72,13 +72,13 @@ export function build(root: HTMLElement, spec: Spec): CreativeHandle {
   root.style.width = spec.canvas.width + 'px';
   root.style.height = spec.canvas.height + 'px';
 
-  // The order of the frame: photo, then at most one template, then the buttons
-  // in the order of their list. A button is meant to be laid over a template,
-  // never under one.
+  // The order of the frame: photo, then the template, then the overlay drawn
+  // over it, then the buttons in the order of their list. A button is meant to
+  // be laid over a template, never under one.
   root.innerHTML =
     '<div class="cf-wrap">' +
     '<img class="cf-base" alt="">' +
-    (spec.template === null ? '' : '<div class="cf-layer cf-tpl"><div class="cf-tpl-frame"></div></div>') +
+    TEMPLATE_HTML.repeat((spec.template === null ? 0 : 1) + (spec.overlay === null ? 0 : 1)) +
     spec.buttons.map(buttonHtml).join('') +
     '</div>';
 
@@ -86,13 +86,17 @@ export function build(root: HTMLElement, spec: Spec): CreativeHandle {
   const base = root.querySelector<HTMLImageElement>('.cf-base')!;
   if (spec.image) base.src = spec.image;
 
-  const template = dressTemplate(spec, root);
+  const slots = [...root.querySelectorAll<HTMLElement>('.cf-tpl')];
+  const templates = [spec.template, spec.overlay]
+    .filter((t): t is TemplateSpec => t !== null)
+    .map((t, i) => dressTemplate(t, spec, slots[i]!))
+    .filter((t): t is TemplatePlace => t !== null);
   const layers = [...root.querySelectorAll<HTMLElement>('.cf-btn-layer')];
   const parts: ButtonParts[] = spec.buttons.map((b, i) => dressButton(b, layers[i]!));
 
   const fitAll = (): void => {
     parts.forEach(fitText);
-    template?.parts.fit();
+    for (const template of templates) template.parts.fit();
   };
   fitAll();
   // Text measured before the webfont lands is measured against a fallback face,
@@ -102,7 +106,7 @@ export function build(root: HTMLElement, spec: Spec): CreativeHandle {
 
   function render(t: number): void {
     wrap.style.transform = 'scale(' + (spec.pushIn ? 1 + 0.022 * (t / spec.duration) : 1) + ')';
-    if (template) renderTemplate(template, t, spec);
+    for (const template of templates) renderTemplate(template, t, spec);
     for (const p of parts) renderButton(p, t, spec);
   }
 
@@ -110,16 +114,17 @@ export function build(root: HTMLElement, spec: Spec): CreativeHandle {
   return { render, spec };
 }
 
+const TEMPLATE_HTML = '<div class="cf-layer cf-tpl"><div class="cf-tpl-frame"></div></div>';
+
 /**
- * Put the template on the frame, or answer nothing when the photo wears none —
- * or names one this build does not carry, which a project saved against an older
- * library can. A creative short a panel beats one that refuses to build.
+ * Put a template on the frame, or answer nothing when it names one this build
+ * does not carry, which a project saved against an older library can. A
+ * creative short a panel beats one that refuses to build.
  */
-function dressTemplate(spec: Spec, root: HTMLElement): TemplatePlace | null {
-  const layer = root.querySelector<HTMLElement>('.cf-tpl');
-  const definition = spec.template === null ? null : definitionById(spec.template.definitionId);
-  if (layer === null || spec.template === null || definition === null) {
-    layer?.remove();
+function dressTemplate(template: TemplateSpec, spec: Spec, layer: HTMLElement): TemplatePlace | null {
+  const definition = definitionById(template.definitionId);
+  if (definition === null) {
+    layer.remove();
     return null;
   }
 
@@ -137,14 +142,14 @@ function dressTemplate(spec: Spec, root: HTMLElement): TemplatePlace | null {
   const fit = Math.min(spec.canvas.width / DESIGN.width, spec.canvas.height / DESIGN.height);
   const dx = (spec.canvas.width - DESIGN.width * fit) / 2;
   const dy = (spec.canvas.height - DESIGN.height * fit) / 2;
-  const lift = DESIGN.height * (spec.template.offsetY / 100);
+  const lift = DESIGN.height * (template.offsetY / 100);
   frame.style.transform = `translate(${dx}px, ${dy}px) scale(${fit}) translateY(${lift}px)`;
 
   return {
-    spec: spec.template,
+    spec: template,
     layer,
     parts: definition.build({
-      spec: spec.template,
+      spec: template,
       frame,
       rtl: localeDir(spec.locale) === 'rtl',
     }),

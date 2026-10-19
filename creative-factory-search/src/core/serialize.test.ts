@@ -147,6 +147,30 @@ describe('a project file carrying templates', () => {
     expect((result as { project: Project }).project.photos[0]!.template!.offsetY).toBe(0);
   });
 
+  it('comes back with the overlay drawn over the template', () => {
+    const p = apply(saved(), { type: 'template/set', ids: ['a'], definitionId: 'news-tv', slot: 'overlay' });
+    const result = fromFile(JSON.parse(JSON.stringify(toFile(p))));
+    expect(result.ok).toBe(true);
+    const photo = (result as { project: Project }).project.photos[0]!;
+    expect(photo.template!.definitionId).toBe('jobs-card-panel');
+    expect(photo.overlay!.definitionId).toBe('news-tv');
+  });
+
+  it('opens a file written before overlays existed, with none on the photos', () => {
+    const file = toFile(saved()) as unknown as Record<string, unknown>;
+    const photos = (file['photos'] as Record<string, unknown>[]).map(({ overlay: _gone, ...rest }) => rest);
+    const result = fromFile({ ...file, photos });
+    expect(result.ok).toBe(true);
+    expect((result as { project: Project }).project.photos[0]!.overlay).toBeNull();
+  });
+
+  it('refuses a file whose overlay is not a layout', () => {
+    const file = toFile(saved()) as unknown as Record<string, unknown>;
+    const photos = (file['photos'] as Record<string, unknown>[])
+      .map(p => ({ ...p, overlay: { definitionId: 7 } }));
+    expect(fromFile({ ...file, photos })).toEqual({ ok: false, reason: 'not-a-project' });
+  });
+
   it('refuses a file whose template is not one', () => {
     const file = toFile(saved()) as unknown as Record<string, unknown>;
     const photos = (file['photos'] as Record<string, unknown>[])

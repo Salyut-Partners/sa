@@ -154,6 +154,20 @@ describe('buildSpec and the template', () => {
     expect(buildSpec(broken, 'a')!.template).toBeNull();
   });
 
+  it('resolves the overlay in the same language as the layout under it', () => {
+    let p = withTemplate('rates');
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'news-tab', slot: 'overlay' });
+    const spec = buildSpec(p, 'a')!;
+    expect(spec.template!.definitionId).toBe('rates');
+    expect(spec.overlay!.definitionId).toBe('news-tab');
+    expect(spec.overlay!.fields['newsHead']).toBe('How it works: everything to know');
+    expect(spec.overlay!.color).toBe(spec.template!.color);
+  });
+
+  it('builds no overlay for a photo that wears none', () => {
+    expect(buildSpec(withTemplate('rates'), 'a')!.overlay).toBeNull();
+  });
+
   it('shares no state with the project it was built from', () => {
     const project = withTemplate('rates');
     const spec = buildSpec(project, 'a')!;

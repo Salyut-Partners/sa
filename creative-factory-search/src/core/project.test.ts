@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  apply, createProject, defaultButton, MAX_PHOTOS, nextSlot, TEMPLATE_LIFT,
+  apply, createProject, defaultButton, MAX_PHOTOS, nextSlot, photoTimings, TEMPLATE_LIFT,
 } from './project.ts';
 import { templateById } from './templates.ts';
 import type { Project } from './types.ts';
@@ -575,6 +575,40 @@ describe('template commands', () => {
     p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: -40 } });
     p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'donor-tiers' });
     expect(p.photos[0]!.template!.offsetY).toBe(0);
+  });
+});
+
+describe('the overlay', () => {
+  it('lays a second layout over the first without touching it', () => {
+    let p = apply(withPhotos('a'), { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-panel' });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'news-tab', slot: 'overlay' });
+    expect(p.photos[0]!.template!.definitionId).toBe('jobs-card-panel');
+    expect(p.photos[0]!.overlay!.definitionId).toBe('news-tab');
+  });
+
+  it('arrives with the overlay layout\'s own window, not the layout\'s under it', () => {
+    let p = apply(withPhotos('a'), { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-sheet' });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'notice-push', slot: 'overlay' });
+    expect(p.photos[0]!.overlay!.timing).toEqual(templateById('notice-push')!.defaultTiming);
+  });
+
+  it('is patched and cleared on its own', () => {
+    let p = apply(withPhotos('a'), { type: 'template/set', ids: ['a'], definitionId: 'tier-rows' });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'news-tv', slot: 'overlay' });
+    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: -20 }, slot: 'overlay' });
+    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 2 } }, slot: 'overlay' });
+    expect(p.photos[0]!.overlay!.offsetY).toBe(-20);
+    expect(p.photos[0]!.overlay!.timing.appearAt).toBe(2);
+    expect(p.photos[0]!.template!.offsetY).toBe(0);
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: null, slot: 'overlay' });
+    expect(p.photos[0]!.overlay).toBeNull();
+    expect(p.photos[0]!.template!.definitionId).toBe('tier-rows');
+  });
+
+  it('counts among the photo\'s layers', () => {
+    let p = apply(withPhotos('a'), { type: 'template/set', ids: ['a'], definitionId: 'news-box', slot: 'overlay' });
+    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 3 } }, slot: 'overlay' });
+    expect(photoTimings(p.photos[0]!).map(t => t.appearAt)).toEqual([3]);
   });
 });
 

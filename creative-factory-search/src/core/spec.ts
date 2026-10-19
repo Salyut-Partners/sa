@@ -5,7 +5,7 @@ import { toPixels } from './canvas.ts';
 import { activeLocale, localeById, newLocale } from './locales.ts';
 import { photoById } from './project.ts';
 import { templateById, templateFields } from './templates.ts';
-import type { LocaleId, Project, ButtonSpec, Spec, TemplateSpec } from './types.ts';
+import type { LocaleId, Project, ButtonSpec, Spec, TemplateLayer, TemplateSpec } from './types.ts';
 
 export function buildSpec(
   project: Project,
@@ -33,11 +33,10 @@ export function buildSpec(
     timing: { ...b.timing },
   }));
 
-  const layer = photo.template;
   // A template the library no longer carries drops off the frame. Unlike a
   // button style, there is nothing sane to fall back to — a template is its own
   // layout — and a creative missing a panel beats one that will not build.
-  const template: TemplateSpec | null =
+  const resolve = (layer: TemplateLayer | null): TemplateSpec | null =>
     layer === null || templateById(layer.definitionId) === null ? null : {
       definitionId: layer.definitionId,
       fields: templateFields(layer.definitionId, locale),
@@ -53,7 +52,8 @@ export function buildSpec(
     image: photo.image,
     pushIn: photo.pushIn,
     glare: photo.glare,
-    template,
+    template: resolve(photo.template),
+    overlay: resolve(photo.overlay),
     buttons,
     locale: locale.id,
     script: locale.script.trim(),

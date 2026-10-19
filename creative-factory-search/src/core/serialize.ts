@@ -101,6 +101,8 @@ const isPhoto = (v: unknown): v is Photo =>
   isText(v['accent']) && typeof v['pushIn'] === 'boolean' && typeof v['glare'] === 'boolean' &&
   // Absent is a valid answer, and the one a version 1 file gives.
   (v['template'] == null || isTemplate(v['template'])) &&
+  // Absent in every file written before a photo could wear a second layout.
+  (v['overlay'] == null || isTemplate(v['overlay'])) &&
   Array.isArray(v['buttons']) && v['buttons'].every(isButton);
 
 const isCanvas = (v: unknown): v is CanvasSize => isBag(v) && isNum(v['width']) && isNum(v['height']);
@@ -115,6 +117,16 @@ const isLocale = (v: unknown): v is Locale =>
 const isTranslatedFrom = (v: unknown): v is TranslatedFrom =>
   isBag(v) && isLocaleId(v['id']) && isText(v['script']);
 
+/** A stored layer, rebuilt to the model's shape, or none. */
+const readLayer = (layer: TemplateLayer | null | undefined): TemplateLayer | null =>
+  layer == null ? null : {
+    definitionId: layer.definitionId,
+    // Every file written before layouts could be moved says nothing here,
+    // and means where the layout draws itself.
+    offsetY: layer.offsetY ?? 0,
+    timing: layer.timing,
+  };
+
 /**
  * Read a file back. Everything is checked rather than trusted: this is the one
  * door into the model that the editor's commands do not guard, and a half-read
@@ -128,7 +140,10 @@ export function fromFile(data: unknown): LoadResult {
   // silently trimmed: losing photos on open is worse than not opening.
   if (data['photos'].length > MAX_PHOTOS) return { ok: false, reason: 'too-many' };
 
-  const stored = data['photos'] as (Photo & { template: (TemplateLayer & { values?: unknown }) | null })[];
+  const stored = data['photos'] as (Photo & {
+    template: (TemplateLayer & { values?: unknown }) | null;
+    overlay?: TemplateLayer | null;
+  })[];
   // Rebuilt field by field rather than spread: a file written while the editor
   // still had a layer of catalogue objects carries `props`, and copying the
   // photo whole would carry that into a model that has no such field. Every
@@ -143,15 +158,8 @@ export function fromFile(data: unknown): LoadResult {
     pushIn: p.pushIn,
     glare: p.glare,
     buttons: p.buttons,
-    template: p.template == null
-      ? null
-      : {
-        definitionId: p.template.definitionId,
-        // Every file written before layouts could be moved says nothing here,
-        // and means where the layout draws itself.
-        offsetY: p.template.offsetY ?? 0,
-        timing: p.template.timing,
-      },
+    template: readLayer(p.template),
+    overlay: readLayer(p.overlay),
   }));
 
   const locales = readLocales(data['locales'], stored);
