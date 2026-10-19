@@ -120,6 +120,12 @@ describe('parseTsp', () => {
     expect(now.fields.bid).toBe(0);
   });
 
+  it('reads a Cost per result profile as one, with its bid as the goal', () => {
+    const cost = parseTsp({ ...PROFILE_142169, bid_strategy: 'COST_CAP', bid: 0.8 });
+    expect(cost.fields.facebook).toMatchObject({ bid_strategy: 'COST_CAP' });
+    expect(cost.fields.bid).toBe(0.8);
+  });
+
   it('reads a TikTok profile as before, as TikTok also when the source is not said', () => {
     const raw = { id: 7, name: 'x', topic_id: 1, budget: '20', bid: '0.45', location: '["Germany"]', age_from: '["All"]', lunch_tomorrow: 1, device_os: null };
     expect(parseTsp(raw).fields).toEqual(fields());
@@ -155,6 +161,11 @@ describe('Facebook profile body', () => {
     const body = tspBody(1, fbFields({ bid: 0, facebook: fb({ launch_time: '00:00', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', age_from: 25, age_to: 54 }) }));
     expect(body).toMatchObject({ launch_type: 'tomorrow', launch_time: '00:00', lunch_tomorrow: 0, bid_strategy: 'LOWEST_COST_WITHOUT_CAP', age_from: '25', age_to: '54' });
     expect('bid' in body).toBe(false);
+  });
+
+  it('sends the bid as the cost per result goal on Cost per result', () => {
+    const body = tspBody(1, fbFields({ bid: 0.8, facebook: fb({ bid_strategy: 'COST_CAP' }) }));
+    expect(body).toMatchObject({ bid_strategy: 'COST_CAP', bid: '0.8' });
   });
 
   it('leaves the TikTok body as it was', () => {

@@ -58,8 +58,13 @@ export const markedFor = (c: Pick<PlatformCreative, 'traffic_sources'>, source: 
 
 export const PERFORMANCE_GOALS = ['MAXIMIZE_NUMBER_OF_CONVERSIONS', 'MAXIMIZE_VALUE_OF_CONVERSIONS'] as const;
 export type PerformanceGoal = (typeof PERFORMANCE_GOALS)[number];
-/** Bid Cap, where the bid is the cap and the ladder works, and Lowest cost, where there is no bid at all. Cost Cap is not made. */
-export const BID_STRATEGIES = ['LOWEST_COST_WITH_BID_CAP', 'LOWEST_COST_WITHOUT_CAP'] as const;
+/**
+ * Bid Cap, where the bid is the cap and the ladder works; Cost Cap — the admin's
+ * «Cost per result Goal» — where the bid is the cost per result aimed at and is
+ * sent the same way; and Lowest cost, where there is no bid at all. The admin's
+ * form drops `bid` for Lowest cost only. ROAS Goal is not made.
+ */
+export const BID_STRATEGIES = ['LOWEST_COST_WITH_BID_CAP', 'COST_CAP', 'LOWEST_COST_WITHOUT_CAP'] as const;
 export type BidStrategy = (typeof BID_STRATEGIES)[number];
 /** Advantage+ (`advantage`) or Facebook Only — `facebook` is a guess, not yet seen in a dump. */
 export const PLACEMENTS = ['advantage', 'facebook'] as const;

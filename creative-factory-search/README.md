@@ -194,8 +194,10 @@ or delivered only on Pangle, and the launch says so.
 has both bodies, from the admin's dumps of 2026-10-15):
 
 - the profile is the FB form's — performance goal (Number / Value of
-  Conversions), bid strategy (Bid Cap, the default, keeps the ladder; Lowest
-  cost hides the bid column, sends no bid and groups profiles by budget alone),
+  Conversions), bid strategy (Bid Cap, the default, keeps the ladder; Cost per
+  result goal — `COST_CAP` — sends the bid as the cost per result aimed at and
+  keeps the ladder too; Lowest cost hides the bid column, sends no bid and
+  groups profiles by budget alone),
   placements (Advantage+ / Facebook Only), age from–to (18–65+), attribution
   always 7-1-1; the start is «Одразу» or «Завтра о HH:MM» (00:00 by default),
   and is part of the profile;
@@ -218,7 +220,8 @@ Number of Conversions, Advantage+, 18–65+, start now.
 
 Not yet checked on a live launch — said in the modal and the progress
 (`uncheckedOnFacebook`), struck off after the first test: `placements` for
-Facebook Only (`facebook` is a guess); `bid` as text under Bid Cap; whether the
+Facebook Only (`facebook` is a guess); `bid` as text under Bid Cap; `COST_CAP`
+(read off the admin's form, not yet off a launch dump); whether the
 creative-repo list says an entry's sources and a headline's primary text (if
 not, nothing is ruled out); whether a builder takes a creative marked for the
 other source; `account_id` with or without `act_`; a neighbour cabinet's pixel

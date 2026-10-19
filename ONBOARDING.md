@@ -49,7 +49,7 @@ ffmpeg, Python 3.11, шрифт) і шаблон конфігурації. Га�
   тема, «Learn more», TikTok, таргетинг All. Плаский формат — це TikTok;
   окремо для джерел — блоки `tiktok` і `facebook`, а `source` верхнього рівня
   вибирає, з якого відкривається форма. Для Facebook ще `bid_strategy`
-  (`LOWEST_COST_WITH_BID_CAP` | `LOWEST_COST_WITHOUT_CAP`), `performance_goal`,
+  (`LOWEST_COST_WITH_BID_CAP` | `COST_CAP` | `LOWEST_COST_WITHOUT_CAP`), `performance_goal`,
   `placements` (`advantage` | `facebook`), `age_from`, `age_to`,
   `launch_time` (`"00:00"` — завтра о, `null` — одразу). Без нього на FB —
   20 / 0.3, крок 0.05, Bid Cap, Number of Conversions, Advantage+, 18–65+,

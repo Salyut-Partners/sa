@@ -63,7 +63,9 @@ const imageSize = (url: string): Promise<{ width: number; height: number }> => n
 });
 
 const GOALS: [FacebookSettings['performance_goal'], string][] = [['MAXIMIZE_NUMBER_OF_CONVERSIONS', 'Maximize Number of Conversions'], ['MAXIMIZE_VALUE_OF_CONVERSIONS', 'Maximize Value of Conversions']];
-const STRATEGIES: [FacebookSettings['bid_strategy'], string][] = [['LOWEST_COST_WITH_BID_CAP', 'Bid Cap'], ['LOWEST_COST_WITHOUT_CAP', 'Lowest cost (без капу)']];
+const STRATEGIES: [FacebookSettings['bid_strategy'], string][] = [
+  ['LOWEST_COST_WITH_BID_CAP', 'Bid Cap'], ['COST_CAP', 'Cost per result goal'], ['LOWEST_COST_WITHOUT_CAP', 'Lowest cost (без капу)'],
+];
 const PLACEMENT_NAMES: [FacebookSettings['placements'], string][] = [['advantage', 'Advantage+'], ['facebook', 'Facebook Only']];
 const label = <T extends string>(list: [T, string][], value: T): string => list.find(([v]) => v === value)?.[1] ?? value;
 const AGES = Array.from({ length: FB_AGE_MAX - FB_AGE_MIN + 1 }, (_, i) => FB_AGE_MIN + i);

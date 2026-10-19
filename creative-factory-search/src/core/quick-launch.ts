@@ -723,6 +723,7 @@ export const creativesCount = (videos: number, images: number): string =>
 export function uncheckedOnFacebook(fb: FacebookSettings, reusedOtherSource: boolean): string {
   const items = [
     ...(hasCap(fb) ? ['bid рядком при Bid Cap (знятий дамп був без капу)'] : []),
+    ...(fb.bid_strategy === 'COST_CAP' ? ['Cost per result goal (`COST_CAP`) — значення з форми адмінки, дампу заливу з ним ще не було'] : []),
     ...(fb.placements === 'facebook' ? ['значення placements для Facebook Only (шлемо `facebook`)'] : []),
     'чи віддає список креативів джерела й primary text — від цього залежить, що перевикористовується',
     ...(reusedOtherSource ? ['чи прийме builder креатив, позначений іншим джерелом'] : []),
@@ -814,7 +815,7 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
       errors.push(`вік від ${fb.age_from} до ${fb.age_to} — Facebook бере від ${FB_AGE_MIN} до ${FB_AGE_MAX}+, «від» не більше «до»`);
     }
     if (!(PERFORMANCE_GOALS as readonly string[]).includes(fb.performance_goal)) errors.push(`цілі «${fb.performance_goal}» немає`);
-    if (!(BID_STRATEGIES as readonly string[]).includes(fb.bid_strategy)) errors.push(`стратегії «${fb.bid_strategy}» немає — Bid Cap або Lowest cost`);
+    if (!(BID_STRATEGIES as readonly string[]).includes(fb.bid_strategy)) errors.push(`стратегії «${fb.bid_strategy}» немає — Bid Cap, Cost per result goal або Lowest cost`);
     if (!(PLACEMENTS as readonly string[]).includes(fb.placements)) errors.push(`плейсментів «${fb.placements}» немає — Advantage+ або Facebook Only`);
   }
   const headline = form.headline.trim();
