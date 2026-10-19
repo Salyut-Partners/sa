@@ -96,6 +96,18 @@ export const money = (spec: TemplateSpec): string => {
  */
 export const inFrom = (rtl: boolean): number => rtl ? 1 : -1;
 
+/**
+ * A clip that uncovers a block from the side the reader's eye starts on, `p`
+ * of the way across. The news strips draw themselves this way — a lower third
+ * is laid on the picture by being pulled across it — and in Hebrew it is pulled
+ * the other way.
+ */
+export const wipe = (p: number, rtl: boolean): string => {
+  if (p >= 1) return 'none';
+  const hidden = 100 * (1 - clamp01(p));
+  return rtl ? `inset(0 0 0 ${hidden}%)` : `inset(0 ${hidden}% 0 0)`;
+};
+
 /** One field as items. A line asked for as items is one item. */
 export const items = (spec: TemplateSpec, key: string): readonly string[] => {
   const value: FieldValue | undefined = spec.fields[key];
@@ -114,6 +126,9 @@ const ICONS: Record<string, string> = {
   shield: '<path d="M12 2.7 4.7 5.8v5.5c0 4.6 3.1 8.8 7.3 10 4.2-1.2 7.3-5.4 7.3-10V5.8Z"/><path d="m8.8 11.9 2.3 2.3 4.2-4.6"/>',
   lock: '<rect x="4.6" y="10.4" width="14.8" height="10.2" rx="2.6"/><path d="M8.3 10.4V7.7a3.7 3.7 0 0 1 7.4 0v2.7"/>',
   heart: '<path d="M12 20.8 4.8 13.9a4.5 4.5 0 0 1 6.4-6.3l.8.8.8-.8a4.5 4.5 0 0 1 6.4 6.3Z"/>',
+  cross: '<path d="M6 6l12 12M18 6 6 18"/>',
+  spark: '<path d="M12 3.2l1.9 5.6 5.6 1.9-5.6 1.9L12 18.2l-1.9-5.6-5.6-1.9 5.6-1.9Z"/><path d="M19 15.5v4M17 17.5h4"/>',
+  warn: '<path d="M12 3.2 2.4 20h19.2Z"/><path d="M12 9.6v4.8M12 17.2v.2"/>',
 };
 
 /**

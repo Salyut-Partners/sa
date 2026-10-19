@@ -12,10 +12,23 @@ import { cardPanel } from './card-panel.ts';
 import { cardPills } from './card-pills.ts';
 import { cardSheet } from './card-sheet.ts';
 import { donorTiers } from './donor-tiers.ts';
+import { gaugeSwap } from './gauge-swap.ts';
+import { guideArc } from './guide-arc.ts';
+import { headlineBlocks } from './headline-blocks.ts';
+import { newsBox } from './news-box.ts';
+import { newsTab } from './news-tab.ts';
+import { newsTv } from './news-tv.ts';
+import { noticeAlert } from './notice-alert.ts';
+import { noticeBubble } from './notice-bubble.ts';
+import { noticePush } from './notice-push.ts';
+import { optionTiles } from './option-tiles.ts';
+import { photoPanel } from './photo-panel.ts';
 import { rateSlider } from './rate-slider.ts';
 import { rowsBanner } from './rows-banner.ts';
 import { scrimColumn } from './scrim-column.ts';
+import { stepsCard } from './steps-card.ts';
 import { tierRowsTemplate } from './tier-rows.ts';
+import { verdictPills } from './verdict-pills.ts';
 
 export interface BuildContext {
   spec: TemplateSpec;
@@ -74,6 +87,19 @@ const BUILDERS: Record<string, (context: BuildContext) => TemplateParts> = {
   'donor-tiers': donorTiers,
   'tier-rows': tierRowsTemplate,
   'rate-slider': rateSlider,
+  'news-tab': newsTab,
+  'news-tv': newsTv,
+  'news-box': newsBox,
+  'headline-blocks': headlineBlocks,
+  'photo-panel': photoPanel,
+  'verdict-pills': verdictPills,
+  'option-tiles': optionTiles,
+  'steps-card': stepsCard,
+  'gauge-swap': gaugeSwap,
+  'notice-push': noticePush,
+  'notice-alert': noticeAlert,
+  'notice-bubble': noticeBubble,
+  'guide-arc': guideArc,
   rates: rowsBanner({
     headKey: 'ratesHead',
     accentKey: 'ratesAccent',

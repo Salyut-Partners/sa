@@ -20,6 +20,9 @@ describe('the template library', () => {
     expect(TEMPLATES.map(t => t.id)).toEqual([
       'jobs-banner', 'jobs-card-pills', 'jobs-card-panel', 'jobs-card-sheet',
       'jobs-scrim', 'avia-strip', 'rates', 'donor-tiers', 'tier-rows', 'rate-slider',
+      'news-tab', 'news-tv', 'news-box', 'headline-blocks', 'photo-panel',
+      'verdict-pills', 'option-tiles', 'steps-card', 'gauge-swap',
+      'notice-push', 'notice-alert', 'notice-bubble', 'guide-arc',
     ]);
   });
 
@@ -124,12 +127,13 @@ describe('the template library', () => {
     for (const field of strip.schema) expect(labels.get(field.key), field.key).toBe(field.label);
   });
 
-  it('lets only the layout that carries no scrim be moved', () => {
+  it('lets only the layouts that carry no scrim be moved', () => {
     // Every other layout darkens the whole picture behind itself, so sliding it
     // drags the shading off one edge and leaves the other bare. The list is
     // named rather than counted: making a layout movable is a decision about
     // how it is drawn, and it should have to be made here too.
-    expect(TEMPLATES.filter(t => t.movable === true).map(t => t.id)).toEqual(['tier-rows']);
+    expect(TEMPLATES.filter(t => t.movable === true).map(t => t.id))
+      .toEqual(['tier-rows', 'news-tab', 'news-tv', 'news-box', 'verdict-pills', 'option-tiles', 'gauge-swap']);
     expect(templateMoves('tier-rows')).toBe(true);
     expect(templateMoves('donor-tiers')).toBe(false);
     // A layout this build no longer carries cannot be moved either: an offset
@@ -142,6 +146,14 @@ describe('the template library', () => {
     expect(cards).toHaveLength(3);
     const keys = cards.map(c => c.schema.map(f => f.key).join(','));
     expect(new Set(keys).size).toBe(1);
+  });
+
+  it('holds the three news strips to one schema, as they are one strip in three looks', () => {
+    const strips = TEMPLATES.filter(t => t.id.startsWith('news-'));
+    expect(strips).toHaveLength(3);
+    for (const strip of strips) {
+      expect(strip.schema.map(f => f.key), strip.id).toEqual(['newsKicker', 'newsHead', 'newsSub']);
+    }
   });
 });
 

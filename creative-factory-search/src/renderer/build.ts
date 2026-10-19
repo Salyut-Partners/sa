@@ -221,6 +221,13 @@ function dressButton(spec: ButtonSpec, layer: HTMLElement): ButtonParts {
     (arrow as unknown as HTMLElement).style.marginLeft = Math.round(h * 0.12) + 'px';
   }
 
+  // Painted by the engine off the button's own picture, so it follows every
+  // pulse and rise of the button without a second copy to keep in step.
+  if (style.reflect) {
+    button.style.setProperty('-webkit-box-reflect',
+      `below ${Math.round(h * 0.08)}px linear-gradient(transparent 40%,rgba(255,255,255,${style.reflect}))`);
+  }
+
   const sheenWidth = Math.round(w * 0.7);
   sheen.style.width = sheenWidth + 'px';
   sheen.style.opacity = String(style.sheen);

@@ -310,6 +310,216 @@ export const TEMPLATE_CSS = `
   font-family:'Inter',sans-serif;font-weight:800;font-size:36px;letter-spacing:1.6px;
   white-space:nowrap}
 
+/* ----------------------------------------------------------- news strips -- */
+/* All three sit 300px off the bottom, which leaves the band under them for a
+   button placed by hand, and all three can be slid up the frame from there. */
+.cf-nw-tab{position:absolute;inset-inline-start:0;bottom:300px;width:1010px;
+  display:flex;flex-direction:column;align-items:flex-start}
+.cf-nw-tab .tag{display:flex;align-items:center;gap:22px;
+  padding-block:14px 12px;padding-inline:56px 40px;
+  font-family:'Inter',sans-serif;font-weight:700;font-size:34px;line-height:1;
+  letter-spacing:3px;text-transform:uppercase;color:#14213A;will-change:transform,opacity}
+.cf-nw-tab .tag i{width:6px;height:44px;border-radius:2px;flex:none}
+.cf-nw-tab .bar{width:1010px;background:#2E3448;padding-block:30px 32px;padding-inline:56px 50px;
+  box-shadow:0 18px 44px rgba(0,0,0,.4)}
+.cf-nw-tab .hd{width:904px;font-family:'Inter',sans-serif;font-weight:600;line-height:1.12;
+  letter-spacing:2px;text-transform:uppercase;color:#fff}
+.cf-nw-tab .sub{background:rgba(255,255,255,.94);padding-block:12px;padding-inline:56px 40px;
+  font-family:'Inter',sans-serif;font-weight:500;font-size:30px;line-height:1.2;color:#2E3448}
+
+.cf-nw-tv{position:absolute;left:44px;right:44px;bottom:300px}
+/* The bar is cut on a slant at the end it is read towards; mirrored below. */
+.cf-nw-tv .row{position:relative;overflow:hidden;display:flex;align-items:stretch;
+  padding:8px;padding-inline-end:74px;border-start-start-radius:14px;border-end-start-radius:14px;
+  clip-path:polygon(0 0,calc(100% - 64px) 0,100% 100%,0 100%)}
+.cf-nw-tv .kick{flex:none;display:flex;align-items:center;padding:0 34px;
+  font-family:'Inter',sans-serif;font-weight:800;font-size:50px;line-height:1;letter-spacing:1px;
+  text-transform:uppercase;color:#fff;text-shadow:0 3px 10px rgba(0,0,0,.35)}
+.cf-nw-tv .plate{flex:1;min-width:0;background:linear-gradient(180deg,#fff 0%,#E8EBF0 100%);
+  border-radius:10px;padding:22px 30px;display:flex;align-items:center}
+.cf-nw-tv .hd{width:100%;font-family:'Inter',sans-serif;font-weight:800;line-height:1.1;
+  text-transform:uppercase;text-align:center;color:#14161C}
+.cf-nw-tv .sheen{position:absolute;top:0;bottom:0;left:0;width:140px;pointer-events:none;
+  background:linear-gradient(90deg,rgba(255,255,255,0),rgba(255,255,255,.4),rgba(255,255,255,0))}
+.cf-nw-tv .sub{display:inline-flex;align-items:center;gap:16px;margin-top:12px;margin-inline-start:8px;
+  max-width:900px;background:#fff;border-radius:6px;padding:10px 26px;
+  box-shadow:0 10px 26px rgba(0,0,0,.3);
+  font-family:'Inter',sans-serif;font-weight:600;font-size:28px;line-height:1.2;color:#222}
+.cf-nw-tv .sub i{width:16px;height:16px;border-radius:50%;flex:none}
+
+.cf-nw-box{position:absolute;left:56px;right:56px;bottom:300px;background:#fff;
+  padding:58px 44px 40px;box-shadow:0 24px 60px rgba(0,0,0,.45);transform-origin:50% 100%;
+  will-change:transform,opacity}
+.cf-nw-box .tag{position:absolute;top:-46px;inset-inline-start:30px;padding:8px 22px 4px;
+  font-family:'Anton','Avenir Next Condensed',sans-serif;font-size:72px;line-height:1;
+  letter-spacing:1px;text-transform:uppercase;color:#fff;will-change:transform,opacity}
+.cf-nw-box .hd{width:880px;font-family:'Anton','Avenir Next Condensed',sans-serif;line-height:1.02;
+  letter-spacing:.5px;text-transform:uppercase;color:#111}
+.cf-nw-box .sub{margin-top:24px;display:flex;align-items:center;gap:16px;
+  font-family:'Inter',sans-serif;font-weight:700;font-size:30px;line-height:1.2;
+  letter-spacing:1.5px;text-transform:uppercase;color:#555}
+.cf-nw-box .sub i{width:36px;height:6px;flex:none}
+
+/* -------------------------------------------------------- headline blocks -- */
+.cf-hb{position:absolute;top:150px;left:60px;width:960px;
+  display:flex;flex-direction:column;align-items:center;gap:16px}
+.cf-hb .tag{margin-bottom:6px;padding:12px 28px 10px;border-radius:10px;background:#FFD83A;
+  font-family:'Inter',sans-serif;font-weight:800;font-size:40px;line-height:1;letter-spacing:1px;
+  text-transform:uppercase;color:#111;box-shadow:0 10px 24px rgba(0,0,0,.3);will-change:transform,opacity}
+.cf-hb .ln{background:#fff;padding:8px 26px 4px;box-shadow:0 14px 32px rgba(0,0,0,.38);
+  will-change:transform,opacity}
+.cf-hb .ln span{display:block;font-family:'Anton','Avenir Next Condensed',sans-serif;line-height:1.06;
+  letter-spacing:.5px;text-transform:uppercase;color:#111;white-space:nowrap}
+.cf-hb .ln.a span{color:#fff}
+
+/* ------------------------------------------------------------ photo panel -- */
+.cf-pp{position:absolute;left:0;right:0;bottom:0;min-height:700px;background:#fff;
+  display:flex;flex-direction:column;justify-content:center;padding:80px 70px 120px;
+  box-shadow:0 -20px 50px rgba(0,0,0,.35)}
+.cf-pp .rule{position:absolute;top:0;left:0;right:0;height:12px}
+.cf-pp .in{transform-origin:50% 100%}
+.cf-pp .hd{font-family:'Anton','Avenir Next Condensed',sans-serif;line-height:1.06;letter-spacing:.5px;
+  text-transform:uppercase;text-align:center;color:#121826}
+.cf-pp .lk{margin-top:36px;text-align:center}
+.cf-pp .lk span{display:inline-block;padding-bottom:10px;background-repeat:no-repeat;
+  font-family:'Inter',sans-serif;font-weight:700;font-size:36px;line-height:1.2;
+  letter-spacing:1px;text-transform:uppercase}
+
+/* ---------------------------------------------------------- verdict pills -- */
+.cf-vp{position:absolute;left:60px;width:960px;bottom:300px;
+  display:flex;flex-direction:column;align-items:center;gap:22px}
+.cf-vp .pill{display:flex;align-items:center;gap:16px;max-width:960px;
+  padding-block:16px;padding-inline:22px 36px;border-radius:999px;border:4px solid rgba(255,255,255,.6);
+  font-family:'Inter',sans-serif;font-weight:800;line-height:1.1;text-transform:uppercase;color:#fff;
+  text-shadow:0 2px 6px rgba(0,0,0,.3);will-change:transform,opacity}
+.cf-vp .pill span{position:relative;white-space:nowrap}
+.cf-vp .no{background:linear-gradient(180deg,#FF8461 0%,#E8452C 100%);box-shadow:0 0 34px rgba(255,90,60,.75)}
+.cf-vp .yes{background:linear-gradient(180deg,#5BEA78 0%,#1FAE3E 100%);box-shadow:0 0 34px rgba(60,220,90,.75)}
+.cf-vp .strike{position:absolute;left:-4px;right:-4px;top:50%;height:6px;margin-top:-3px;border-radius:3px;
+  background:#fff;transform-origin:0 50%;transform:scaleX(0)}
+[dir=rtl] .cf-vp .strike{transform-origin:100% 50%}
+
+/* ----------------------------------------------------------- option tiles -- */
+.cf-ot{position:absolute;left:40px;right:40px;bottom:300px;display:flex;gap:18px}
+.cf-ot .tile{flex:1;min-width:0;background:#fff;border-radius:18px;overflow:hidden;
+  box-shadow:0 14px 34px rgba(0,0,0,.4);display:flex;flex-direction:column;will-change:transform,opacity}
+.cf-ot .v,.cf-ot .go{text-align:center;overflow:hidden}
+.cf-ot .v{padding:26px 10px 18px;font-family:'Inter',sans-serif;font-weight:800;line-height:1.1;color:#111}
+.cf-ot .go{padding:16px 10px;font-family:'Inter',sans-serif;font-weight:800;line-height:1.1;color:#fff;
+  text-decoration:underline;text-underline-offset:6px}
+.cf-ot .v span,.cf-ot .go span{white-space:nowrap}
+
+/* ------------------------------------------------------------- steps card -- */
+.cf-st .head{position:absolute;top:0;left:110px;width:860px;background:#fff;
+  padding:110px 50px 44px;border-radius:0 0 30px 30px;box-shadow:0 18px 44px rgba(0,0,0,.35)}
+.cf-st .hd{font-family:'Inter',sans-serif;font-weight:800;font-size:72px;line-height:1.1;
+  text-align:center;color:#111}
+.cf-st .steps{position:absolute;top:720px;left:110px;width:860px;
+  display:flex;flex-direction:column;align-items:flex-start;gap:30px}
+.cf-st .step{display:flex;align-items:center;filter:drop-shadow(0 12px 22px rgba(0,0,0,.35));
+  will-change:transform,opacity}
+.cf-st .step b{flex:none;width:96px;height:96px;border-radius:18px;display:flex;align-items:center;
+  justify-content:center;font-family:'Inter',sans-serif;font-weight:800;font-size:58px;color:#fff;
+  box-shadow:inset 0 -6px 0 rgba(0,0,0,.18)}
+.cf-st .step span{margin-inline-start:-10px;background:#fff;padding-block:18px;padding-inline:34px 30px;
+  font-family:'Inter',sans-serif;font-weight:700;line-height:1.1;color:#111;white-space:nowrap}
+.cf-st .badge{position:absolute;top:470px;inset-inline-end:60px;width:250px;height:250px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;padding:30px;text-align:center;
+  border:6px solid #fff;will-change:transform,opacity}
+.cf-st .badge span{font-family:'Inter',sans-serif;font-weight:800;font-size:46px;line-height:1.05;color:#fff}
+
+/* ------------------------------------------------------------- gauge swap -- */
+.cf-gs{position:absolute;left:60px;width:960px;bottom:260px;
+  display:flex;flex-direction:column;align-items:center;gap:44px}
+.cf-gs .hd{width:960px;padding:30px 40px;border-radius:30px;background:rgba(10,8,22,.78);
+  backdrop-filter:blur(12px);font-family:'Inter',sans-serif;font-weight:800;line-height:1.15;
+  text-align:center;color:#fff}
+.cf-gs .dials{display:flex;align-items:center;gap:30px}
+.cf-gs .dial{position:relative;width:300px;height:300px;border-radius:50%;overflow:hidden;
+  border:10px solid #fff;background:#120C22;box-shadow:0 0 44px rgba(0,0,0,.5);
+  display:flex;align-items:center;justify-content:center;will-change:transform,opacity}
+.cf-gs .from{border-color:#FF4A3D;box-shadow:0 0 44px rgba(255,60,50,.7)}
+.cf-gs .to{border-color:#4BE36A;box-shadow:0 0 44px rgba(70,230,100,.7)}
+.cf-gs .liq{position:absolute;left:-150px;top:0;width:580px;height:580px;border-radius:42%}
+.cf-gs .from .liq{background:linear-gradient(180deg,#FF5A4A 0%,#C3170E 100%)}
+.cf-gs .to .liq{background:linear-gradient(180deg,#6BF087 0%,#1C9E37 100%)}
+.cf-gs .dial span{position:relative;font-family:'Inter',sans-serif;font-weight:800;font-size:96px;
+  color:#fff;text-shadow:0 4px 14px rgba(0,0,0,.55)}
+.cf-gs .arw{display:flex;gap:4px}
+.cf-gs .arw i{width:34px;height:34px;border-top:12px solid;border-right:12px solid;transform:rotate(45deg)}
+[dir=rtl] .cf-gs .arw i{transform:rotate(-135deg)}
+.cf-gs .go{padding:28px 90px;border-radius:999px;border:4px solid rgba(255,255,255,.55);
+  font-family:'Inter',sans-serif;font-weight:800;font-size:54px;line-height:1;color:#fff;
+  text-shadow:0 3px 10px rgba(0,0,0,.35);white-space:nowrap;will-change:transform,opacity}
+
+/* ------------------------------------------------------------ notice push -- */
+.cf-np{position:absolute;top:110px;left:40px;right:40px;display:flex;gap:28px;align-items:flex-start;
+  padding:30px 34px;border-radius:40px;background:rgba(246,246,248,.94);backdrop-filter:blur(18px);
+  box-shadow:0 20px 50px rgba(0,0,0,.35);will-change:transform,opacity}
+.cf-np .ic{flex:none;width:110px;height:110px;border-radius:26px;display:flex;align-items:center;
+  justify-content:center;font-family:'Inter',sans-serif;font-weight:800;font-size:62px;color:#fff}
+.cf-np .tx{flex:1;min-width:0;font-family:'Inter',sans-serif;color:#111}
+.cf-np .top{display:flex;justify-content:space-between;gap:20px;font-size:30px;line-height:1.2}
+.cf-np .app{font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#444}
+.cf-np .when{color:#888}
+.cf-np .ti{margin-top:6px;font-weight:700;font-size:40px;line-height:1.2}
+.cf-np .bd{margin-top:4px;font-weight:400;font-size:38px;line-height:1.25;color:#333}
+
+/* ----------------------------------------------------------- notice alert -- */
+.cf-na-dim{position:absolute;inset:0;background:rgba(0,0,0,.28)}
+.cf-na{position:absolute;top:640px;left:140px;width:800px;border-radius:36px;overflow:hidden;
+  background:rgba(255,255,255,.97);box-shadow:0 30px 70px rgba(0,0,0,.45);font-family:'Inter',sans-serif;
+  will-change:transform,opacity}
+.cf-na .ti{display:flex;align-items:center;justify-content:center;gap:20px;padding:44px 44px 0;
+  font-weight:800;font-size:54px;line-height:1.15;color:#111}
+.cf-na .bd{padding:20px 50px 40px;text-align:center;font-weight:400;font-size:40px;line-height:1.35;color:#333}
+.cf-na .btns{display:flex;border-top:2px solid #D9D9DE}
+.cf-na .btns div{flex:1;padding:30px 20px;text-align:center;font-size:44px;line-height:1.1}
+.cf-na .no{font-weight:500;color:#222;border-inline-end:2px solid #D9D9DE}
+.cf-na .yes{font-weight:700}
+
+/* ---------------------------------------------------------- notice bubble -- */
+.cf-nb{position:absolute;top:130px;left:60px;max-width:820px;padding:24px 34px 30px;
+  border-radius:30px;background:#fff;box-shadow:0 18px 44px rgba(0,0,0,.35);
+  transform-origin:10% 100%;will-change:transform,opacity}
+.cf-nb::after{content:'';position:absolute;bottom:-26px;left:46px;
+  border-left:18px solid transparent;border-right:18px solid transparent;border-top:28px solid #fff}
+[dir=rtl] .cf-nb{left:auto;right:60px;transform-origin:90% 100%}
+[dir=rtl] .cf-nb::after{left:auto;right:46px}
+.cf-nb .lb{font-family:'Inter',sans-serif;font-weight:500;font-size:28px;color:#8A8A90;margin-bottom:12px}
+.cf-nb .row{display:flex;align-items:flex-start;gap:22px}
+.cf-nb .av{flex:none;width:84px;height:84px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.cf-nb .q{font-family:'Inter',sans-serif;font-weight:800;font-size:48px;line-height:1.2;color:#111}
+.cf-nb .q .rest{visibility:hidden}
+
+/* -------------------------------------------------------------- guide arc -- */
+/* Wider than the frame so the arch's ends run off its sides rather than
+   curling down inside the picture. */
+.cf-ga{position:absolute;left:-120px;width:1320px;bottom:0;min-height:900px;background:#fff;
+  border-top:16px solid;border-radius:50% 50% 0 0/150px 150px 0 0;
+  display:flex;flex-direction:column;justify-content:center;padding:130px 200px 120px}
+.cf-ga .dots{position:absolute;top:120px;width:120px;height:90px;background-size:30px 30px;opacity:.9}
+.cf-ga .dots.l{left:150px}
+.cf-ga .dots.r{right:150px}
+.cf-ga .in{display:flex;flex-direction:column;align-items:center;transform-origin:50% 100%}
+.cf-ga .tag{display:flex;align-items:center;gap:22px;width:100%;margin-bottom:24px}
+.cf-ga .tag i{flex:1;height:4px;border-radius:2px;transform-origin:50% 50%}
+.cf-ga .tag span{flex:none;padding:10px 34px;border-radius:999px;
+  font-family:'Inter',sans-serif;font-weight:700;font-size:38px;line-height:1.1;color:#fff}
+.cf-ga .hd{width:100%;font-family:'Anton','Avenir Next Condensed',sans-serif;line-height:1.04;
+  text-align:center;color:#141625}
+.cf-ga .hd .a{display:block}
+.cf-ga .sub{margin-top:22px;font-family:'Inter',sans-serif;font-weight:500;font-size:34px;
+  line-height:1.3;text-align:center;color:#3A3D4A}
+.cf-ga .act{margin-top:48px;display:flex;align-items:center;justify-content:center;gap:44px}
+.cf-ga .mk{flex:none;width:130px;height:130px;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;will-change:transform,opacity}
+.cf-ga .go{position:relative;overflow:hidden;padding:30px 70px;border-radius:999px;
+  font-family:'Inter',sans-serif;font-weight:700;font-size:46px;line-height:1;color:#fff;
+  white-space:nowrap;will-change:transform,opacity}
+.cf-ga .go .sheen{position:absolute;top:-20%;bottom:-20%;left:0;width:120px;
+  background:linear-gradient(90deg,rgba(255,255,255,0),rgba(255,255,255,.45),rgba(255,255,255,0))}
+
 /* ------------------------------------------------- read the other way --- */
 /* Almost all of the mirroring is already done by the time this block is
    reached: the frame carries its own dir, the rows are laid out by the flow, and
@@ -322,6 +532,9 @@ export const TEMPLATE_CSS = `
    button rather than off the outer edge of the row. */
 [dir=rtl] .cf-tier .band{
   clip-path:polygon(100% 0,46px 0,0 50%,46px 100%,100% 100%)}
+
+/* The broadcast bar's slant moves to the end a Hebrew headline is read towards. */
+[dir=rtl] .cf-nw-tv .row{clip-path:polygon(64px 0,100% 0,100% 100%,0 100%)}
 
 /* A block grows out of the corner the eye enters by, which is the other corner. */
 [dir=rtl] .cf-sc-col{transform-origin:100% 0}

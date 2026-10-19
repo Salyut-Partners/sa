@@ -4,7 +4,7 @@
 // editor, the catalogue or the exporter names a style.
 //
 // Every visual is a function of the instance's accent, so a style holds no
-// colour of its own and any of the ten works in any colour the user picks.
+// colour of its own and any of them works in any colour the user picks.
 import type { Accent } from './color.ts';
 
 /** A paint that ignores the accent — a fixed gradient, or nothing at all. */
@@ -56,6 +56,12 @@ export interface ButtonStyle {
   drop: (a: Accent) => string;
   /** How brightly the glare crosses the button, 0 for a matte one. */
   sheen: number;
+  /**
+   * How strongly the button is mirrored on the surface under it, 0 or absent
+   * for none. The one paint a style puts outside its own box: the reflection
+   * hangs below the button, so a button carrying one wants room beneath it.
+   */
+  reflect?: number;
 }
 
 export const BUTTON_STYLES: ButtonStyle[] = [
@@ -253,6 +259,110 @@ export const BUTTON_STYLES: ButtonStyle[] = [
     halo: 0.9,
     drop: flat('0 12px 28px rgba(0,0,0,.40)'),
     sheen: 1,
+  },
+  {
+    // The mobile-game button: a fat body on a hard ledge of its own darker
+    // shade, and the label outlined in near-black so it reads like a sticker.
+    // Loud on purpose — it is the "Accept" of a game lobby, not a link.
+    id: 'game',
+    label: 'Game',
+    radiusRatio: 0.2,
+    padRatio: 0.045,
+    letterRatio: 0.02,
+    arrow: false,
+    rim: flat('#1B1B22'),
+    fill: a => `linear-gradient(180deg,${a.lift(0.42)} 0%,${a.lift(0.12)} 48%,${a.base} 52%,${a.dark(0.12)} 100%)`,
+    gloss: 'linear-gradient(180deg,rgba(255,255,255,.34) 0%,rgba(255,255,255,0) 46%)',
+    ink: WHITE,
+    textShadow: flat(
+      '-3px -3px 0 #1B1B22,3px -3px 0 #1B1B22,-3px 3px 0 #1B1B22,3px 3px 0 #1B1B22,0 6px 0 #1B1B22'),
+    pulse: 0.03,
+    halo: 0,
+    drop: a => `0 10px 0 ${a.dark(0.55)},0 18px 30px rgba(0,0,0,.45)`,
+    sheen: 0.6,
+  },
+  {
+    // A straight run of the accent from deep to bright across the body, on a
+    // full pill with no rim — the plainest of the gradients, for a frame that
+    // wants colour and no ornament.
+    id: 'linear',
+    label: 'Linear',
+    radiusRatio: 0.5,
+    padRatio: 0,
+    letterRatio: 0.03,
+    arrow: true,
+    rim: NO_PAINT,
+    fill: a => `linear-gradient(90deg,${a.dark(0.45)} 0%,${a.base} 55%,${a.lift(0.3)} 100%)`,
+    gloss: 'linear-gradient(180deg,rgba(255,255,255,.12) 0%,rgba(255,255,255,0) 50%)',
+    ink: WHITE,
+    textShadow: flat('0 2px 8px rgba(0,0,0,.30)'),
+    pulse: 0.02,
+    halo: 0.6,
+    drop: a => `0 14px 30px rgba(${a.rgb},.38)`,
+    sheen: 0.8,
+  },
+  {
+    // A dark slab whose label is split into two colour channels, as if the
+    // screen had slipped: cyan off one side, the accent off the other.
+    // Still rather than flickering — a glitch that jumped on every frame would
+    // fight the photo for the eye the whole length of the video.
+    id: 'glitch',
+    label: 'Glitch',
+    radiusRatio: 0.12,
+    padRatio: 0.02,
+    letterRatio: 0.06,
+    arrow: false,
+    rim: a => a.base,
+    fill: flat('linear-gradient(180deg,#14151B 0%,#07080C 100%)'),
+    gloss: NO_GLOSS,
+    ink: WHITE,
+    textShadow: a => `-4px 0 0 rgba(0,240,255,.85),4px 0 0 rgba(${a.rgb},.95)`,
+    pulse: 0.015,
+    halo: 0.5,
+    drop: flat('0 10px 26px rgba(0,0,0,.50)'),
+    sheen: 0,
+  },
+  {
+    // The accent on a glossy pill, mirrored on the floor under it — the
+    // showroom button. The reflection is the style; the body is a plain
+    // gradient so that the two read as one object and its image.
+    id: 'reflect',
+    label: 'Reflect',
+    radiusRatio: 0.5,
+    padRatio: 0,
+    letterRatio: 0.03,
+    arrow: false,
+    rim: NO_PAINT,
+    fill: a => `linear-gradient(90deg,${a.dark(0.35)} 0%,${a.base} 60%,${a.lift(0.25)} 100%)`,
+    gloss: 'linear-gradient(180deg,rgba(255,255,255,.28) 0%,rgba(255,255,255,0) 50%)',
+    ink: WHITE,
+    textShadow: flat('0 2px 8px rgba(0,0,0,.3)'),
+    pulse: 0.018,
+    halo: 0.4,
+    drop: flat('0 8px 18px rgba(0,0,0,.30)'),
+    sheen: 0.7,
+    reflect: 0.38,
+  },
+  {
+    // Soft plastic: a pale cut of the accent pressed out of the surface, lit
+    // from the top left — a highlight on one side, a shadow on the other, and
+    // the label in the accent's own dark. The quiet style, for a frame that is
+    // already loud.
+    id: 'morph',
+    label: 'Morph',
+    radiusRatio: 0.5,
+    padRatio: 0.03,
+    letterRatio: 0.03,
+    arrow: false,
+    rim: a => `linear-gradient(145deg,#ffffff 0%,${a.lift(0.7)} 100%)`,
+    fill: a => `linear-gradient(145deg,${a.lift(0.86)} 0%,${a.lift(0.7)} 100%)`,
+    gloss: 'linear-gradient(180deg,rgba(255,255,255,.35) 0%,rgba(255,255,255,0) 45%)',
+    ink: a => a.dark(0.35),
+    textShadow: flat('0 1px 0 rgba(255,255,255,.7)'),
+    pulse: 0.012,
+    halo: 0,
+    drop: a => `-8px -8px 18px rgba(255,255,255,.45),10px 12px 24px rgba(${a.rgb},.45)`,
+    sheen: 0.3,
   },
 ];
 

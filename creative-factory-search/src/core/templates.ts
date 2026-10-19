@@ -161,6 +161,118 @@ const AVIA_FIELDS: FieldSchema = [
   { key: 'aviaDisclaimer', label: 'Дисклеймер', kind: 'text' },
 ];
 
+/**
+ * The news strips: a rubric, a headline, and a line under it. One schema for
+ * the three of them, for the reason the cards share one — they are one strip
+ * in three looks, and switching between them must not ask for the headline
+ * again.
+ *
+ * The defaults are a guide rather than a report on purpose. A strip that looks
+ * like a broadcast reads as news whatever it says, so what it says out of the
+ * box has to be something the article really delivers: no names, no figures,
+ * no event, and the line under it only invites further reading.
+ */
+const NEWS_FIELDS: FieldSchema = [
+  { key: 'newsKicker', label: 'Рубрика', kind: 'line' },
+  { key: 'newsHead', label: 'Заголовок', kind: 'line' },
+  { key: 'newsSub', label: 'Рядок під заголовком', kind: 'line' },
+];
+
+/**
+ * The poster headline: a tag, the plain lines, and the lines that go on the
+ * accent. Two lists rather than one with a mark in it, because which lines are
+ * loud is a choice the user makes with the panel, not with punctuation a
+ * translation could drop.
+ */
+const BLOCK_FIELDS: FieldSchema = [
+  { key: 'hlTag', label: 'Ярлик над заголовком', kind: 'line' },
+  { key: 'hlLines', label: 'Рядки заголовка', kind: 'list' },
+  { key: 'hlAccent', label: 'Рядки акцентом', kind: 'list' },
+];
+
+/**
+ * The teaser under a picture: the headline, its closing words in the accent,
+ * and the underlined line under it. The accent is its own field for the reason
+ * the rate list's is — it is the part the eye should land on, and in most of
+ * the languages that is the end of the sentence.
+ */
+const PANEL_FIELDS: FieldSchema = [
+  { key: 'phHead', label: 'Заголовок', kind: 'text' },
+  { key: 'phAccent', label: 'Кінець заголовка, акцент', kind: 'line' },
+  { key: 'phLink', label: 'Підкреслений рядок', kind: 'line' },
+];
+
+/**
+ * The guide cover: the photo panel's headline in the photo panel's keys, so
+ * switching between the two costs nothing, with the poster's tag over it, a
+ * quiet line under it and the shared button caption.
+ */
+const GUIDE_FIELDS: FieldSchema = [
+  { key: 'hlTag', label: 'Ярлик над заголовком', kind: 'line' },
+  { key: 'phHead', label: 'Заголовок', kind: 'text' },
+  { key: 'phAccent', label: 'Кінець заголовка, акцент', kind: 'line' },
+  { key: 'gaSub', label: 'Рядок під заголовком', kind: 'line' },
+  { key: 'cta', label: 'Напис на кнопці', kind: 'line' },
+];
+
+/** Wrong and right: the claims set aside, then the ones that replace them. */
+const VERDICT_FIELDS: FieldSchema = [
+  { key: 'vpWrong', label: 'Хибне (червоне, з хрестиком)', kind: 'list' },
+  { key: 'vpRight', label: 'Правильне (зелене, з галочкою)', kind: 'list' },
+];
+
+/**
+ * The choice in tiles, one tile per option. The button caption is the shared
+ * `cta`, the one every layout's button is written in, so a caption fixed for
+ * one layout is fixed for all of them.
+ */
+const TILE_FIELDS: FieldSchema = [
+  { key: 'otTiles', label: 'Плитки', kind: 'list' },
+  { key: 'cta', label: 'Напис на кнопках', kind: 'line' },
+];
+
+/** The how-to. The badge is optional: left empty, the layout draws none. */
+const STEPS_FIELDS: FieldSchema = [
+  { key: 'stHead', label: 'Заголовок', kind: 'text' },
+  { key: 'stSteps', label: 'Кроки', kind: 'list' },
+  { key: 'stBadge', label: 'Бейдж (порожній — без бейджа)', kind: 'line' },
+];
+
+/**
+ * Before and after. The two figures are read back as levels — "90%" fills its
+ * gauge nine-tenths — so they belong with the figures that do not translate.
+ */
+const GAUGE_FIELDS: FieldSchema = [
+  { key: 'gsHead', label: 'Заголовок', kind: 'text' },
+  { key: 'gsFrom', label: 'Було (червоне)', kind: 'line' },
+  { key: 'gsTo', label: 'Стало (зелене)', kind: 'line' },
+  { key: 'cta', label: 'Напис на кнопці', kind: 'line' },
+];
+
+/**
+ * The three notifications. No field takes a picture: the push banner's icon is
+ * the accent with the app name's first letter on it, and the bubble's avatar is
+ * a person mark — a real logo or face would make the creative pose as someone.
+ */
+const PUSH_FIELDS: FieldSchema = [
+  { key: 'npApp', label: 'Назва застосунку', kind: 'line' },
+  { key: 'npTime', label: 'Час', kind: 'line' },
+  { key: 'npTitle', label: 'Заголовок', kind: 'line' },
+  { key: 'npText', label: 'Текст', kind: 'text' },
+];
+
+const ALERT_FIELDS: FieldSchema = [
+  { key: 'naTitle', label: 'Заголовок', kind: 'line' },
+  { key: 'naText', label: 'Текст', kind: 'text' },
+  { key: 'naNo', label: 'Ліва кнопка', kind: 'line' },
+  { key: 'naYes', label: 'Права кнопка (акцент)', kind: 'line' },
+];
+
+const BUBBLE_FIELDS: FieldSchema = [
+  { key: 'nbLabel', label: 'Підпис над питанням', kind: 'line' },
+  { key: 'nbText', label: 'Питання', kind: 'text' },
+];
+
 const LANDS: Timing = { appearAt: 0.3, hideAt: null, enter: 'none', enterDuration: 0.9 };
 /** The row banners build themselves a row at a time, so they open on the frame. */
 const OPENS: Timing = { appearAt: 0, hideAt: null, enter: 'none', enterDuration: 0.6 };
@@ -239,6 +351,102 @@ export const TEMPLATES: readonly TemplateInfo[] = [
     schema: PAYMENT_FIELDS,
     // The headline is the frame's first word, and the slider needs room to run
     // before the video is over, so it opens rather than lands.
+    defaultTiming: { ...OPENS },
+  },
+  // The news strips. Each is pulled across the frame from the first beat, the
+  // way a lower third arrives on a broadcast, and each carries its own ground
+  // and no scrim, so each can be slid to wherever the photo leaves room.
+  {
+    id: 'news-tab',
+    label: 'Новини · плашка',
+    schema: NEWS_FIELDS,
+    defaultTiming: { ...OPENS },
+    movable: true,
+  },
+  {
+    id: 'news-tv',
+    label: 'Новини · ефір',
+    schema: NEWS_FIELDS,
+    defaultTiming: { ...OPENS },
+    movable: true,
+  },
+  {
+    id: 'news-box',
+    label: 'Новини · блок',
+    schema: NEWS_FIELDS,
+    defaultTiming: { ...OPENS },
+    movable: true,
+  },
+  {
+    id: 'headline-blocks',
+    label: 'Заголовок · блоки',
+    schema: BLOCK_FIELDS,
+    // Stuck on a block at a time from the first beat, like the row stacks.
+    defaultTiming: { ...OPENS },
+  },
+  {
+    id: 'photo-panel',
+    label: 'Фото + панель',
+    schema: PANEL_FIELDS,
+    // The sheet rising is the entrance; it starts on the frame, not after a
+    // pause, or the photo's own headline space sits empty for a beat.
+    defaultTiming: { ...OPENS },
+  },
+  // Each of these four is its own ground — pills, tiles, gauges on a plate —
+  // and stands low on the frame, so each can be slid up to where the photo
+  // leaves room. All of them build themselves in from the first beat.
+  {
+    id: 'verdict-pills',
+    label: 'Хибне / правильне',
+    schema: VERDICT_FIELDS,
+    defaultTiming: { ...OPENS },
+    movable: true,
+  },
+  {
+    id: 'option-tiles',
+    label: 'Плитки варіантів',
+    schema: TILE_FIELDS,
+    defaultTiming: { ...OPENS },
+    movable: true,
+  },
+  {
+    id: 'steps-card',
+    label: 'Кроки',
+    schema: STEPS_FIELDS,
+    defaultTiming: { ...OPENS },
+  },
+  {
+    id: 'gauge-swap',
+    label: 'Було → стало',
+    schema: GAUGE_FIELDS,
+    defaultTiming: { ...OPENS },
+    movable: true,
+  },
+  // The notifications hang from the top or sit on the middle of the frame, and
+  // a nudge only lifts, so none of them is offered for moving.
+  {
+    id: 'notice-push',
+    label: 'Сповіщення · банер',
+    schema: PUSH_FIELDS,
+    defaultTiming: { ...LANDS },
+  },
+  {
+    id: 'notice-alert',
+    label: 'Сповіщення · діалог',
+    schema: ALERT_FIELDS,
+    defaultTiming: { ...LANDS },
+  },
+  {
+    id: 'notice-bubble',
+    label: 'Сповіщення · коментар',
+    schema: BUBBLE_FIELDS,
+    defaultTiming: { ...OPENS },
+  },
+  {
+    id: 'guide-arc',
+    label: 'Гайд · дуга',
+    schema: GUIDE_FIELDS,
+    // Rises like the photo panel, from the first beat.
     defaultTiming: { ...OPENS },
   },
 ];
