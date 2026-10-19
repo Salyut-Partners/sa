@@ -369,17 +369,22 @@ export function App() {
         </>)}
       </header>
 
-      {tab === 'subtitles' ? (
+      {/* Every tab stays mounted and the others are hidden, not unmounted: a launch form
+          half filled in, a launch running, the «Куди» panel open — all of it lives in the
+          tabs' own state, and switching away to look at something must not throw it away. */}
+      <div className="tab-body" hidden={tab !== 'subtitles'}>
         <SubtitlesTab queue={subtitles} />
-      ) : tab === 'launch' ? (
-        // A launch of files made anywhere: mp4 from disk, no project needed. Renders of the
-        // project launch from the creatives tab's «Куди», where the project is in view.
+      </div>
+      {/* A launch of files made anywhere: mp4 from disk, no project needed. Renders of the
+          project launch from the creatives tab's «Куди», where the project is in view. */}
+      <div className="tab-body" hidden={tab !== 'launch'}>
         <main className="launch-page">
           <div className="side launch-side">
             <LaunchPanel project={emptyProject} translator={translator} />
           </div>
         </main>
-      ) : (
+      </div>
+      <div className="tab-body" hidden={tab !== 'creatives'}>
       <main>
         <section className="stage-area">
           {cells.length === 0 ? (
@@ -394,7 +399,8 @@ export function App() {
                   key={photo.id}
                   spec={spec}
                   scale={scaleOf(photo.canvas)}
-                  animate={selected.has(photo.id)}
+                  // A hidden grid sits on its posters rather than drawing sixty frames nobody sees.
+                  animate={tab === 'creatives' && selected.has(photo.id)}
                   clock={clock}
                   posterAt={poster}
                   selected={selected.has(photo.id)}
@@ -446,7 +452,7 @@ export function App() {
           onExportOne={onExportOne}
         />
       </main>
-      )}
+      </div>
     </div>
   );
 }

@@ -108,6 +108,8 @@ header {
 .save-state.failed { color: var(--danger); }
 
 main { flex: 1; display: flex; min-height: 0; }
+.tab-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.tab-body[hidden] { display: none; }
 
 .stage-area {
   flex: 1; min-width: 0; overflow: auto; padding: 20px;
