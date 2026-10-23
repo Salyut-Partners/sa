@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FacebookSettings, PlatformBuilder, PlatformCampaign, PlatformCreative, PlatformTsp, TspFields } from './platform-model.ts';
 import {
   campaignWarnings, FB_TEAM_DEFAULTS, forCabinet, launchSteps, nextCampaign, linksWanted, pixelNiche, placeSources, plainFailure, ratioWarning, setsAndDefaults,
-  TEAM_DEFAULTS, teamDefaults, topicFolder, uploadName,
+  TEAM_DEFAULTS, teamDefaults, topicFolder, uploadName, remadeUploadName, isUploadOf,
   type LaunchCampaign, type LaunchFile, type LaunchForm, type LaunchStep, type TopicSnapshot,
 } from './quick-launch.ts';
 
@@ -226,6 +226,29 @@ describe('uploadName', () => {
   it('tags the name with the first eight of the digest, once', () => {
     expect(uploadName(file('photo-1-en.mp4'))).toBe('photo-1-en-abcdef01.mp4');
     expect(uploadName(file('photo-1-en-abcdef01.mp4'))).toBe('photo-1-en-abcdef01.mp4');
+  });
+});
+
+describe('a file the platform dropped, sent again under a marked name', () => {
+  it('keeps the first name and adds the mark before the extension', () => {
+    expect(remadeUploadName('photo-1-en-abcdef01.mp4', '1a2b')).toBe('photo-1-en-abcdef01-u1a2b.mp4');
+  });
+
+  it('is known as the same upload, and nothing else is', () => {
+    expect(isUploadOf('photo-1-en-abcdef01.mp4', 'photo-1-en-abcdef01.mp4')).toBe(true);
+    expect(isUploadOf('photo-1-en-abcdef01-u1a2b.mp4', 'photo-1-en-abcdef01.mp4')).toBe(true);
+    expect(isUploadOf('photo-1-en-abcdef01-uzzzz.mp4', 'photo-1-en-abcdef01.mp4')).toBe(false);
+    expect(isUploadOf('photo-1-en-abcdef01-u1a2b.png', 'photo-1-en-abcdef01.mp4')).toBe(false);
+    expect(isUploadOf('photo-1-en-abcdef02.mp4', 'photo-1-en-abcdef01.mp4')).toBe(false);
+    expect(isUploadOf(null, 'photo-1-en-abcdef01.mp4')).toBe(false);
+  });
+
+  it('is reused by the next launch into the topic', () => {
+    const held = snapshot();
+    held.creatives = [...held.creatives, { ...held.creatives.find(c => c.media_type !== 'Headline')!, id: 9001, original_filename: 'a-en-11111111-u0f0f.mp4' }];
+    const plan = launchSteps(form(), held, [file('a-en.mp4', '11111111aaaa')]);
+    if (!plan.ok) throw new Error(plan.errors.join('; '));
+    expect(plan.steps.some(s => s.kind === 'creative.upload')).toBe(false);
   });
 });
 

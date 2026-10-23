@@ -15,11 +15,12 @@ import {
 import { buyerIdFromToken } from '../core/platform-token.ts';
 import { DEFAULT_QUEUE, pauseBefore, type WriteKind } from '../core/queue.ts';
 import {
-  BUILDERS_URL, launchSteps, linksWanted, MEDIA_EXTENSIONS, mediaOf, placeSources, sourceOf, plainFailure, setsAndDefaults, teamDefaults, topicFolder, uploadName,
+  BUILDERS_URL, isUploadOf, launchSteps, linksWanted, MEDIA_EXTENSIONS, mediaOf, placeSources, remadeUploadName, sourceOf, plainFailure, setsAndDefaults, teamDefaults, topicFolder, uploadName,
   type LaunchForm, type LaunchStep, type Listed, type TeamDefaults, type TopicSets, type TopicSnapshot,
 } from '../core/quick-launch.ts';
 import type { SaConfig } from './config.ts';
 import { createJob, jobById, outputsOf, RefusedError, settleJob, type Job } from './jobs.ts';
+import { remark } from './ffmpeg.ts';
 import { PolicyStop, writeUnderPolicy } from './policy.ts';
 import { transcribeVideo } from './subs.ts';
 import {
@@ -335,10 +336,14 @@ async function digestAt(url: string): Promise<string | null> {
  */
 async function heldByContent(snapshot: TopicSnapshot, files: readonly { name: string; hash: string; path: string }[]): Promise<Record<string, number>> {
   const media = snapshot.creatives.filter(c => c.media_type !== 'Headline' && c.file_url != null);
-  const names = new Set(media.map(v => v.original_filename));
-  const wanted = files.filter((f, i) => files.findIndex(g => g.hash === f.hash) === i && !names.has(uploadName(f)));
+  const wanted = files.filter((f, i) => files.findIndex(g => g.hash === f.hash) === i && !media.some(v => isUploadOf(v.original_filename, uploadName(f))));
   if (wanted.length === 0 || media.length === 0) return {};
-  const sizes = new Map(wanted.map(f => [fs.statSync(f.path).size, f]));
+  // A list per size: two files of one size were one entry, and the first of them was never looked for.
+  const sizes = new Map<number, typeof wanted>();
+  for (const f of wanted) {
+    const size = (await fs.promises.stat(f.path)).size;
+    sizes.set(size, [...(sizes.get(size) ?? []), f]);
+  }
   const held: Record<string, number> = {};
   // Newest first: of two entries with the same bytes, the later is the one the buyer last saw.
   const ordered = [...media].sort((x, y) => y.id - x.id);
@@ -346,9 +351,11 @@ async function heldByContent(snapshot: TopicSnapshot, files: readonly { name: st
     const chunk = ordered.slice(i, i + 8);
     const read = await Promise.all(chunk.map(v => sizeAt(v.file_url!)));
     for (const [n, size] of read.entries()) {
-      const file = size === null ? undefined : sizes.get(size);
-      if (file === undefined || file.hash in held) continue;
-      if (await digestAt(chunk[n]!.file_url!) === file.hash) held[file.hash] = chunk[n]!.id;
+      const open = (size === null ? [] : sizes.get(size) ?? []).filter(f => !(f.hash in held));
+      if (open.length === 0) continue;
+      const digest = await digestAt(chunk[n]!.file_url!);
+      const file = open.find(f => f.hash === digest);
+      if (file !== undefined) held[file.hash] = chunk[n]!.id;
     }
   }
   return held;
@@ -391,9 +398,7 @@ export async function startLaunch(config: SaConfig, body: unknown): Promise<{ id
 
   const api = client(config);
   const snapshot = await readTopicSnapshot(api, request.topicId, request.form.source);
-  const files = picked.map(f => ({
-    ...f, hash: crypto.createHash('sha256').update(fs.readFileSync(f.path)).digest('hex'),
-  }));
+  const files = await Promise.all(picked.map(async f => ({ ...f, hash: await digestOf(f.path) })));
   snapshot.heldByDigest = await heldByContent(snapshot, files);
   const plan = launchSteps(request.form, snapshot, files);
   if (!plan.ok) throw new RefusedError(plan.errors.join('\n'));
@@ -406,7 +411,7 @@ export async function startLaunch(config: SaConfig, body: unknown): Promise<{ id
   for (const f of files) {
     if (local.has(f.name) || !plan.steps.some(s => s.kind === 'creative.upload' && s.file === f.name)) continue;
     const copy = path.join(job.dir, `${local.size}-${path.basename(f.name)}`);
-    fs.copyFileSync(f.path, copy);
+    await fs.promises.copyFile(f.path, copy);
     local.set(f.name, copy);
   }
   void runLaunch({ api, job, topicId: snapshot.topic.id, userId: snapshot.topic.user_id, local, sources: request.sources, folder }, plan.steps);
@@ -482,7 +487,7 @@ async function runLaunch(run: Run, steps: readonly LaunchStep[]): Promise<void> 
       run.job.active.clear();
       run.job.active.add(label);
       try {
-        const written = saveSources(run.folder, run.sources);
+        const written = await saveSources(run.folder, run.sources);
         run.job.outputs.push({ name: label, file: '' });
         run.job.result = { ...run.job.result, label: `${run.job.result.label} · ісходників нових: ${written}` };
       } catch (e) {
@@ -497,12 +502,24 @@ async function runLaunch(run: Run, steps: readonly LaunchStep[]): Promise<void> 
   if (!run.job.cancelled && crashed === null) run.job.state = builders.length === wanted ? 'done' : 'failed';
 }
 
+/**
+ * A file's sha256, streamed. Read whole and synchronously, a launch of a few
+ * mp4s — and a topic folder that only grows — held the server still: polls
+ * stalled and renders in flight timed out.
+ */
+function digestOf(file: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    fs.createReadStream(file).on('error', reject).on('data', chunk => hash.update(chunk)).on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
 /** The pictures into the topic's folder, flat, as `placeSources` lays them. Answers how many were new. */
-function saveSources(folder: string, sources: readonly { name: string; image: string }[]): number {
-  fs.mkdirSync(folder, { recursive: true });
+async function saveSources(folder: string, sources: readonly { name: string; image: string }[]): Promise<number> {
+  await fs.promises.mkdir(folder, { recursive: true });
   const digest = (bytes: Buffer): string => crypto.createHash('sha256').update(bytes).digest('hex');
-  const held = fs.readdirSync(folder, { withFileTypes: true }).filter(d => d.isFile() && !d.name.startsWith('.'))
-    .map(d => ({ name: d.name, hash: digest(fs.readFileSync(path.join(folder, d.name))) }));
+  const entries = (await fs.promises.readdir(folder, { withFileTypes: true })).filter(d => d.isFile() && !d.name.startsWith('.'));
+  const held = await Promise.all(entries.map(async d => ({ name: d.name, hash: await digestOf(path.join(folder, d.name)) })));
   const bytes = new Map<string, Buffer>();
   const incoming = sources.flatMap(source => {
     const decoded = decodeDataUrl(source.image);
@@ -513,7 +530,7 @@ function saveSources(folder: string, sources: readonly { name: string; image: st
     return [{ name: `${safeStem(source.name) || 'photo'}.${extensionFor(decoded.mime)}`, hash }];
   });
   const placed = placeSources(held, incoming);
-  for (const file of placed) fs.writeFileSync(path.join(folder, file.name), bytes.get(file.hash)!);
+  for (const file of placed) await fs.promises.writeFile(path.join(folder, file.name), bytes.get(file.hash)!);
   return placed.length;
 }
 
@@ -531,6 +548,24 @@ async function underPolicy(run: Run, kind: WriteKind, send: () => Promise<Answer
   }
 }
 
+/**
+ * How long after an upload the topic's list is read for it, pause by pause —
+ * about twenty seconds in all. Read once, at once, a file the platform was
+ * still taking in looked dropped, and the launch stopped.
+ */
+const READ_BACK_MS = [0, 1500, 3000, 5000, 10_000];
+
+/** The id an upload answered with, where the answer carries one — at the top, or under `data` or `creativeRepo`. */
+function answeredId(answer: Answer): number | null {
+  if (answer.status !== 'ok') return null;
+  const body = bagOf(answer.body);
+  for (const holder of [body, bagOf(body['data']), bagOf(body['creativeRepo'])]) {
+    const id = holder['id'];
+    if (typeof id === 'number' && Number.isInteger(id)) return id;
+  }
+  return null;
+}
+
 /** The id in the list now that the list before did not have. */
 const freshIn = (before: readonly number[], now: readonly number[]): number | null => {
   const fresh = now.filter(id => !before.includes(id));
@@ -543,15 +578,40 @@ async function runStep(run: Run, step: LaunchStep, made: Made): Promise<number |
   switch (step.kind) {
     case 'creative.upload': {
       const media = async () => (await readCreatives(api, topicId)).filter(c => c.media_type !== 'Headline');
-      const before = (await media()).map(c => c.id);
-      const bytes = fs.readFileSync(run.local.get(step.file)!);
       const fields = { ...step.body, topic_ids: step.body.topic_ids.map(String) };
       const progress = (done: number, total: number): void => { run.job.progress.set(step.label, { done, total }); };
-      await underPolicy(run, 'create', () => uploadCreative(api, fields, { name: step.upload, bytes, mime: step.mime }, progress),
-        async () => uploadedId(before, await media(), step.upload));
-      const id = uploadedId(before, await media(), step.upload);
-      // The platform takes bytes it already holds and adds nothing — in this topic that was found before the
-      // upload, so it is another one's file, or one deleted from the repository.
+      /** One upload under `name`, and the id the topic shows for it — looked for a while, since the list can lag the upload. */
+      const send = async (name: string, file: string): Promise<number | null> => {
+        const before = (await media()).map(c => c.id);
+        const bytes = await fs.promises.readFile(file);
+        const { answer } = await underPolicy(run, 'create', () => uploadCreative(api, fields, { name, bytes, mime: step.mime }, progress),
+          async () => uploadedId(before, await media(), name));
+        // What the platform says to an upload is not yet known in full: said once in the log, so the next fix can read it.
+        if (answer !== null) console.log(`launch: upload ${name} answered`, answer.status, JSON.stringify('body' in answer ? answer.body : null)?.slice(0, 400));
+        const answered = answer === null ? null : answeredId(answer);
+        for (const wait of READ_BACK_MS) {
+          await pause(run.job, wait);
+          if (run.job.cancelled) throw new Cancelled('скасовано');
+          const now = await media();
+          const id = uploadedId(before, now, name)
+            // The platform may store a name of its own; the id it answered with, new in the topic, is ours whatever it is called.
+            ?? (answered !== null && !before.includes(answered) && now.some(c => c.id === answered) ? answered : null);
+          if (id !== null) return id;
+        }
+        return null;
+      };
+      const local = run.local.get(step.file)!;
+      let id = await send(step.upload, local);
+      // Taken and dropped: the platform holds these bytes already — in another topic, or deleted — and adds
+      // nothing. The same video with a mark in its metadata is new bytes, and goes up under a name that still
+      // reads as this one, so a later launch into the topic reuses it.
+      if (id === null && step.mime.startsWith('video/')) {
+        const mark = crypto.randomBytes(2).toString('hex');
+        const name = remadeUploadName(step.upload, mark);
+        const remade = path.join(run.job.dir, name);
+        await remark(local, remade, mark);
+        id = await send(name, remade);
+      }
       if (id === null) throw new StepError(`після завантаження платформа не показує ${step.upload} у топіку — схоже, такий самий файл уже є на платформі в іншому топіку або видалений; змініть файл (перезбережіть) або приберіть його з цього заливу`);
       made.uploads.set(step.upload, id);
       return null;

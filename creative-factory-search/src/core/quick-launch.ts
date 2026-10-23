@@ -611,6 +611,27 @@ export function uploadName(file: Pick<LaunchFile, 'name' | 'hash'>): string {
   return stem.endsWith(`-${tag}`) ? `${stem}.${ext}` : `${stem}-${tag}.${ext}`;
 }
 
+/**
+ * The name a file goes up under a second time, when the platform took the
+ * first upload and added nothing — it drops bytes it already holds, in another
+ * topic or deleted, without a word. The bytes are remade with a mark (`mark`,
+ * four hex), and the name keeps the first one's so a later launch still
+ * knows it: `photo-en-abcdef01.mp4` → `photo-en-abcdef01-u1a2b.mp4`.
+ */
+export const remadeUploadName = (upload: string, mark: string): string =>
+  upload.replace(/(\.[^.]+)$/, `-u${mark}$1`);
+
+/** Whether the topic's `stored` name is `upload` itself, or a remade copy of it — see `remadeUploadName`. */
+export function isUploadOf(stored: string | null, upload: string): boolean {
+  if (stored === null) return false;
+  if (stored === upload) return true;
+  const dot = upload.lastIndexOf('.');
+  if (dot < 0) return false;
+  const stem = upload.slice(0, dot);
+  const ext = upload.slice(dot);
+  return stored.startsWith(`${stem}-u`) && stored.endsWith(ext) && /^[0-9a-f]{4}$/.test(stored.slice(stem.length + 2, -ext.length));
+}
+
 /** The proportions each source shows as they are; another is said, not refused. */
 const USUAL_RATIOS: Record<TrafficSource, { label: string; value: number }[]> = {
   tiktok: [{ label: '9:16', value: 9 / 16 }],
@@ -849,7 +870,7 @@ export function launchSteps(form: LaunchForm, snapshot: TopicSnapshot, files: re
     const kind = mediaOf(file.name)!;
     seen.set(file.hash, kind.media_type);
     const upload = uploadName(file);
-    const byName = media.filter(v => v.original_filename === upload).sort((x, y) => y.id - x.id)[0];
+    const byName = media.filter(v => isUploadOf(v.original_filename, upload)).sort((x, y) => y.id - x.id)[0];
     const held = byName?.id ?? snapshot.heldByDigest?.[file.hash];
     if (held !== undefined) {
       const entry = media.find(c => c.id === held);

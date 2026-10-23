@@ -93,6 +93,18 @@ function run(tool: string, args: readonly string[]): Promise<string> {
   });
 }
 
+/**
+ * The same video with a mark in its metadata: new bytes, the same frames and
+ * sound. For a file the platform will not take twice — it drops bytes it
+ * already holds — copied, not re-encoded, so nothing on screen changes.
+ */
+export async function remark(input: string, outFile: string, mark: string): Promise<void> {
+  await run('ffmpeg', [
+    '-y', '-i', input, '-map', '0', '-c', 'copy',
+    '-metadata', `comment=sa-${mark}`, '-movflags', '+faststart', outFile,
+  ]);
+}
+
 /** How long an audio or video file runs, in seconds. */
 export async function probeDuration(file: string): Promise<number> {
   const out = await run('ffprobe', [

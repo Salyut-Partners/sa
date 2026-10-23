@@ -22,6 +22,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, '..', '..');
 const PORT = Number(process.env['PORT'] ?? 5180);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
+/** The exit code for a port another process holds; `bin/serve.mjs` knows it. */
+const PORT_TAKEN = 3;
 
 const app = express();
 // Photos travel inside the spec as data URLs, and a batch carries one per
@@ -276,7 +278,8 @@ const server = app.listen(PORT, err => {
   if (err) {
     const busy = (err as NodeJS.ErrnoException).code === 'EADDRINUSE';
     console.error(busy ? `порт ${PORT} зайнятий — сервер уже запущений в іншому вікні?` : `сервер не стартував: ${err.message}`);
-    process.exit(1);
+    // A taken port is not ours to retry for: `bin/serve.mjs` reads this code and stops.
+    process.exit(busy ? PORT_TAKEN : 1);
   }
   console.log(`Creative Factory Search -> ${ORIGIN}`);
   // Only once the port is ours: a second server would otherwise clear the first one's jobs.

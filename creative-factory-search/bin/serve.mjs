@@ -15,6 +15,9 @@ const tsx = path.join(root, 'node_modules', '.bin', 'tsx');
 const entry = path.join(root, 'src', 'server', 'index.ts');
 const WATCHED = ['server', 'core', 'renderer'].map(dir => path.join(root, 'src', dir));
 
+/** What `src/server/index.ts` exits with when its port is taken. */
+const PORT_TAKEN = 3;
+
 let child = null;
 let stopping = false;
 let restartOnExit = false;
@@ -32,6 +35,12 @@ function start() {
       restartOnExit = false;
       start();
       return;
+    }
+    if (code === PORT_TAKEN) {
+      // Another server has the port — the buyer's other window, most likely.
+      // Retrying would only print this every half a minute for ever.
+      console.error('[serve] порт зайнятий іншим сервером — цей не запускаю. Закрийте те вікно або працюйте в ньому.');
+      process.exit(1);
     }
     if (Date.now() - startedAt > 60_000) crashes = 0;
     crashes += 1;
