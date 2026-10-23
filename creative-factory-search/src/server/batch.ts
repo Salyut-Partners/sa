@@ -123,15 +123,14 @@ async function run(
     }
   };
 
-  let crashed: Error | null = null;
-  try {
-    await Promise.all(
-      Array.from({ length: Math.min(CONCURRENCY, groups.length) }, (_, slot) => worker(slot)),
-    );
-  } catch (e) {
-    crashed = e as Error;
-  }
-  settleJob(job, crashed);
+  // Every worker is waited for, even after one has thrown: settling while
+  // another was still writing made the job sweepable, and its folder could be
+  // deleted under a render in flight.
+  const ran = await Promise.allSettled(
+    Array.from({ length: Math.min(CONCURRENCY, groups.length) }, (_, slot) => worker(slot)),
+  );
+  const crashed = ran.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+  settleJob(job, crashed === undefined ? null : crashed.reason as Error);
 }
 
 interface GroupContext {

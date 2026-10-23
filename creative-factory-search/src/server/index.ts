@@ -10,7 +10,7 @@ import { VOICE_MODELS } from '../core/voice.ts';
 import { startBatch } from './batch.ts';
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
 import { configPath, loadConfig } from './config.ts';
-import { BadRequestError, cancelJob, jobById, outputsOf, RefusedError, statusOf } from './jobs.ts';
+import { BadRequestError, cancelJob, jobById, outputsOf, RefusedError, removeLeftovers, statusOf } from './jobs.ts';
 import { PlatformReadError, platformState } from './platform.ts';
 import { launchTopic, launchTopics, showTopic, stageFile, startLaunch, transcribeStaged } from './quick-launch.ts';
 import { closeBrowsers } from './render.ts';
@@ -140,8 +140,14 @@ app.post('/api/launch/files', async (req, res) => {
 
 /** The words a staged mp4 speaks, for its `ad_script` — Whisper on this machine, one file at a time. */
 app.post('/api/launch/files/:id/transcript', async (req, res) => {
+  // A closed tab or a removed file stops waiting; so does Whisper, rather than
+  // holding the lane for an answer no one will read.
+  const asker = new AbortController();
+  res.on('close', () => {
+    if (!res.writableFinished) asker.abort();
+  });
   try {
-    res.json({ text: await transcribeStaged(req.params.id) });
+    res.json({ text: await transcribeStaged(req.params.id, asker.signal) });
   } catch (e) {
     answerFailure(res, e, 'launch transcript');
   }
@@ -204,14 +210,14 @@ app.post('/api/subtitles', async (req, res) => {
 
 app.get('/api/jobs/:id', (req, res) => {
   const job = jobById(req.params.id);
-  if (job === undefined) res.status(404).json({ error: 'задачі більше немає' });
+  if (job === undefined) res.status(404).json({ error: 'задачі більше немає — сервер, мабуть, перезапускався; запустіть ще раз' });
   else res.json(statusOf(job));
 });
 
 app.delete('/api/jobs/:id', (req, res) => {
   const job = jobById(req.params.id);
   if (job === undefined) {
-    res.status(404).json({ error: 'задачі більше немає' });
+    res.status(404).json({ error: 'задачі більше немає — сервер, мабуть, перезапускався; запустіть ще раз' });
     return;
   }
   cancelJob(job);
@@ -225,7 +231,7 @@ app.delete('/api/jobs/:id', (req, res) => {
 app.get('/api/jobs/:id/download', (req, res) => {
   const job = jobById(req.params.id);
   if (job === undefined) {
-    res.status(404).json({ error: 'задачі більше немає' });
+    res.status(404).json({ error: 'задачі більше немає — сервер, мабуть, перезапускався; запустіть ще раз' });
     return;
   }
   const outputs = outputsOf(job);
@@ -236,8 +242,9 @@ app.get('/api/jobs/:id/download', (req, res) => {
 
   const only = outputs.length === 1 ? outputs[0]! : null;
   if (only !== null) {
-    res.setHeader('Content-Type', 'video/mp4');
-    res.setHeader('Content-Disposition', `attachment; filename="${only.name}"`);
+    // `attachment` encodes the name: a Cyrillic stem put raw into the header
+    // made Node refuse it, and every single download of one answered 500.
+    res.type('video/mp4').attachment(only.name);
     fs.createReadStream(only.file).on('error', () => res.destroy()).pipe(res);
     return;
   }
@@ -253,11 +260,34 @@ app.get('/api/jobs/:id/download', (req, res) => {
   });
   zip.pipe(res);
   for (const output of outputs) zip.file(output.file, { name: output.name });
-  void zip.finalize();
+  zip.finalize().catch((e: Error) => {
+    console.error('zip:', e.message);
+    res.destroy();
+  });
 });
 
-const server = app.listen(PORT, () => {
+// Express 5 calls back with the error too: ignoring it printed the banner for a
+// server that had never started, and then the process quietly ended.
+const server = app.listen(PORT, err => {
+  if (err) {
+    const busy = (err as NodeJS.ErrnoException).code === 'EADDRINUSE';
+    console.error(busy ? `порт ${PORT} зайнятий — сервер уже запущений в іншому вікні?` : `сервер не стартував: ${err.message}`);
+    process.exit(1);
+  }
   console.log(`Creative Factory Search -> ${ORIGIN}`);
+  // Only once the port is ours: a second server would otherwise clear the first one's jobs.
+  removeLeftovers();
+});
+
+// A stray rejection is logged and survived; a thrown exception leaves the
+// process in a state nothing vouches for, so it ends — `bin/serve.mjs` starts
+// a fresh one.
+process.on('unhandledRejection', reason => {
+  console.error('unhandled rejection:', reason);
+});
+process.on('uncaughtException', e => {
+  console.error('uncaught exception:', e);
+  process.exit(1);
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

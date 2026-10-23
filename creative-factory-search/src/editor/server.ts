@@ -24,6 +24,8 @@ export type { JobFailure, JobStatus, LaunchForm, LaunchLine, LaunchTopic, Staged
  * fallback covers a response that is not JSON at all.
  */
 async function refusal(response: Response): Promise<Error> {
+  // A 413 comes from Express's body parser as an HTML page, never as `{ error }`.
+  if (response.status === 413) return new Error(TOO_BIG);
   const body = await response.json().catch(() => ({ error: response.statusText }));
   return new Error((body as { error?: string }).error ?? response.statusText);
 }
@@ -34,11 +36,23 @@ async function ask<T>(url: string, init?: RequestInit): Promise<T> {
   return await response.json() as T;
 }
 
-const asJson = (body: unknown): RequestInit => ({
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(body),
-});
+const TOO_BIG = 'Запит завеликий для сервера — забагато фото чи мов за раз. Розбийте на кілька експортів.';
+
+/**
+ * A POST with a JSON body. Async so that a body too large to stringify — the
+ * photos ride inside it — arrives as a rejection: thrown synchronously it
+ * escaped the caller's `.catch`, and the export sat on «Рендер» with no job
+ * behind it until the page was reloaded.
+ */
+async function post<T>(url: string, body: unknown): Promise<T> {
+  let json: string;
+  try {
+    json = JSON.stringify(body);
+  } catch (e) {
+    throw e instanceof RangeError ? new Error(TOO_BIG) : e;
+  }
+  return ask<T>(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: json });
+}
 
 // ------------------------------------------------------------------ voices --
 
@@ -86,13 +100,13 @@ export const translate = (
   texts: readonly string[],
   targets: readonly LocaleId[],
 ): Promise<TranslationResult> =>
-  ask<TranslationResult>('/api/translate', asJson({ texts, targets }));
+  post<TranslationResult>('/api/translate', { texts, targets });
 
 // ------------------------------------------------------------------ export --
 
 /** Start an export; its files stay on the server until they are downloaded or a launch takes them. */
 export const startBatch = (plan: BatchPlan, duration: number, fitToVoice: boolean): Promise<{ id: string }> =>
-  ask<{ id: string }>('/api/batch', asJson({ groups: plan.groups, duration, fitToVoice }));
+  post<{ id: string }>('/api/batch', { groups: plan.groups, duration, fitToVoice });
 
 /** Any job's progress — an export or a subtitle run; they share the registry. */
 export const jobStatus = (id: string): Promise<JobStatus> =>
@@ -172,7 +186,7 @@ export interface LaunchRequest {
 
 /** One new campaign. `confirm` rides along: the only caller is the modal's «Підтвердити». */
 export const startLaunch = (request: LaunchRequest): Promise<{ id: string; lines: LaunchLine[]; warnings: string[] }> =>
-  ask('/api/launch', asJson({ ...request, confirm: true }));
+  post('/api/launch', { ...request, confirm: true });
 
 /** A designer's mp4 sent to this machine's server once, when it is added to the form; the launch names it by the id. */
 export const stageLaunchFile = (file: File): Promise<StagedFile> =>

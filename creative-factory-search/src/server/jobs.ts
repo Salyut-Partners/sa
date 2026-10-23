@@ -11,8 +11,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-/** How many finished jobs are kept for their outputs before being swept. */
+/**
+ * Finished jobs are kept for their outputs — a download, or a launch taking
+ * the renders — by age rather than by count alone: with six kept, a handful
+ * of subtitle files (a job each) swept away the export a launch was about to
+ * take. The newest few stay whatever their age, and a ceiling bounds the disk.
+ */
 const KEEP_JOBS = 6;
+const KEEP_FOR_MS = 3 * 60 * 60_000;
+const KEEP_AT_MOST = 60;
 
 export type JobState = 'running' | 'done' | 'cancelled' | 'failed';
 
@@ -206,7 +213,28 @@ export function forgetJob(job: Job): void {
  */
 function sweep(): void {
   const done = [...jobs.values()].filter(j => j.settled);
-  for (const job of done.slice(0, Math.max(0, done.length - KEEP_JOBS))) forgetJob(job);
+  const now = Date.now();
+  done.forEach((job, i) => {
+    const newer = done.length - 1 - i;
+    const old = now - (job.finishedAt ?? now) > KEEP_FOR_MS;
+    if (newer >= KEEP_AT_MOST || (newer >= KEEP_JOBS && old)) forgetJob(job);
+  });
+}
+
+/** A job folder by its `mkdtemp` name — a prefix and six characters; `sa-launch-files`, the staged files, is not one. */
+const JOB_DIR = /^(cfs-batch|cfs-subs|sa-launch)-[A-Za-z0-9]{6}$/;
+
+/**
+ * Remove job folders an earlier run of the server left behind. Jobs live only
+ * in the process, so at startup no folder of that shape belongs to anyone; a
+ * server killed mid-render used to leave its frames and mp4s for good.
+ */
+export function removeLeftovers(): void {
+  const tmp = os.tmpdir();
+  for (const name of fs.readdirSync(tmp)) {
+    if (name === 'sa-launch-files' || !JOB_DIR.test(name)) continue;
+    fs.promises.rm(path.join(tmp, name), { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /**

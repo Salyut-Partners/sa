@@ -240,11 +240,11 @@ const stagedPath = (id: string): string | null => {
 };
 
 /** The words a staged video speaks, transcribed on this machine. An image has none. */
-export async function transcribeStaged(id: string): Promise<string> {
+export async function transcribeStaged(id: string, signal?: AbortSignal): Promise<string> {
   const file = stagedPath(id);
   if (file === null) throw new RefusedError('файл уже прибрано з сервера — додайте його ще раз');
   if (mediaOf(file)?.media_type !== 'Video') throw new RefusedError('картинку не розпізнають — у неї немає тексту');
-  return transcribeVideo(file);
+  return transcribeVideo(file, null, signal);
 }
 
 // -------------------------------------------------------------- launch --

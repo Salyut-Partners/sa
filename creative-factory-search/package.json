@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "concurrently -n server,editor -c blue,magenta \"npm:dev:server\" \"npm:dev:editor\"",
-    "dev:server": "tsx watch src/server/index.ts",
+    "dev:server": "node bin/serve.mjs",
     "dev:editor": "vite",
     "build": "vite build",
     "start": "tsx src/server/index.ts",

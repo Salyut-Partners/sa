@@ -43,10 +43,22 @@ export interface LaunchRun {
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
+/** Failed asks in a row before a job is given up on — about ten seconds, so one blip does not end a launch that is still going. */
+const MISSES_ALLOWED = 14;
+
 /** Ask after a job until it stops, handing every status on the way to `seen`. */
 async function follow(id: string, seen: (status: JobStatus) => void): Promise<JobStatus> {
+  let misses = 0;
   for (;;) {
-    const status = await jobStatus(id);
+    let status: JobStatus;
+    try {
+      status = await jobStatus(id);
+      misses = 0;
+    } catch (e) {
+      if (++misses >= MISSES_ALLOWED) throw e;
+      await sleep(POLL_MS);
+      continue;
+    }
     seen(status);
     if (status.state !== 'running') return status;
     await sleep(POLL_MS);

@@ -263,6 +263,12 @@ npm run dev        # server on 5180, editor on 5181
 
 Open <http://localhost:5181>. The editor proxies `/api` to the server.
 
+`npm run dev` runs the server under `bin/serve.mjs`, which restarts it when it
+crashes and when anything under `src/server`, `src/core` or `src/renderer`
+changes — the renderer too, because the server bundles it once per process.
+Jobs live in the process, so a restart loses what was in flight; the editor
+says so rather than waiting on a job that is gone.
+
 `npm run build && npm start` serves the built editor from the server alone, on 5180.
 
 ffmpeg and ffprobe must be on `PATH` (`brew install ffmpeg`). Chromium comes with

@@ -13,6 +13,13 @@ import {
 /** How often to ask. Often enough to feel live, rarely enough to be free. */
 const POLL_MS = 700;
 
+/**
+ * Failed asks in a row before the export is given up on — about ten seconds.
+ * One blip, or the server being restarted under it, used to mark a job that
+ * was still rendering as failed, with nothing to bring it back.
+ */
+const MISSES_ALLOWED = 14;
+
 export interface ExportRun {
   status: JobStatus | null;
   /** The last thing worth telling the user, in a sentence. */
@@ -50,9 +57,11 @@ export function useExport(): ExportRun {
   // button, so a status that comes back finished stops it wherever it was.
   useEffect(() => {
     if (!running || id === '') return;
+    let misses = 0;
     const timer = setInterval(() => {
       void jobStatus(id)
         .then(next => {
+          misses = 0;
           setStatus(next);
           if (next.state === 'running' || delivered.current) return;
           delivered.current = true;
@@ -61,6 +70,8 @@ export function useExport(): ExportRun {
           if (next.ready) void take(id);
         })
         .catch(e => {
+          misses += 1;
+          if (misses < MISSES_ALLOWED) return;
           setFailed(true);
           setNote((e as Error).message);
           setStatus(s => (s === null ? s : { ...s, state: 'failed' }));

@@ -27,6 +27,29 @@ export const SUBS_OUTPUT = path.join(SUBS_ROOT, 'output');
 /** How long an answer about the machine is trusted before the pipeline is asked again. */
 const STATE_TTL_MS = 20_000;
 
+/**
+ * How long one run of the pipeline may take before it is killed. A creative is
+ * seconds of speech and Whisper does it in well under a minute; the margin is
+ * for a first run that downloads its model. Without a limit one hung Whisper
+ * held the lane, and every later file and launch transcript queued behind it
+ * until the server was restarted.
+ */
+const PIPELINE_TIMEOUT_MS = 15 * 60_000;
+const TIMED_OUT = `пайплайн не вклався в ${PIPELINE_TIMEOUT_MS / 60_000} хв і зупинений`;
+
+/** Kills `child` once the limit passes; the returned function says whether it did, and is to be called on close. */
+function limit(child: ReturnType<typeof spawn>): () => boolean {
+  let killed = false;
+  const timer = setTimeout(() => {
+    killed = true;
+    child.kill('SIGKILL');
+  }, PIPELINE_TIMEOUT_MS);
+  return () => {
+    clearTimeout(timer);
+    return killed;
+  };
+}
+
 export interface SubsState {
   /** Whether a file dropped now would come out the other end. */
   ready: boolean;
@@ -114,10 +137,15 @@ export function burnWords(input: string, output: string, style: string, wordsFil
   return new Promise((resolve, reject) => {
     const args = [STYLER, input, '-o', output, '--style', style, '--words', wordsFile];
     const child = spawn(VENV_PYTHON, args, { cwd: TECHNICAL, stdio: ['ignore', 'ignore', 'pipe'] });
+    const timedOut = limit(child);
     let stderr = '';
     child.stderr.on('data', d => { stderr += d; });
     child.on('error', e => reject(new Error('не вдалось запустити пайплайн субтитрів: ' + e.message)));
     child.on('close', code => {
+      if (timedOut()) {
+        reject(new Error('субтитри: ' + TIMED_OUT));
+        return;
+      }
       if (code === 0 && fs.existsSync(output)) {
         resolve();
         return;
@@ -131,22 +159,40 @@ export function burnWords(input: string, output: string, style: string, wordsFil
 /**
  * The words a video speaks, as text — the `ad_script` of a designer's file
  * going into a launch. Whisper, so on the lane: one at a time with the tab's
- * files. Rejects with the pipeline's last word on stderr.
+ * files. Rejects with the pipeline's last word on stderr. `signal` is the
+ * asker going away: a transcript nobody waits for leaves the lane, queued or
+ * running.
  */
-export function transcribeVideo(input: string, lang: string | null = null): Promise<string> {
+export function transcribeVideo(input: string, lang: string | null = null, signal?: AbortSignal): Promise<string> {
   const run = (): Promise<string> => new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('транскрипт: скасовано'));
+      return;
+    }
     if (!fs.existsSync(VENV_PYTHON)) {
       reject(new Error('транскрипт: немає venv у subs/technical — запусти ./setup.sh у корені ~/sa'));
       return;
     }
     const args = [STYLER, input, '--transcript', ...(lang === null ? [] : ['--lang', lang])];
     const child = spawn(VENV_PYTHON, args, { cwd: TECHNICAL, stdio: ['ignore', 'pipe', 'pipe'] });
+    const timedOut = limit(child);
+    const abort = (): void => { child.kill('SIGTERM'); };
+    signal?.addEventListener('abort', abort, { once: true });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', d => { stdout += d; });
     child.stderr.on('data', d => { stderr += d; });
     child.on('error', e => reject(new Error('не вдалось запустити розпізнавання: ' + e.message)));
     child.on('close', code => {
+      signal?.removeEventListener('abort', abort);
+      if (timedOut()) {
+        reject(new Error('транскрипт: ' + TIMED_OUT));
+        return;
+      }
+      if (signal?.aborted) {
+        reject(new Error('транскрипт: скасовано'));
+        return;
+      }
       try {
         const parsed = JSON.parse(lastLine(stdout)) as { text?: unknown };
         if (code === 0 && typeof parsed.text === 'string') {
@@ -216,7 +262,7 @@ export async function startSubtitles(body: NodeJS.ReadableStream, request: Subti
 }
 
 function burn(job: Job, name: string, input: string, request: SubtitleRequest): Promise<void> {
-  return new Promise(resolve => {
+  return new Promise<void>(resolve => {
     if (job.cancelled) {
       settleJob(job, null);
       resolve();
@@ -233,6 +279,7 @@ function burn(job: Job, name: string, input: string, request: SubtitleRequest): 
     if (request.lang !== null) args.push('--lang', request.lang);
     const child = spawn(VENV_PYTHON, args, { cwd: TECHNICAL, stdio: ['ignore', 'pipe', 'pipe'] });
     job.onCancel = () => child.kill('SIGTERM');
+    const timedOut = limit(child);
 
     let stderr = '';
     let tail = '';
@@ -256,7 +303,10 @@ function burn(job: Job, name: string, input: string, request: SubtitleRequest): 
     });
     child.on('close', code => {
       job.onCancel = null;
-      if (job.cancelled) {
+      if (timedOut()) {
+        fs.promises.unlink(output).catch(() => {});
+        job.errors.push({ name, message: TIMED_OUT });
+      } else if (job.cancelled) {
         fs.promises.unlink(output).catch(() => {});
       } else if (code === 0 && fs.existsSync(output)) {
         job.outputs.push({ name, file: output });
@@ -268,5 +318,10 @@ function burn(job: Job, name: string, input: string, request: SubtitleRequest): 
       settleJob(job, null);
       resolve();
     });
+  }).catch(e => {
+    // A throw before the child ran — naming the output, spawning — would
+    // otherwise leave the job «у черзі» for good.
+    job.errors.push({ name, message: explain(e) });
+    settleJob(job, null);
   });
 }

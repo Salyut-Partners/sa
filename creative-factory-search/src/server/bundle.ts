@@ -10,8 +10,10 @@ const ENTRY = path.join(here, '..', 'renderer', 'render-target.ts');
 
 let cached: Promise<string> | null = null;
 
+/** Built once per process; a build that failed is dropped, or one bad moment would fail every render until a restart. */
 export function renderTargetScript(): Promise<string> {
-  return (cached ??= esbuild
+  if (cached !== null) return cached;
+  const building = esbuild
     .build({
       entryPoints: [ENTRY],
       bundle: true,
@@ -24,7 +26,12 @@ export function renderTargetScript(): Promise<string> {
       const file = result.outputFiles[0];
       if (!file) throw new Error('render target bundle produced no output');
       return file.text;
-    }));
+    });
+  cached = building;
+  building.catch(() => {
+    if (cached === building) cached = null;
+  });
+  return building;
 }
 
 export const RENDER_TARGET_HTML = `<!doctype html>
