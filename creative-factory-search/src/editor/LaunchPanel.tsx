@@ -759,6 +759,25 @@ function themeId(data: LaunchTopic, wanted: string): string {
 
 /** The render, a line per language with how far along it is; then every line of the launch with where it stands, and the new campaign. */
 function Progress({ run, onRetry }: { run: ReturnType<typeof useLaunch>; onRetry: () => void }) {
+  // The server names its steps only once it has read the topic and matched the files against what the
+  // platform holds — on a big topic, with files from disk, that is a while. Until then the wait is a step
+  // of its own, ticking, so a press that is working does not look like one that did nothing.
+  const preparing = run.phase === 'launch' && run.lines.length === 0;
+  const [waited, setWaited] = useState(0);
+  useEffect(() => {
+    if (!preparing) return;
+    const since = Date.now();
+    setWaited(0);
+    const timer = setInterval(() => setWaited(Math.floor((Date.now() - since) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [preparing]);
+  // A launch starts from the foot of a long form: bring its progress into view rather than leave it below.
+  const box = useRef<HTMLDivElement>(null);
+  const started = run.phase === 'render' || run.phase === 'launch';
+  useEffect(() => {
+    if (started) box.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [started]);
+
   if (run.phase === 'idle') return null;
   const render = run.render;
   const launch = run.launch;
@@ -772,7 +791,7 @@ function Progress({ run, onRetry }: { run: ReturnType<typeof useLaunch>; onRetry
     return files.length === 0 ? 0 : parts.reduce((a, b) => a + b, 0) / files.length;
   };
   return (
-    <div className="group export-progress">
+    <div className="group export-progress" ref={box}>
       {render === null && run.phase !== 'render' ? null : (
         <>
           <div className="lab">Рендер<span className="val">{render?.done ?? 0} / {render?.total ?? run.rendering.length}</span></div>
@@ -789,6 +808,15 @@ function Progress({ run, onRetry }: { run: ReturnType<typeof useLaunch>; onRetry
             })}
           </ul>
         </>
+      )}
+      {!preparing ? null : (
+        <ul className="launch-steps">
+          <li className="active">
+            <span className="step-mark">…</span>
+            Готую залив: читаю топік з платформи, звіряю файли з уже залитими
+            <span className="muted">{waited} с</span>
+          </li>
+        </ul>
       )}
       {run.lines.length === 0 ? null : (
         <ul className="launch-steps">
