@@ -21,12 +21,15 @@ export interface Translator {
   translateScript: () => void;
   translateFields: () => void;
   /**
-   * Before an export: the script into every language going out that has
-   * none, or a stale translation. Answers the project as it is after —
-   * what the export plans from — or null when the translation failed, and
-   * then nothing should render.
+   * Before an export: the script into every language going out whose
+   * translation is stale, and — when the buyer said so — into every one
+   * that has none. Answers the project as it is after — what the export
+   * plans from — or null when the translation failed, and then nothing
+   * should render.
    */
-  beforeExport: () => Promise<Project | null>;
+  beforeExport: (choice: { fillEmpty: boolean }) => Promise<Project | null>;
+  /** Empty the script of every language: a silent creative everywhere, one undo step. */
+  clearScripts: () => void;
 }
 
 export function useTranslator(
@@ -87,9 +90,9 @@ export function useTranslator(
     );
   }, [run]);
 
-  const beforeExport = useCallback(async (): Promise<Project | null> => {
+  const beforeExport = useCallback(async ({ fillEmpty }: { fillEmpty: boolean }): Promise<Project | null> => {
     const current = latest.current;
-    const pending = pendingTranslation(current);
+    const pending = pendingTranslation(current, { fillEmpty });
     if (pending === null) return current;
     const names = pending.targets.map(id => LOCALE_NAMES[id]).join(', ');
     setBusy(true);
@@ -148,7 +151,14 @@ export function useTranslator(
     );
   }, [run]);
 
-  return { busy, note, failed, translateScript, translateFields, beforeExport };
+  const clearScripts = useCallback(() => {
+    const writes = latest.current.locales.map(l => ({ id: l.id, script: '', translatedFrom: null }));
+    dispatch({ type: 'locale/write', writes });
+    setFailed(false);
+    setNote('Озвучку прибрано з усіх мов.');
+  }, [dispatch]);
+
+  return { busy, note, failed, translateScript, translateFields, beforeExport, clearScripts };
 }
 
 /**

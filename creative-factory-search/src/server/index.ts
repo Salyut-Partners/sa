@@ -249,8 +249,12 @@ app.get('/api/jobs/:id/download', (req, res) => {
     return;
   }
 
-  res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Content-Disposition', 'attachment; filename="creatives.zip"');
+  // Named by the hour it was taken: always `creatives.zip`, a new export
+  // landed as `creatives (1).zip` beside the old one, and the old one is the
+  // one that got opened.
+  const at = new Date();
+  const stamp = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}-${String(at.getHours()).padStart(2, '0')}${String(at.getMinutes()).padStart(2, '0')}`;
+  res.type('application/zip').attachment(`creatives-${stamp}.zip`);
   // Stored, not deflated: mp4 is already compressed, and the second pass would
   // cost seconds per file to save nothing.
   const zip = new ZipArchive({ store: true });

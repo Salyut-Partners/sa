@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { batchSize, planBatch, subtitleCount, type BatchPlan } from '../core/batch.ts';
-import { LOCALE_NAMES, releaseLocales } from '../core/locales.ts';
+import { LOCALE_NAMES, releaseLocales, voiceCheck } from '../core/locales.ts';
 import { FLAGS } from '../core/phrasebook.ts';
 import type { Command } from '../core/project.ts';
 import type { Project } from '../core/types.ts';
@@ -8,6 +8,7 @@ import type { ExportRun } from './export.ts';
 import type { Translator } from './translate.ts';
 import { LaunchPanel } from './LaunchPanel.tsx';
 import { fetchPlatform, fetchSubtitles, type PlatformState, type SubsState } from './server.ts';
+import { VoiceConfirm } from './VoiceCheck.tsx';
 
 interface Props {
   project: Project;
@@ -70,13 +71,27 @@ export function ExportPanel({ project, dispatch, run, onExportOne, translator }:
   }, []);
   const noPlatform = platform !== null && !platform.ready ? platform.note : null;
 
+  const [asking, setAsking] = useState<((project: Project) => BatchPlan | null) | null>(null);
+  const [fillEmpty, setFillEmpty] = useState(true);
+  const check = voiceCheck(project);
+
+  /** Asked first when what the languages will say is not what the panel shows — see `voiceCheck`. */
+  const go = (planOf: (project: Project) => BatchPlan | null): void => {
+    if (check.ask) {
+      setFillEmpty(true);
+      setAsking(() => planOf);
+      return;
+    }
+    render(planOf, true);
+  };
+
   /**
    * Start a download: the script translated first into every language going
-   * out that lacks one — a forgotten translation is a mute video — then the
-   * plan, made from the project as the translation left it.
+   * out whose translation is stale, and into the empty ones when the buyer
+   * said so — then the plan, made from the project as the translation left it.
    */
-  const go = (planOf: (project: Project) => BatchPlan | null): void => {
-    void translator.beforeExport().then(translated => {
+  const render = (planOf: (project: Project) => BatchPlan | null, fill: boolean): void => {
+    void translator.beforeExport({ fillEmpty: fill }).then(translated => {
       if (translated === null) return;
       const plan = planOf(translated);
       if (plan === null) return;
@@ -164,7 +179,7 @@ export function ExportPanel({ project, dispatch, run, onExportOne, translator }:
         <button
           className="wide"
           disabled={run.running || translator.busy || !whereChosen || project.activeId === null}
-          title={whereChosen ? 'Креатив, на якому стоїть курсор, — усіма мовами в експорт' : 'Спершу оберіть, куди'}
+          title={whereChosen ? 'Креатив, на якому стоїть курсор, — мовою, що зараз на екрані' : 'Спершу оберіть, куди'}
           onClick={() => go(onExportOne)}
         >
           Лише цей креатив
@@ -188,6 +203,24 @@ export function ExportPanel({ project, dispatch, run, onExportOne, translator }:
           {total === 0 ? 'Оберіть фото і хоча б одну мову в експорт.' : 'Однакові відеоряди рендеряться один раз.'}
         </div>
       </div>
+      )}
+
+      {asking === null ? null : (
+        <VoiceConfirm
+          check={check}
+          fillEmpty={fillEmpty}
+          onFillEmpty={setFillEmpty}
+          onCancel={() => setAsking(null)}
+          onClear={() => {
+            translator.clearScripts();
+            setAsking(null);
+          }}
+          onGo={() => {
+            const planOf = asking;
+            setAsking(null);
+            render(planOf, fillEmpty);
+          }}
+        />
       )}
 
       {status === null ? null : (

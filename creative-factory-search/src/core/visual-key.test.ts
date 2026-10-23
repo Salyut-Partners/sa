@@ -73,6 +73,8 @@ describe('visualKey', () => {
     it('the frame rate', () => expect(differs({ fps: 60 })).toBe(true));
     it('the push-in', () => expect(differs({ pushIn: false })).toBe(true));
     it('the glare', () => expect(differs({ glare: false })).toBe(true));
+    it('a language read right to left', () => expect(differs({ locale: 'he' })).toBe(true));
+    it('Turkish, whose capital i is not English', () => expect(differs({ locale: 'tr' })).toBe(true));
 
     it('a button that is not there', () => expect(differs({ buttons: [] })).toBe(true));
 

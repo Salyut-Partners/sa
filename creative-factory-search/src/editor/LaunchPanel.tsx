@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { batchNames, keepItems, planBatch } from '../core/batch.ts';
-import { LOCALE_NAMES } from '../core/locales.ts';
+import { LOCALE_NAMES, voiceCheck } from '../core/locales.ts';
 import { FLAGS } from '../core/phrasebook.ts';
 import { FB_AGE_MAX, FB_AGE_MIN, hasCap, type FacebookSettings } from '../core/platform-model.ts';
 import {
@@ -13,6 +13,7 @@ import { FilePicker } from './FilePicker.tsx';
 import { useLaunch } from './launch.ts';
 import { fetchLaunchTopic, fetchLaunchTopics, stageLaunchFile, transcribeLaunchFile, type LaunchTopic, type StagedFile } from './server.ts';
 import type { Translator } from './translate.ts';
+import { VoiceLines } from './VoiceCheck.tsx';
 
 interface Props {
   project: Project;
@@ -163,6 +164,9 @@ export function LaunchPanel({ project, translator }: Props) {
   const sent = useRef<number[]>([]);
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  /** The modal's answer for languages with no script: translated into, or left silent. */
+  const [fillEmpty, setFillEmpty] = useState(true);
+  const voice = voiceCheck(project);
 
   const loadTopics = (): void => {
     fetchLaunchTopics()
@@ -326,7 +330,7 @@ export function LaunchPanel({ project, translator }: Props) {
       launch(null, project);
       return;
     }
-    void translator.beforeExport().then(translated => {
+    void translator.beforeExport({ fillEmpty }).then(translated => {
       if (translated === null) return;
       launch(keepItems(planBatch(translated), names), translated);
     }).catch(() => undefined);
@@ -665,7 +669,10 @@ export function LaunchPanel({ project, translator }: Props) {
       </div>
 
       <div className="group">
-        <button className="primary" disabled={!canLaunch} onClick={() => setConfirming(true)}
+        <button className="primary" disabled={!canLaunch} onClick={() => {
+          setFillEmpty(true);
+          setConfirming(true);
+        }}
           title={missing.length > 0 ? `Оберіть ${missing.join(', ')}` : ''}>
           Залити
         </button>
@@ -718,6 +725,17 @@ export function LaunchPanel({ project, translator }: Props) {
                 </>
               )}
             </dl>
+            {ticked.length === 0 ? null : (() => {
+              // Only the languages this launch renders: the summary speaks for what goes up.
+              const going = new Set(ticked.map(r => r.locale));
+              const shown = { ...voice, lines: voice.lines.filter(l => going.has(l.id)), empty: voice.empty.filter(id => going.has(id)) };
+              return (
+                <div className="launch-voice">
+                  <div className="lab">Озвучка</div>
+                  <VoiceLines check={shown} fillEmpty={fillEmpty} onFillEmpty={setFillEmpty} />
+                </div>
+              );
+            })()}
             <table className="launch-campaigns">
               <thead><tr><th>#</th><th>Кабінет</th><th>Піксель</th><th>FP</th><th>Бюджет</th>{capped ? <th>Бід</th> : null}</tr></thead>
               <tbody>

@@ -346,7 +346,10 @@ export function App() {
           </button>
           <button
             onClick={() => replaceProject(createProject())}
-            disabled={project.photos.length === 0}
+            // Scripts outlive the photos — deleting every photo kept every
+            // language's voice-over — so a project with no photos but a
+            // script, or a language, still has something to start over from.
+            disabled={project.photos.length === 0 && project.locales.length === 1 && project.locales[0]!.script.trim() === ''}
             title="Почати з чистого"
           >
             Новий

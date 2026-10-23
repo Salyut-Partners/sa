@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeLocale, availableLocales, editedFieldCount, isLocaleId, localeDir, LOCALE_ENGLISH,
-  LOCALE_IDS, LOCALE_NAMES, newLocale, pendingTranslation, releaseLocales,
+  LOCALE_IDS, LOCALE_NAMES, newLocale, pendingTranslation, voiceCheck, releaseLocales,
 } from './locales.ts';
 import { apply, createProject } from './project.ts';
 import type { LocaleId, Project } from './types.ts';
@@ -171,5 +171,48 @@ describe('what the export translates before it renders', () => {
     p = apply(p, { type: 'locale/add', id: 'it' });
     p = apply(p, { type: 'locale/activate', id: 'de' });
     expect(pendingTranslation(p)).toEqual({ source: 'en', script: 'Apply now', targets: ['it'] });
+  });
+});
+
+describe('what the buyer is asked about the voice before an export', () => {
+  const scripted = (p: Project, id: LocaleId, script: string): Project =>
+    apply(p, { type: 'locale/patch', id, patch: { script } });
+  const translated = (p: Project, id: LocaleId, script: string, from: { id: LocaleId; script: string }): Project =>
+    apply(p, { type: 'locale/write', writes: [{ id, script, translatedFrom: from }] });
+
+  it('asks nothing when every language speaks its own words, or none speaks', () => {
+    expect(voiceCheck(withLocales('de')).ask).toBe(false);
+    let p = scripted(withLocales('de'), 'en', 'Apply now');
+    p = translated(p, 'de', 'Jetzt bewerben', { id: 'en', script: 'Apply now' });
+    expect(voiceCheck(p).ask).toBe(false);
+  });
+
+  it('asks before filling an empty language, and names it with the words it would get', () => {
+    const p = scripted(withLocales('de'), 'en', 'Apply now');
+    const check = voiceCheck(p);
+    expect(check.ask).toBe(true);
+    expect(check.empty).toEqual(['de']);
+    expect(check.source).toBe('en');
+    expect(check.lines).toContainEqual({ id: 'de', script: 'Apply now', kind: 'fill', from: 'en' });
+  });
+
+  it('asks when the language on screen was emptied but an old translation still speaks', () => {
+    let p = scripted(withLocales('de'), 'en', 'Old line');
+    p = translated(p, 'de', 'Alte Zeile', { id: 'en', script: 'Old line' });
+    p = scripted(p, 'en', '');
+    const check = voiceCheck(p);
+    expect(check.ask).toBe(true);
+    expect(check.lines).toEqual([
+      { id: 'en', script: '', kind: 'silent', from: null },
+      { id: 'de', script: 'Alte Zeile', kind: 'translation', from: 'en' },
+    ]);
+  });
+
+  it('leaves an empty language silent when told to, still redoing a stale translation', () => {
+    let p = scripted(withLocales('de', 'fr'), 'en', 'Apply now');
+    p = translated(p, 'de', 'Jetzt bewerben', { id: 'en', script: 'Apply now' });
+    p = scripted(p, 'en', 'Apply today');
+    expect(pendingTranslation(p, { fillEmpty: false })).toEqual({ source: 'en', script: 'Apply today', targets: ['de'] });
+    expect(pendingTranslation(p)?.targets).toEqual(['de', 'fr']);
   });
 });

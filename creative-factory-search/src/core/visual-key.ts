@@ -5,7 +5,8 @@
 // language, and the only difference between its German and its Polish is the
 // soundtrack. This key is what lets the export notice — it walks the frames
 // once per distinct picture and muxes the rest.
-import type { FieldValue, Spec, TemplateSpec, Timing } from './types.ts';
+import { localeDir } from './locales.ts';
+import type { FieldValue, LocaleId, Spec, TemplateSpec, Timing } from './types.ts';
 
 /**
  * Everything about a Spec that reaches the frame, written down in a fixed order.
@@ -22,6 +23,7 @@ function visualParts(spec: Spec): unknown[] {
   return [
     canvas.width, canvas.height, spec.duration, spec.fps,
     spec.image, spec.pushIn, spec.glare,
+    languageParts(spec.locale),
     templateParts(spec.template),
     templateParts(spec.overlay),
     spec.buttons.map(b => [
@@ -44,6 +46,16 @@ const templateParts = (template: TemplateSpec | null): unknown[] | null =>
     // two fields written the other way round are the same frame.
     Object.keys(template.fields).sort().map(k => [k, flatten(template.fields[k]!)]),
   ];
+
+/**
+ * The part of the language the frame shows, and no more. The renderer marks
+ * the frame with it (`build.ts`): the direction lays out a Hebrew frame
+ * mirrored, and Turkish uppercases its "i" as "İ". Left out, a Hebrew file
+ * whose words matched the English ones shared the English video, laid out left
+ * to right. The rest of the language stays out, so a German and a Polish file
+ * with the same words still share one walk of the frames.
+ */
+const languageParts = (locale: LocaleId): unknown[] => [localeDir(locale), locale === 'tr' ? 'tr' : ''];
 
 const timingParts = (t: Timing): unknown[] => [t.appearAt, t.hideAt, t.enter, t.enterDuration];
 

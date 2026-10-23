@@ -107,7 +107,10 @@ export const releaseLocales = (project: Project): Locale[] =>
  * hand is the buyer's and is never sent over. Null when there is nothing to
  * translate.
  */
-export function pendingTranslation(project: Project): { source: LocaleId; script: string; targets: LocaleId[] } | null {
+export function pendingTranslation(
+  project: Project,
+  { fillEmpty = true }: { fillEmpty?: boolean } = {},
+): { source: LocaleId; script: string; targets: LocaleId[] } | null {
   const written = (l: Locale): boolean => l.script.trim() !== '' && (l.translatedFrom ?? null) === null;
   const origins = project.locales.flatMap(l => (l.translatedFrom == null ? [] : [l.translatedFrom.id]));
   const origin = project.locales
@@ -120,9 +123,60 @@ export function pendingTranslation(project: Project): { source: LocaleId; script
   const stale = (from: TranslatedFrom | null | undefined): boolean =>
     from != null && (from.id !== source.id || from.script !== script);
   const targets = releaseLocales(project)
-    .filter(l => l.id !== source.id && (l.script.trim() === '' || stale(l.translatedFrom)))
+    .filter(l => l.id !== source.id && ((fillEmpty && l.script.trim() === '') || stale(l.translatedFrom)))
     .map(l => l.id);
   return targets.length === 0 ? null : { source: source.id, script, targets };
+}
+
+/** What one language going out will say, as the buyer is asked to confirm it. */
+export interface VoiceLine {
+  id: LocaleId;
+  /** The words it will speak — for `fill`, the source's words before they are translated. */
+  script: string;
+  /**
+   * `own` written by hand; `translation` translated earlier and kept;
+   * `fill` empty now, and translated from `from` if the buyer agrees;
+   * `silent` no voice.
+   */
+  kind: 'own' | 'translation' | 'fill' | 'silent';
+  from: LocaleId | null;
+}
+
+export interface VoiceCheck {
+  lines: VoiceLine[];
+  /** The languages going out with no script that the export would otherwise fill by translation. */
+  empty: LocaleId[];
+  /** The language those would be translated from. */
+  source: LocaleId | null;
+  /**
+   * Whether the buyer has to be asked before anything renders. The panel
+   * shows the script of one language; an export speaks every language's.
+   * Two things went out unseen: an empty script filled from another
+   * language's — an earlier one, never cleared — and a language still
+   * speaking a translation while the one on screen was emptied. So: asked
+   * when an empty script would be filled, or when some languages speak and
+   * others do not.
+   */
+  ask: boolean;
+}
+
+/** What each language going out will say, and whether that needs the buyer's word before an export. */
+export function voiceCheck(project: Project): VoiceCheck {
+  const pending = pendingTranslation(project);
+  const targets = new Set(pending?.targets ?? []);
+  const lines = releaseLocales(project).map((l): VoiceLine => {
+    const script = l.script.trim();
+    if (pending !== null && targets.has(l.id)) {
+      return { id: l.id, script: pending.script, kind: script === '' ? 'fill' : 'translation', from: pending.source };
+    }
+    if (script === '') return { id: l.id, script: '', kind: 'silent', from: null };
+    const from = l.translatedFrom ?? null;
+    return from === null ? { id: l.id, script, kind: 'own', from: null } : { id: l.id, script, kind: 'translation', from: from.id };
+  });
+  const empty = lines.filter(l => l.kind === 'fill').map(l => l.id);
+  const speaks = lines.filter(l => l.kind !== 'silent');
+  const mixed = speaks.length > 0 && speaks.length < lines.length;
+  return { lines, empty, source: pending?.source ?? null, ask: empty.length > 0 || mixed };
 }
 
 /** Which languages could still be added — the bar offers these and no others. */

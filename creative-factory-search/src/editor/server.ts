@@ -156,8 +156,18 @@ export async function downloadBatch(id: string): Promise<number> {
   return blob.size;
 }
 
-const nameFrom = (disposition: string | null): string | null =>
-  disposition?.match(/filename="([^"]+)"/)?.[1] ?? null;
+/** The file's name off the header: the UTF-8 `filename*` first, since `filename` holds only an ASCII stand-in for a Cyrillic name. */
+function nameFrom(disposition: string | null): string | null {
+  const encoded = disposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded !== undefined) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      // falls through to the plain name
+    }
+  }
+  return disposition?.match(/filename="([^"]+)"/)?.[1] ?? null;
+}
 
 // ------------------------------------------------------------------ launch --
 
