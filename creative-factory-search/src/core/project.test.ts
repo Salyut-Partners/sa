@@ -481,11 +481,11 @@ describe('template commands', () => {
 
   it('puts a template on the photo with the library default timing', () => {
     const p = apply(withPhotos('a'), {
-      type: 'template/set', ids: ['a'], definitionId: 'donor-tiers',
+      type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills',
     });
     const layer = p.photos[0]!.template!;
-    expect(layer.definitionId).toBe('donor-tiers');
-    expect(layer.timing).toEqual(templateById('donor-tiers')!.defaultTiming);
+    expect(layer.definitionId).toBe('jobs-card-pills');
+    expect(layer.timing).toEqual(templateById('jobs-card-pills')!.defaultTiming);
   });
 
   it('puts one template on the whole selection', () => {
@@ -512,10 +512,10 @@ describe('template commands', () => {
     // The three card versions are one offer in three layouts: changing which one
     // is on the frame is not a reason to retype the offer or re-time the panel.
     let p = apply(withPhotos('a'), {
-      type: 'template/set', ids: ['a'], definitionId: 'donor-tiers',
+      type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills',
     });
     p = apply(p, { type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 2 } } });
-    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'steps-card' });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-sheet' });
     expect(p.photos[0]!.template!.timing.appearAt).toBe(2);
   });
 
@@ -576,14 +576,14 @@ describe('template commands', () => {
 
 describe('the overlay', () => {
   it('lays a second layout over the first without touching it', () => {
-    let p = apply(withPhotos('a'), { type: 'template/set', ids: ['a'], definitionId: 'news-box' });
+    let p = apply(withPhotos('a'), { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-panel' });
     p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'news-tab', slot: 'overlay' });
-    expect(p.photos[0]!.template!.definitionId).toBe('news-box');
+    expect(p.photos[0]!.template!.definitionId).toBe('jobs-card-panel');
     expect(p.photos[0]!.overlay!.definitionId).toBe('news-tab');
   });
 
   it('arrives with the overlay layout\'s own window, not the layout\'s under it', () => {
-    let p = apply(withPhotos('a'), { type: 'template/set', ids: ['a'], definitionId: 'steps-card' });
+    let p = apply(withPhotos('a'), { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-sheet' });
     p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'notice-push', slot: 'overlay' });
     expect(p.photos[0]!.overlay!.timing).toEqual(templateById('notice-push')!.defaultTiming);
   });
@@ -702,7 +702,7 @@ describe('the words of the offer', () => {
   it('is untouched by which photo or which template is on screen', () => {
     // The offer is the batch's. Swapping a photo's layout must not lose the words.
     let p = apply(withPhotos('a'), { type: 'locale/field', id: 'en', key: 'cta', value: 'МОЄ' });
-    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'donor-tiers' });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills' });
     p = apply(p, { type: 'template/set', ids: ['a'], definitionId: null });
     expect(p.locales[0]!.overrides['cta']).toBe('МОЄ');
   });

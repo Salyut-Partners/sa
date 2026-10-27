@@ -96,7 +96,7 @@ describe('a project file carrying templates', () => {
     let p = apply(createProject(), {
       type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:,a', canvas: { width: 1080, height: 1920 } }],
     });
-    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'news-box' });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-panel' });
     p = apply(p, { type: 'locale/field', id: 'en', key: 'headline', value: 'Робота' });
     p = apply(p, { type: 'locale/field', id: 'en', key: 'jobs', value: ['Охорона', 'Кухня'] });
     return apply(p, { type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 1.5 } } });
@@ -107,7 +107,7 @@ describe('a project file carrying templates', () => {
     expect(result.ok).toBe(true);
     const project = (result as { project: Project }).project;
     const layer = project.photos[0]!.template!;
-    expect(layer.definitionId).toBe('news-box');
+    expect(layer.definitionId).toBe('jobs-card-panel');
     expect(layer.timing.appearAt).toBe(1.5);
     expect(project.locales[0]!.overrides)
       .toEqual({ headline: 'Робота', jobs: ['Охорона', 'Кухня'] });
@@ -170,7 +170,7 @@ describe('a project file carrying templates', () => {
     const result = fromFile(JSON.parse(JSON.stringify(toFile(p))));
     expect(result.ok).toBe(true);
     const photo = (result as { project: Project }).project.photos[0]!;
-    expect(photo.template!.definitionId).toBe('news-box');
+    expect(photo.template!.definitionId).toBe('jobs-card-panel');
     expect(photo.overlay!.definitionId).toBe('news-tv');
   });
 
@@ -219,7 +219,7 @@ describe('a project file carrying templates', () => {
     expect(result.ok).toBe(true);
     const project = (result as { project: Project }).project;
     expect(project.photos[0]).not.toHaveProperty('props');
-    expect(project.photos[0]!.template!.definitionId).toBe('news-box');
+    expect(project.photos[0]!.template!.definitionId).toBe('jobs-card-panel');
     expect(toFile(project).photos[0]).not.toHaveProperty('props');
   });
 });

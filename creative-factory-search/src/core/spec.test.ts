@@ -130,16 +130,16 @@ describe('buildSpec and the template', () => {
     // A value left behind by the template the photo used to wear stays on the
     // locale, so swapping back restores it — but it is not this template's field
     // and the renderer must never see it.
-    let p = apply(withTemplate('donor-tiers'), {
-      type: 'locale/field', id: 'en', key: 'donorPledge', value: 'дрібний шрифт',
+    let p = apply(withTemplate('jobs-card-pills'), {
+      type: 'locale/field', id: 'en', key: 'disclaimer', value: 'дрібний шрифт',
     });
     p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'rates' });
 
     const { fields } = buildSpec(p, 'a')!.template!;
     expect(Object.keys(fields).sort()).toEqual(['linkLine', 'rates', 'ratesAccent', 'ratesHead']);
     expect(buildSpec(apply(p, {
-      type: 'template/set', ids: ['a'], definitionId: 'donor-tiers',
-    }), 'a')!.template!.fields['donorPledge']).toBe('дрібний шрифт');
+      type: 'template/set', ids: ['a'], definitionId: 'jobs-card-pills',
+    }), 'a')!.template!.fields['disclaimer']).toBe('дрібний шрифт');
   });
 
   it('drops a template this build no longer carries rather than failing to build', () => {
