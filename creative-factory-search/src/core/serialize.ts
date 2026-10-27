@@ -128,7 +128,9 @@ const readLayer = (layer: TemplateLayer | null | undefined): TemplateLayer | nul
   layer == null ? null : {
     definitionId: layer.definitionId,
     // Every file written before layouts could be moved says nothing here,
-    // and means where the layout draws itself.
+    // and means where the layout draws itself. Files from when they only slid
+    // up and down carry `offsetY` alone, and keep that place.
+    offsetX: layer.offsetX ?? 0,
     offsetY: layer.offsetY ?? 0,
     timing: layer.timing,
   };

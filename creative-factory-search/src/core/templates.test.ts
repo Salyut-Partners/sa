@@ -3,7 +3,7 @@ import { LOCALE_IDS, newLocale } from './locales.ts';
 import { amountOf, counterFor } from './money.ts';
 import { phrase } from './phrasebook.ts';
 import {
-  fieldEdited, fieldText, fieldValue, TEMPLATES, templateById, templateFields, templateMoves,
+  fieldEdited, fieldText, fieldValue, TEMPLATES, templateById, templateFields,
 } from './templates.ts';
 import type { Locale, LocaleId } from './types.ts';
 
@@ -125,20 +125,6 @@ describe('the template library', () => {
     const donor = templateById('donor-tiers')!;
     const labels = new Map(donor.schema.map(f => [f.key, f.label]));
     for (const field of strip.schema) expect(labels.get(field.key), field.key).toBe(field.label);
-  });
-
-  it('lets only the layouts that carry no scrim be moved', () => {
-    // Every other layout darkens the whole picture behind itself, so sliding it
-    // drags the shading off one edge and leaves the other bare. The list is
-    // named rather than counted: making a layout movable is a decision about
-    // how it is drawn, and it should have to be made here too.
-    expect(TEMPLATES.filter(t => t.movable === true).map(t => t.id))
-      .toEqual(['tier-rows', 'news-tab', 'news-tv', 'news-box', 'verdict-pills', 'option-tiles', 'gauge-swap']);
-    expect(templateMoves('tier-rows')).toBe(true);
-    expect(templateMoves('donor-tiers')).toBe(false);
-    // A layout this build no longer carries cannot be moved either: an offset
-    // nothing can show is one nobody could undo.
-    expect(templateMoves('no-such-template')).toBe(false);
   });
 
   it('holds the three card versions to one schema, as they are one offer in three layouts', () => {

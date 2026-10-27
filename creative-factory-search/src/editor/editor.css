@@ -152,6 +152,8 @@ main { flex: 1; display: flex; min-height: 0; }
   border: 1px solid rgba(255,255,255,.28); cursor: pointer;
 }
 .box.idle:hover { border-color: rgba(255,255,255,.7); }
+/* A layout's box: round what it paints, dotted so it does not read as a button's. */
+.box.template { border-style: dotted; }
 
 .timeline {
   display: flex; align-items: center; gap: 12px;

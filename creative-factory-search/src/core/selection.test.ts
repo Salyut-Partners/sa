@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { apply, createProject, defaultButton } from './project.ts';
 import {
   buttonCount, buttonField, buttonRectField, buttonTimingField, NO_TEMPLATE, photoField,
-  shared, templateChoice, templateOffsetField, templateTimingField,
+  shared, templateChoice, templateTimingField,
 } from './selection.ts';
 import type { Project } from './types.ts';
 
@@ -177,14 +177,5 @@ describe('reading a template across the selection', () => {
     });
     expect(templateTimingField(p, ['a', 'b'], 'appearAt').mixed).toBe(true);
     expect(templateTimingField(p, ['a'], 'appearAt')).toEqual({ mixed: false, value: 3 });
-  });
-
-  it('reads where the layout was slid to, and says so when the two disagree', () => {
-    const p = apply(withTemplate('tier-rows'), {
-      type: 'template/patch', ids: ['a'], patch: { offsetY: -18 },
-    });
-    expect(templateOffsetField(p, ['a', 'b']).mixed).toBe(true);
-    expect(templateOffsetField(p, ['a'])).toEqual({ mixed: false, value: -18 });
-    expect(templateOffsetField(p, ['b'])).toEqual({ mixed: false, value: 0 });
   });
 });

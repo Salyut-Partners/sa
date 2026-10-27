@@ -5,7 +5,7 @@ import {
 } from '../core/history.ts';
 import { activeLocale } from '../core/locales.ts';
 import {
-  apply, createProject, MAX_PHOTOS, photoById, photoTimings, type Command,
+  apply, createProject, MAX_PHOTOS, photoById, photoTimings, type Command, type TemplateSlot,
 } from '../core/project.ts';
 import { parseRoute, routeHash, type Tab } from '../core/route.ts';
 import { buildSpec } from '../core/spec.ts';
@@ -13,6 +13,7 @@ import { posterTime } from '../core/timing.ts';
 import type { CanvasSize, Photo, Project, Spec } from '../core/types.ts';
 import { LaunchPanel } from './LaunchPanel.tsx';
 import { LayerBoxes } from './LayerBoxes.tsx';
+import { TemplateBoxes } from './TemplateBoxes.tsx';
 import { Clock } from './clock.ts';
 import { CreativeCell } from './CreativeCell.tsx';
 import { themeIcon, themeLabel, useTheme } from './theme.ts';
@@ -52,7 +53,14 @@ interface Cell {
 
 export function App() {
   const [history, setHistory] = useState<History<Project>>(() => historyOf(createProject()));
-  const [activeButton, setActiveButton] = useState<number | null>(null);
+  const [activeButton, setActiveButtonOnly] = useState<number | null>(null);
+  /** The template layer being dragged on the frame, if it is one of those rather than a button. */
+  const [activeTemplate, setActiveTemplate] = useState<TemplateSlot | null>(null);
+  /** One thing on the frame is held at a time: taking a button lets go of a layout. */
+  const setActiveButton = useCallback((index: number | null): void => {
+    setActiveButtonOnly(index);
+    setActiveTemplate(null);
+  }, []);
   const [report, setReport] = useState<ImportReport>(NOTHING_IMPORTED);
   const [status, setStatus] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -415,8 +423,19 @@ export function App() {
                       : { type: 'photo/activate', id: photo.id });
                     setActiveButton(null);
                   }}
-                  overlay={
+                  overlay={reach =>
                     photo.id === project.activeId ? (
+                      <>
+                      <TemplateBoxes
+                        photo={photo}
+                        reach={reach}
+                        active={activeTemplate}
+                        cellWidth={CELL_WIDTH}
+                        cellHeight={photo.canvas.height * scaleOf(photo.canvas)}
+                        onSelect={slot => { setActiveButtonOnly(null); setActiveTemplate(slot); }}
+                        onMove={(slot, patch) =>
+                          dispatch({ type: 'template/patch', ids: project.selection, patch, slot })}
+                      />
                       <LayerBoxes
                         layers={photo.buttons}
                         activeIndex={activeButton}
@@ -431,6 +450,7 @@ export function App() {
                             patch: { rect },
                           })}
                       />
+                      </>
                     ) : null
                   }
                 />

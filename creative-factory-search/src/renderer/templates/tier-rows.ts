@@ -5,9 +5,8 @@
 // other one darkens the photo behind itself, because it has copy printed
 // straight onto it; here each row is its own opaque strip and carries its own
 // background, so the photograph is untouched between the rows and around them.
-// That is what lets the stack be slid up and down the frame — there is no scrim
-// to drag off an edge — and it is why this is the layout to reach for when the
-// picture is already saying what the offer is.
+// That is why this is the layout to reach for when the picture is already
+// saying what the offer is.
 import { accent } from '../color.ts';
 import type { BuildContext, TemplateParts } from './index.ts';
 import { items, line } from './kit.ts';

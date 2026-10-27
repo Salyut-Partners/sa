@@ -93,6 +93,7 @@ export function templatePreviewSpec(
       color: options.color,
       // A chip shows the layout where it draws itself. Where one photo's copy
       // of it was nudged to is that photo's business, not the catalogue's.
+      offsetX: 0,
       offsetY: 0,
       timing,
     },

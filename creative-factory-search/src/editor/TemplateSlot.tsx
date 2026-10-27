@@ -1,10 +1,8 @@
 import { useState } from 'react';
-import { photoById, TEMPLATE_LIFT, type Command, type TemplateSlot } from '../core/project.ts';
+import { photoById, type Command, type TemplateSlot } from '../core/project.ts';
 import { activeLocale } from '../core/locales.ts';
-import { templateChoice, templateOffsetField, templateTimingField } from '../core/selection.ts';
-import { templateMoves } from '../core/templates.ts';
+import { templateChoice, templateTimingField } from '../core/selection.ts';
 import type { Project } from '../core/types.ts';
-import { NumberField } from './fields.tsx';
 import { TemplateFields } from './TemplateFields.tsx';
 import { TemplateLibrary } from './TemplatePreview.tsx';
 import { TimingFields } from './TimingFields.tsx';
@@ -69,36 +67,22 @@ export function TemplateSlotPanel({ project, dispatch, slot }: Props) {
         // the boxes afresh rather than leaving a half-typed draft sitting in
         // a box that now belongs to a different field.
         <div key={`${project.activeId}:${slot}:${layer.definitionId}`}>
-          {templateMoves(layer.definitionId) ? (
-            <div className="group">
-              <div className="lab">
-                Положення <span className="val">% висоти кадру</span>
-              </div>
-              <div className="row">
-                <NumberField
-                  value={templateOffsetField(project, targets, slot)}
-                  onChange={offsetY =>
-                    dispatch({ type: 'template/patch', ids: targets, patch: { offsetY }, slot })}
-                  min={TEMPLATE_LIFT.min}
-                  max={TEMPLATE_LIFT.max}
-                  step={1}
-                  suffix="↕"
-                />
-                <button
-                  className="wide"
-                  onClick={() => dispatch({
-                    type: 'template/patch', ids: targets, patch: { offsetY: 0 }, slot,
-                  })}
-                >
-                  На місце
-                </button>
-              </div>
-              <div className="note">
-                Від'ємне — вгору. Рухаються лише шаблони без затемнення: у решти
-                зсув потягнув би затемнення за край кадру.
-              </div>
+          <div className="group">
+            <div className="lab">Положення</div>
+            <button
+              className="wide"
+              disabled={layer.offsetX === 0 && layer.offsetY === 0}
+              onClick={() => dispatch({
+                type: 'template/patch', ids: targets, patch: { offsetX: 0, offsetY: 0 }, slot,
+              })}
+            >
+              На місце
+            </button>
+            <div className="note">
+              Клацніть шаблон на кадрі й тягніть. Затемнення лишається на місці,
+              рухається вміст — і не далі краю кадру.
             </div>
-          ) : null}
+          </div>
 
           <div className="group">
             <div className="lab">Час на екрані: {TITLES[slot].toLowerCase()}</div>

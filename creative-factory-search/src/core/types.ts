@@ -82,11 +82,16 @@ export interface ButtonLayer {
 export interface TemplateLayer {
   definitionId: string;
   /**
-   * How far down the frame the layout is nudged, as a percent of frame height.
-   * Zero is where the layout draws itself; negative is up.
+   * How far across the frame the layout's content is moved, as a percent of
+   * frame width. Zero is where the layout draws itself; negative is left.
+   */
+  offsetX: number;
+  /**
+   * How far down the frame the layout's content is moved, as a percent of
+   * frame height. Zero is where the layout draws itself; negative is up.
    *
-   * Only layouts that say they can be moved are ever given a figure other than
-   * zero — see `TemplateInfo.movable`.
+   * Any layout moves. A full-frame scrim stays where it is and only what sits
+   * over it travels; the renderer keeps the content inside the frame.
    */
   offsetY: number;
   timing: Timing;
@@ -215,7 +220,9 @@ export interface TemplateSpec {
   fields: Readonly<Record<string, FieldValue>>;
   /** The photo's accent, which the template paints itself in. */
   color: string;
-  /** Percent of frame height the layout is nudged down by; negative is up. */
+  /** Percent of frame width the content is moved right by; negative is left. */
+  offsetX: number;
+  /** Percent of frame height the content is moved down by; negative is up. */
   offsetY: number;
   timing: Timing;
 }
