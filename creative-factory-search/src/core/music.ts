@@ -17,6 +17,16 @@ export interface MusicTrack {
 
 export const MUSIC: readonly MusicTrack[] = [
   { id: 'life-in-motion', name: 'Life in Motion — Positive Vibe', file: 'life-in-motion.mp3', seconds: 60 },
+  { id: 'autumn', name: 'Autumn — Alex Morgan', file: 'autumn.mp3', seconds: 22 },
+  { id: 'atlas-background', name: 'Background — AtlasAudio', file: 'atlas-background.mp3', seconds: 126 },
+  { id: 'lumen-vlog', name: 'Vlog Background — Echoes of Lumen', file: 'lumen-vlog.mp3', seconds: 57 },
+  { id: 'gr0za-background', name: 'Background — gr0za', file: 'gr0za-background.mp3', seconds: 113 },
+  { id: 'celebration', name: 'Celebration — ikoliks', file: 'celebration.mp3', seconds: 174 },
+  { id: 'kiravale-video', name: 'Background for Video — Kiravale', file: 'kiravale-video.mp3', seconds: 114 },
+  { id: 'no-sleep-hiphop', name: 'No Sleep (hip-hop) — Kontraa', file: 'no-sleep-hiphop.mp3', seconds: 167 },
+  { id: 'malko-background', name: 'Background — Maksym Malko', file: 'malko-background.mp3', seconds: 39 },
+  { id: 'sub-clair-background', name: 'Background — Sub Clair', file: 'sub-clair-background.mp3', seconds: 101 },
+  { id: 'game', name: 'Game — Vaitsez', file: 'game.mp3', seconds: 148 },
 ];
 
 export const musicById = (id: string | null): MusicTrack | null =>

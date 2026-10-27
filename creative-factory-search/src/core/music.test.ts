@@ -22,3 +22,11 @@ describe('musicById', () => {
     expect(musicById('gone')).toBeNull();
   });
 });
+
+describe('the music list', () => {
+  it('names a file in assets/music for every track, each once', async () => {
+    const { existsSync } = await import('node:fs');
+    for (const t of MUSIC) expect(existsSync(new URL(`../../assets/music/${t.file}`, import.meta.url)), t.file).toBe(true);
+    expect(new Set(MUSIC.map(t => t.id)).size).toBe(MUSIC.length);
+  });
+});
