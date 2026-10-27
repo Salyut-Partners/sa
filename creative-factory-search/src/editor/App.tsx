@@ -21,7 +21,7 @@ import { useExport } from './export.ts';
 import { FilePicker } from './FilePicker.tsx';
 import { importFiles, importReplacement, NOTHING_IMPORTED, type ImportReport } from './import-files.ts';
 import { LocaleBar } from './LocaleBar.tsx';
-import { explainRefusal, openProjectFile, saveProjectFile } from './project-file.ts';
+import { explainRefusal, openProjectFile, removedTemplatesNote, saveProjectFile } from './project-file.ts';
 import { fetchVoices, type VoiceCatalogue } from './server.ts';
 import { SidePanel } from './SidePanel.tsx';
 import { autosaver, loadAutosave, type SaveState } from './store.ts';
@@ -123,7 +123,9 @@ export function App() {
 
   useEffect(() => {
     void loadAutosave().then(saved => {
-      if (saved !== null) setHistory(historyOf(saved));
+      if (saved === null) return;
+      setHistory(historyOf(saved.project));
+      if (saved.removed.length > 0) setReport({ warnings: [removedTemplatesNote(saved.removed)], rejected: [] });
     });
     // Asked once. Which voices an account has does not change while the editor
     // is open, and a failure here is not a reason to stop editing — the panel
@@ -283,6 +285,7 @@ export function App() {
     if (result.ok) {
       replaceProject(result.project);
       setStatus(`Відкрито ${file.name}`);
+      if (result.removed.length > 0) setReport({ warnings: [removedTemplatesNote(result.removed)], rejected: [] });
     } else {
       setReport({ warnings: [], rejected: [`${file.name}: ${explainRefusal(result.reason)}`] });
     }

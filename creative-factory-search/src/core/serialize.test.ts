@@ -96,7 +96,7 @@ describe('a project file carrying templates', () => {
     let p = apply(createProject(), {
       type: 'photo/add', photos: [{ id: 'a', name: 'a.jpg', image: 'data:,a', canvas: { width: 1080, height: 1920 } }],
     });
-    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'jobs-card-panel' });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'news-box' });
     p = apply(p, { type: 'locale/field', id: 'en', key: 'headline', value: 'Робота' });
     p = apply(p, { type: 'locale/field', id: 'en', key: 'jobs', value: ['Охорона', 'Кухня'] });
     return apply(p, { type: 'template/patch', ids: ['a'], patch: { timing: { appearAt: 1.5 } } });
@@ -107,7 +107,7 @@ describe('a project file carrying templates', () => {
     expect(result.ok).toBe(true);
     const project = (result as { project: Project }).project;
     const layer = project.photos[0]!.template!;
-    expect(layer.definitionId).toBe('jobs-card-panel');
+    expect(layer.definitionId).toBe('news-box');
     expect(layer.timing.appearAt).toBe(1.5);
     expect(project.locales[0]!.overrides)
       .toEqual({ headline: 'Робота', jobs: ['Охорона', 'Кухня'] });
@@ -170,7 +170,7 @@ describe('a project file carrying templates', () => {
     const result = fromFile(JSON.parse(JSON.stringify(toFile(p))));
     expect(result.ok).toBe(true);
     const photo = (result as { project: Project }).project.photos[0]!;
-    expect(photo.template!.definitionId).toBe('jobs-card-panel');
+    expect(photo.template!.definitionId).toBe('news-box');
     expect(photo.overlay!.definitionId).toBe('news-tv');
   });
 
@@ -219,7 +219,7 @@ describe('a project file carrying templates', () => {
     expect(result.ok).toBe(true);
     const project = (result as { project: Project }).project;
     expect(project.photos[0]).not.toHaveProperty('props');
-    expect(project.photos[0]!.template!.definitionId).toBe('jobs-card-panel');
+    expect(project.photos[0]!.template!.definitionId).toBe('news-box');
     expect(toFile(project).photos[0]).not.toHaveProperty('props');
   });
 });
@@ -418,5 +418,25 @@ describe('a project file carrying music and the voice switch', () => {
     const project = (result as { project: Project }).project;
     expect(project.music).toBeNull();
     expect(project.voiceOn).toBe(true);
+  });
+});
+
+describe('a project file wearing a template the library has dropped', () => {
+  it('opens the photo bare and names the template that went', () => {
+    let p = apply(sample(), { type: 'template/set', ids: ['a'], definitionId: 'news-box' });
+    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'news-tab', slot: 'overlay' });
+    const file = toFile(p) as unknown as { photos: { template: { definitionId: string } | null }[] };
+    file.photos[0]!.template!.definitionId = 'jobs-card-pills';
+    const result = fromFile(file);
+    expect(result.ok).toBe(true);
+    const opened = result as { project: Project; removed: string[] };
+    expect(opened.removed).toEqual(['jobs-card-pills']);
+    expect(opened.project.photos[0]!.template).toBeNull();
+    expect(opened.project.photos[0]!.overlay!.definitionId).toBe('news-tab');
+  });
+
+  it('names nothing when every template is still there', () => {
+    const result = fromFile(toFile(apply(sample(), { type: 'template/set', ids: ['a'], definitionId: 'news-box' })));
+    expect((result as { removed: string[] }).removed).toEqual([]);
   });
 });

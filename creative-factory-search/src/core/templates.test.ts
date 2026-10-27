@@ -18,8 +18,7 @@ describe('the template library', () => {
     // saved project all agree on, so a rename has to be a decision here and not
     // a number that still adds up.
     expect(TEMPLATES.map(t => t.id)).toEqual([
-      'jobs-banner', 'jobs-card-pills', 'jobs-card-panel', 'jobs-card-sheet',
-      'jobs-scrim', 'avia-strip', 'rates', 'donor-tiers', 'tier-rows', 'rate-slider',
+      'jobs-banner', 'avia-strip', 'rates', 'donor-tiers', 'tier-rows', 'rate-slider',
       'news-tab', 'news-tv', 'news-box', 'headline-blocks', 'photo-panel',
       'verdict-pills', 'option-tiles', 'steps-card', 'gauge-swap',
       'notice-push', 'notice-alert', 'notice-bubble', 'guide-arc',
@@ -53,19 +52,6 @@ describe('the template library', () => {
         }
       }
     }
-  });
-
-  it('states the scrim offer in the card keys, so nothing is retyped to switch', () => {
-    // Built by narrowing the card schema, which a typo would silently shorten
-    // rather than break. Pinned to the keys the layout actually draws.
-    const scrim = templateById('jobs-scrim')!;
-    expect(scrim.schema.map(f => f.key)).toEqual([
-      'eyebrow', 'headline', 'flag', 'age', 'audience',
-      'rate', 'cur', 'unitTop', 'unitBot', 'perks', 'cta',
-    ]);
-    const card = templateById('jobs-card-panel')!;
-    const labels = new Map(card.schema.map(f => [f.key, f.label]));
-    for (const field of scrim.schema) expect(labels.get(field.key), field.key).toBe(field.label);
   });
 
   it('quotes every figure in the currency of the country it is going to', () => {
@@ -125,13 +111,6 @@ describe('the template library', () => {
     const donor = templateById('donor-tiers')!;
     const labels = new Map(donor.schema.map(f => [f.key, f.label]));
     for (const field of strip.schema) expect(labels.get(field.key), field.key).toBe(field.label);
-  });
-
-  it('holds the three card versions to one schema, as they are one offer in three layouts', () => {
-    const cards = TEMPLATES.filter(t => t.id.startsWith('jobs-card'));
-    expect(cards).toHaveLength(3);
-    const keys = cards.map(c => c.schema.map(f => f.key).join(','));
-    expect(new Set(keys).size).toBe(1);
   });
 
   it('holds the three news strips to one schema, as they are one strip in three looks', () => {
@@ -194,9 +173,9 @@ describe('templateFields', () => {
 
   it('leaves an override for a field of another template where it is', () => {
     // Swapping layouts must not cost the wording; it just stops being on screen.
-    const held = locale('en', { disclaimer: 'дрібний шрифт' });
-    expect('disclaimer' in templateFields('rates', held)).toBe(false);
-    expect(templateFields('jobs-card-pills', held)['disclaimer']).toBe('дрібний шрифт');
+    const held = locale('en', { donorPledge: 'дрібний шрифт' });
+    expect('donorPledge' in templateFields('rates', held)).toBe(false);
+    expect(templateFields('donor-tiers', held)['donorPledge']).toBe('дрібний шрифт');
   });
 
   it('answers with nothing for a template the library does not carry', () => {

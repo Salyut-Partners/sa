@@ -8,9 +8,6 @@
 import { TEMPLATES, type TemplateInfo } from '../../core/templates.ts';
 import type { TemplateSpec } from '../../core/types.ts';
 import { aviaStrip } from './avia-strip.ts';
-import { cardPanel } from './card-panel.ts';
-import { cardPills } from './card-pills.ts';
-import { cardSheet } from './card-sheet.ts';
 import { donorTiers } from './donor-tiers.ts';
 import { gaugeSwap } from './gauge-swap.ts';
 import { guideArc } from './guide-arc.ts';
@@ -25,7 +22,6 @@ import { optionTiles } from './option-tiles.ts';
 import { photoPanel } from './photo-panel.ts';
 import { rateSlider } from './rate-slider.ts';
 import { rowsBanner } from './rows-banner.ts';
-import { scrimColumn } from './scrim-column.ts';
 import { stepsCard } from './steps-card.ts';
 import { tierRowsTemplate } from './tier-rows.ts';
 import { verdictPills } from './verdict-pills.ts';
@@ -79,10 +75,6 @@ const BUILDERS: Record<string, (context: BuildContext) => TemplateParts> = {
     rowPad: '18px 36px',
     gap: 20,
   }),
-  'jobs-card-pills': cardPills,
-  'jobs-card-panel': cardPanel,
-  'jobs-card-sheet': cardSheet,
-  'jobs-scrim': scrimColumn,
   'avia-strip': aviaStrip,
   'donor-tiers': donorTiers,
   'tier-rows': tierRowsTemplate,

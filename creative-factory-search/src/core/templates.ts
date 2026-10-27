@@ -22,46 +22,6 @@ export interface TemplateInfo {
   defaultTiming: Timing;
 }
 
-/**
- * The offer, as the three card versions all state it. They share this because
- * they are one offer in three layouts: switching between them must not ask the
- * user to type the vacancy list again.
- */
-const JOB_FIELDS: FieldSchema = [
-  { key: 'eyebrow', label: 'Надзаголовок', kind: 'line' },
-  { key: 'headline', label: 'Заголовок', kind: 'line' },
-  { key: 'flag', label: 'Прапор', kind: 'line' },
-  { key: 'age', label: 'Вік', kind: 'line' },
-  { key: 'audience', label: 'Аудиторія', kind: 'line' },
-  { key: 'rate', label: 'Ставка', kind: 'line' },
-  { key: 'cur', label: 'Валюта', kind: 'line' },
-  { key: 'unitTop', label: 'Одиниця, верхній рядок', kind: 'line' },
-  { key: 'unitBot', label: 'Одиниця, нижній рядок', kind: 'line' },
-  { key: 'jobsLabel', label: 'Підпис списку вакансій', kind: 'line' },
-  { key: 'jobs', label: 'Вакансії', kind: 'list' },
-  { key: 'shiftsLabel', label: 'Підпис змін', kind: 'line' },
-  { key: 'shifts', label: 'Зміни', kind: 'list' },
-  { key: 'perks', label: 'Переваги', kind: 'list' },
-  { key: 'cta', label: 'Заклик', kind: 'line' },
-  { key: 'disclaimer', label: 'Дисклеймер', kind: 'text' },
-];
-
-/**
- * The same offer stated straight onto the photo, so it asks for the half of the
- * card that fits beside a picture: no vacancy list, no shifts, no disclaimer.
- *
- * Narrowed from the card schema rather than written out, because these are the
- * cards' own keys and not lookalikes of them. A schema decides which fields the
- * panel offers and which reach the frame — never where a value is kept — so a
- * headline typed on a card is the same `headline` here, and switching a photo
- * between the two layouts asks the user to retype nothing.
- */
-const SCRIM_KEEPS: ReadonlySet<string> = new Set([
-  'eyebrow', 'headline', 'flag', 'age', 'audience',
-  'rate', 'cur', 'unitTop', 'unitBot', 'perks', 'cta',
-]);
-const SCRIM_FIELDS: FieldSchema = JOB_FIELDS.filter(f => SCRIM_KEEPS.has(f.key));
-
 /** The banner states the offer in three lines, so it asks for three fields. */
 const BANNER_FIELDS: FieldSchema = [
   { key: 'headline', label: 'Заголовок', kind: 'line' },
@@ -80,10 +40,8 @@ const RATES_FIELDS: FieldSchema = [
  * The donor call: a two-line title, the claims that answer "is this real", one
  * pledge, and the age bands the offer is split into.
  *
- * Its own schema rather than a share of JOB_FIELDS: this is a different offer,
- * not a fourth layout of the same one. A donor creative has no rate, no shifts
- * and no vacancy list, and folding it into the job schema would put nine dead
- * fields in the panel for every one it uses.
+ * Its own schema: this is a different offer from the jobs banner. A donor
+ * creative has no rate, no shifts and no vacancy list.
  */
 const DONOR_FIELDS: FieldSchema = [
   { key: 'donorTop', label: 'Заголовок, верхній рядок', kind: 'line' },
@@ -272,33 +230,6 @@ export const TEMPLATES: readonly TemplateInfo[] = [
     id: 'jobs-banner',
     label: 'Банер вакансій',
     schema: BANNER_FIELDS,
-    defaultTiming: { ...OPENS },
-  },
-  {
-    id: 'jobs-card-pills',
-    label: 'Картка · пігулки',
-    schema: JOB_FIELDS,
-    defaultTiming: { ...LANDS },
-  },
-  {
-    id: 'jobs-card-panel',
-    label: 'Картка · панель',
-    schema: JOB_FIELDS,
-    defaultTiming: { ...LANDS },
-  },
-  {
-    id: 'jobs-card-sheet',
-    label: 'Картка · розгортка',
-    schema: JOB_FIELDS,
-    // The sheet unrolls from the top, and an unroll takes longer to read than a rise.
-    defaultTiming: { ...LANDS, appearAt: 0.5, enterDuration: 1.1 },
-  },
-  {
-    id: 'jobs-scrim',
-    label: 'Вакансія · затемнення',
-    schema: SCRIM_FIELDS,
-    // The copy is the frame here rather than a panel laid over it, so it builds
-    // itself from the first beat like the row stacks do, not after a pause.
     defaultTiming: { ...OPENS },
   },
   {
