@@ -2,7 +2,6 @@
 // whole batch.
 import { isLocaleId, newLocale } from './locales.ts';
 import { DEFAULT_CANVAS, DEFAULT_DURATION, DEFAULT_FPS, MAX_PHOTOS } from './project.ts';
-import { templateById } from './templates.ts';
 import { DEFAULT_MODEL_ID } from './voice.ts';
 import type {
   ButtonLayer, CanvasSize, FieldValue, Locale, LocaleId, Photo, Project, Rect,
@@ -50,8 +49,7 @@ export interface ProjectFile {
 export type LoadFailure = 'not-a-project' | 'version' | 'too-many';
 
 export type LoadResult =
-  /** `removed`: template ids the file used that the library no longer has — those photos open without one. */
-  | { ok: true; project: Project; removed: string[] }
+  | { ok: true; project: Project }
   | { ok: false; reason: LoadFailure };
 
 export function toFile(project: Project): ProjectFile {
@@ -125,13 +123,9 @@ const isLocale = (v: unknown): v is Locale =>
 const isTranslatedFrom = (v: unknown): v is TranslatedFrom =>
   isBag(v) && isLocaleId(v['id']) && isText(v['script']);
 
-/**
- * A stored layer, rebuilt to the model's shape, or none. A layout taken out of
- * the library is none: the photo opens bare rather than wearing an id nothing
- * can draw or edit.
- */
+/** A stored layer, rebuilt to the model's shape, or none. */
 const readLayer = (layer: TemplateLayer | null | undefined): TemplateLayer | null =>
-  layer == null || templateById(layer.definitionId) === null ? null : {
+  layer == null ? null : {
     definitionId: layer.definitionId,
     // Every file written before layouts could be moved says nothing here,
     // and means where the layout draws itself. Files from when they only slid
@@ -176,15 +170,11 @@ export function fromFile(data: unknown): LoadResult {
     overlay: readLayer(p.overlay),
   }));
 
-  const removed = [...new Set(stored.flatMap(p => [p.template, p.overlay ?? null])
-    .flatMap(l => (l != null && templateById(l.definitionId) === null ? [l.definitionId] : [])))];
-
   const locales = readLocales(data['locales'], stored);
   const activeLocale = locales[0]!.id;
   const first = photos[0]?.id ?? null;
   return {
     ok: true,
-    removed,
     project: {
       canvas: isCanvas(data['canvas']) ? { ...data['canvas'] } : { ...DEFAULT_CANVAS },
       fps: isNum(data['fps']) ? data['fps'] : DEFAULT_FPS,

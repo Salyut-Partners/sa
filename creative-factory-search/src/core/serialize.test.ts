@@ -420,23 +420,3 @@ describe('a project file carrying music and the voice switch', () => {
     expect(project.voiceOn).toBe(true);
   });
 });
-
-describe('a project file wearing a template the library has dropped', () => {
-  it('opens the photo bare and names the template that went', () => {
-    let p = apply(sample(), { type: 'template/set', ids: ['a'], definitionId: 'news-box' });
-    p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'news-tab', slot: 'overlay' });
-    const file = toFile(p) as unknown as { photos: { template: { definitionId: string } | null }[] };
-    file.photos[0]!.template!.definitionId = 'jobs-card-pills';
-    const result = fromFile(file);
-    expect(result.ok).toBe(true);
-    const opened = result as { project: Project; removed: string[] };
-    expect(opened.removed).toEqual(['jobs-card-pills']);
-    expect(opened.project.photos[0]!.template).toBeNull();
-    expect(opened.project.photos[0]!.overlay!.definitionId).toBe('news-tab');
-  });
-
-  it('names nothing when every template is still there', () => {
-    const result = fromFile(toFile(apply(sample(), { type: 'template/set', ids: ['a'], definitionId: 'news-box' })));
-    expect((result as { removed: string[] }).removed).toEqual([]);
-  });
-});

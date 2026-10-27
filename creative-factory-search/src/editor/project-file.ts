@@ -26,10 +26,6 @@ export async function openProjectFile(file: File): Promise<LoadResult> {
   }
 }
 
-/** What to tell the user when a file opened without some of its templates. */
-export const removedTemplatesNote = (removed: readonly string[]): string =>
-  `Шаблонів ${removed.join(', ')} більше немає в бібліотеці — ці фото відкрито без шаблону.`;
-
 /** What to tell the user when a file will not open. */
 export function explainRefusal(reason: LoadFailure): string {
   switch (reason) {

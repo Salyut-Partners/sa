@@ -34,13 +34,13 @@ const transact = async <T>(
   }
 };
 
-/** The project from the last session with the templates it lost, or null if there is nothing to come back to. */
-export async function loadAutosave(): Promise<{ project: Project; removed: string[] } | null> {
+/** The project from the last session, or null if there is nothing to come back to. */
+export async function loadAutosave(): Promise<Project | null> {
   try {
     const saved = await transact<ProjectFile | undefined>('readonly', s => s.get(KEY));
     if (saved === undefined) return null;
     const result = fromFile(saved);
-    return result.ok ? { project: result.project, removed: result.removed } : null;
+    return result.ok ? result.project : null;
   } catch {
     // A private window, a denied quota, a browser with storage off: the editor
     // still works, it just will not remember. Not worth an error in the user's face.
