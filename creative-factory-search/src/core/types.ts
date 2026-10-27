@@ -177,6 +177,14 @@ export interface Project {
   /** Stretch the video to hold the voice-over rather than cutting it off. */
   fitToVoice: boolean;
   /**
+   * Whether the scripts are spoken at all. Off keeps every script — it is still
+   * the creative's `ad_script` — and makes every file silent of speech: no
+   * synthesis, no stretch to a voice, no subtitles, which are timed off the voice.
+   */
+  voiceOn: boolean;
+  /** The track under every file, by id from `core/music.ts`, or null for none. One for the batch: music has no language. */
+  music: string | null;
+  /**
    * The subtitle style every exported file is burned with, by id from the
    * pipeline's own dictionary, or null for no subtitles. On the batch rather
    * than on a photo or a language: the words are the script's, the script is
@@ -237,4 +245,8 @@ export interface Spec {
   script: string;
   voiceId: string;
   modelId: string;
+  /** See `Project.voiceOn`: false is a script nobody speaks. */
+  voiceOn: boolean;
+  /** See `Project.music`. */
+  music: string | null;
 }

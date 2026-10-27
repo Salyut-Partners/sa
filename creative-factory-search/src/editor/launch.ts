@@ -20,6 +20,8 @@ export interface LaunchInput {
   fitToVoice: boolean;
   topicId: number;
   form: LaunchForm;
+  /** The `ad_script` a language's renders go up with, where the buyer wrote one over the voice's script. */
+  adScripts: Partial<Record<LocaleId, string>>;
   /** Files from disk with the words each speaks — its `ad_script`. */
   disk: (StagedFile & { script: string })[];
   /** The pictures behind the ticked renders, for the topic's sources folder. */
@@ -109,7 +111,7 @@ export function useLaunch(): LaunchRun {
     setLaunch(null);
     setLines([]);
     setWarnings([]);
-    const scripts = Object.fromEntries((input.plan?.groups ?? []).flatMap(g => g.items.map(i => [i.name, i.sound.script])));
+    const scripts = Object.fromEntries((input.plan?.groups ?? []).flatMap(g => g.items.map(i => [i.name, input.adScripts[i.locale] ?? i.sound.script])));
     const request = async () => {
       const ready = await renders(input);
       setPhase('launch');

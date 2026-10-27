@@ -15,3 +15,4 @@ export * from './selection.ts';
 export * from './history.ts';
 export * from './serialize.ts';
 export * from './subtitles.ts';
+export * from './music.ts';

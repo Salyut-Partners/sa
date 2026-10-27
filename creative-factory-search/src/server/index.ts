@@ -6,8 +6,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isLocaleId } from '../core/locales.ts';
+import { musicById } from '../core/music.ts';
 import { VOICE_MODELS } from '../core/voice.ts';
-import { startBatch } from './batch.ts';
+import { MUSIC_DIR, startBatch } from './batch.ts';
 import { RENDER_TARGET_HTML, renderTargetScript } from './bundle.ts';
 import { configPath, loadConfig } from './config.ts';
 import { BadRequestError, cancelJob, jobById, outputsOf, RefusedError, removeLeftovers, statusOf } from './jobs.ts';
@@ -55,6 +56,16 @@ app.get('/api/health', (_req, res) => {
 app.get('/api/voices', async (_req, res) => {
   const catalogue = await listVoices();
   res.json({ ...catalogue, models: VOICE_MODELS, translator: translator() });
+});
+
+/** A track from the team's music, for the panel's play button — the same file the export mixes. */
+app.get('/api/music/:id', (req, res) => {
+  const track = musicById(req.params.id);
+  if (track === null) {
+    res.status(404).json({ error: 'такої музики немає в добірці' });
+    return;
+  }
+  res.sendFile(path.join(MUSIC_DIR, track.file));
 });
 
 app.post('/api/translate', async (req, res) => {

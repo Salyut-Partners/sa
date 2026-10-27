@@ -273,3 +273,24 @@ describe('subtitleCount', () => {
     expect(subtitleCount(project).burned).toBeLessThan(plan.total);
   });
 });
+
+describe('the music and the voice switch', () => {
+  it('ride on every item as sound, keeping the files in one video', () => {
+    let project = withLocales(script(batchOf('a.jpg'), 'en', 'Hello.'), 'de');
+    project = apply(project, { type: 'project/patch', patch: { music: 'life-in-motion', voiceOn: false } });
+    const plan = planBatch(project);
+    expect(plan.renders).toBe(1);
+    expect(plan.groups.flatMap(g => g.items).map(i => i.sound)).toEqual([
+      expect.objectContaining({ script: 'Hello.', voiceOn: false, music: 'life-in-motion' }),
+      expect.objectContaining({ voiceOn: false, music: 'life-in-motion' }),
+    ]);
+  });
+
+  it('take every subtitle off with the voice, since nothing times the words', () => {
+    const styled = apply(withLocales(batchOf('a.jpg'), 'de'), { type: 'project/patch', patch: { subtitles: 'yellow' } });
+    const silent = apply(styled, { type: 'project/patch', patch: { voiceOn: false } });
+    expect(burnCount(planBatch(silent))).toBe(0);
+    expect(subtitleCount(silent).burned).toBe(0);
+    expect(subtitleCount(styled).burned).toBe(2);
+  });
+});

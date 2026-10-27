@@ -382,3 +382,23 @@ describe('a project file carrying subtitles', () => {
     expect(toFile(styled()).subtitles).toBe('yellow');
   });
 });
+
+describe('a project file carrying music and the voice switch', () => {
+  it('keeps both', () => {
+    const p = apply(sample(), { type: 'project/patch', patch: { music: 'life-in-motion', voiceOn: false } });
+    const back = reopen(p);
+    expect(back.music).toBe('life-in-motion');
+    expect(back.voiceOn).toBe(false);
+  });
+
+  it('opens a file written before them spoken and without music', () => {
+    const older = toFile(sample()) as unknown as Record<string, unknown>;
+    delete older['music'];
+    delete older['voiceOn'];
+    const result = fromFile(older);
+    expect(result.ok).toBe(true);
+    const project = (result as { project: Project }).project;
+    expect(project.music).toBeNull();
+    expect(project.voiceOn).toBe(true);
+  });
+});

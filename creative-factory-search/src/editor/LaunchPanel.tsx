@@ -11,7 +11,7 @@ import {
 import type { LocaleId, Project } from '../core/types.ts';
 import { FilePicker } from './FilePicker.tsx';
 import { useLaunch } from './launch.ts';
-import { fetchLaunchTopic, fetchLaunchTopics, stageLaunchFile, transcribeLaunchFile, type LaunchTopic, type StagedFile } from './server.ts';
+import { fetchLaunchTopic, fetchLaunchTopics, stageLaunchFile, transcribeLaunchFile, translate, type LaunchTopic, type StagedFile } from './server.ts';
 import type { Translator } from './translate.ts';
 import { VoiceLines } from './VoiceCheck.tsx';
 
@@ -167,6 +167,35 @@ export function LaunchPanel({ project, translator }: Props) {
   /** The modal's answer for languages with no script: translated into, or left silent. */
   const [fillEmpty, setFillEmpty] = useState(true);
   const voice = voiceCheck(project);
+  /**
+   * The `ad_script` a language's renders go up with, where the buyer wrote one over the voice's
+   * script. A language not here follows the script as it is now; one here stays as written until
+   * «↺ як в озвучці». For this launch only: the voice and the project keep their words.
+   */
+  const [adScripts, setAdScripts] = useState<Partial<Record<LocaleId, string>>>({});
+  const [adNote, setAdNote] = useState('');
+  const [adBusy, setAdBusy] = useState(false);
+  const going = [...new Set(ticked.map(r => r.locale))];
+  const voiceScript = (id: LocaleId): string => project.locales.find(l => l.id === id)?.script ?? '';
+  const adScript = (id: LocaleId): string => adScripts[id] ?? voiceScript(id);
+  const handWritten = going.filter(id => adScripts[id] !== undefined);
+  /** One language's `ad_script` into every other going out — each of them then the buyer's, as if typed. */
+  const translateAd = (from: LocaleId): void => {
+    const text = adScript(from).trim();
+    const targets = going.filter(id => id !== from);
+    if (text === '' || targets.length === 0) return;
+    setAdBusy(true);
+    setAdNote('Переклад…');
+    translate([text], targets)
+      .then(result => {
+        const out = targets.flatMap(id => { const t = result.out[id]?.[0]; return t === undefined || t.trim() === '' ? [] : [[id, t] as const]; });
+        setAdScripts(a => ({ ...a, ...Object.fromEntries(out) }));
+        const lost = targets.filter(id => !out.some(([o]) => o === id));
+        setAdNote(lost.length === 0 ? '' : `Переклад не повернувся для: ${lost.map(id => LOCALE_NAMES[id]).join(', ')}`);
+      })
+      .catch(e => setAdNote((e as Error).message))
+      .finally(() => setAdBusy(false));
+  };
 
   const loadTopics = (): void => {
     fetchLaunchTopics()
@@ -321,7 +350,7 @@ export function LaunchPanel({ project, translator }: Props) {
     const names = new Set(ticked.map(r => r.name));
     const photos = new Set(ticked.map(r => r.photoId));
     const launch = (plan: ReturnType<typeof planBatch> | null, from: Project): void => run.start({
-      plan, duration: from.duration, fitToVoice: from.fitToVoice, topicId, form: full,
+      plan, duration: from.duration, fitToVoice: from.fitToVoice, topicId, form: full, adScripts,
       disk: disk.map(d => ({ id: d.id, name: d.name, size: d.size, kind: d.kind, script: d.kind === 'image' ? '' : d.script })),
       sources: from.photos.filter(p => photos.has(p.id)).map(p => ({ name: p.name, image: p.image })),
     });
@@ -336,7 +365,7 @@ export function LaunchPanel({ project, translator }: Props) {
     }).catch(() => undefined);
   };
 
-  const busy = run.running || translator.busy;
+  const busy = run.running || translator.busy || adBusy;
   const listening = disk.some(d => d.words === 'busy');
   const canLaunch = !busy && staging.length === 0 && !listening && data?.missing == null && missing.length === 0 && total > 0;
   const name = (list: { id: string; name?: string; title?: string }[] | undefined, id: string | null): string =>
@@ -547,6 +576,7 @@ export function LaunchPanel({ project, translator }: Props) {
                     {form.end_date === null ? ' без end date' : ` end date ${form.end_date}`} · розклад: завжди
                   </>
                 )}
+                {handWritten.length === 0 ? null : <> · ad_script вручну: {handWritten.map(id => FLAGS[id]).join(' ')}</>}
               </div>
             ) : (
               <div className="launch-edit">
@@ -607,6 +637,32 @@ export function LaunchPanel({ project, translator }: Props) {
                   </>
                 )}
                 <label>End date<input type="text" placeholder="без end date" value={form.end_date ?? ''} disabled={busy} onChange={e => patch({ end_date: e.target.value.trim() === '' ? null : e.target.value.trim() })} /></label>
+                {going.length === 0 ? null : (
+                  <div className="launch-ad-scripts">
+                    <div className="lab">ad_script<span className="val">текст креативу в Creative Repository</span></div>
+                    {going.map(id => (
+                      <div className="launch-ad-script" key={id}>
+                        <label><span>{FLAGS[id]} {LOCALE_NAMES[id]}{adScripts[id] === undefined ? ' · як в озвучці' : ' · змінено вручну'}</span>
+                          <textarea className="launch-script" rows={3} value={adScript(id)} disabled={busy}
+                            placeholder={voiceScript(id).trim() === '' ? 'скрипту немає — перекладеться з іншої мови при заливі, або впишіть свій' : ''}
+                            onChange={e => setAdScripts(a => ({ ...a, [id]: e.target.value }))} />
+                        </label>
+                        <div className="row">
+                          {adScripts[id] === undefined ? null : (
+                            <button type="button" className="link" disabled={busy} title="Повернути скрипт озвучки"
+                              onClick={() => setAdScripts(a => { const { [id]: _gone, ...rest } = a; return rest; })}>↺ як в озвучці</button>
+                          )}
+                          {going.length > 1 ? (
+                            <button type="button" className="link" disabled={busy || adScript(id).trim() === ''}
+                              title="Перекласти цей текст на решту мов заливу — їхні поля стануть вашими" onClick={() => translateAd(id)}>перекласти на всі мови</button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                    {adNote !== '' ? <div className={adBusy ? 'note' : 'error'}>{adNote}</div> : null}
+                    <div className="note">Озвучка й проєкт не змінюються. Поле, якого не торкались, повторює скрипт озвучки.</div>
+                  </div>
+                )}
                 <div className="note">Правки діють лише на цей залив; наступний сет почнеться з командних значень.</div>
               </div>
             )}
@@ -724,6 +780,17 @@ export function LaunchPanel({ project, translator }: Props) {
                   </dd>
                 </>
               )}
+              {handWritten.length === 0 ? null : (
+                <>
+                  <dt>ad_script</dt>
+                  <dd>
+                    <div className="muted">змінено вручну — в Creative Repository піде цей текст, не скрипт озвучки</div>
+                    {handWritten.map(id => (
+                      <div key={id}>{FLAGS[id]} {adScript(id).trim() === '' ? <span className="muted">порожній</span> : `«${adScript(id).trim()}»`}</div>
+                    ))}
+                  </dd>
+                </>
+              )}
             </dl>
             {ticked.length === 0 ? null : (() => {
               // Only the languages this launch renders: the summary speaks for what goes up.
@@ -731,7 +798,7 @@ export function LaunchPanel({ project, translator }: Props) {
               const shown = { ...voice, lines: voice.lines.filter(l => going.has(l.id)), empty: voice.empty.filter(id => going.has(id)) };
               return (
                 <div className="launch-voice">
-                  <div className="lab">Озвучка</div>
+                  <div className="lab">{project.voiceOn ? 'Озвучка' : 'Скрипти — лише в ad_script, озвучку вимкнено'}</div>
                   <VoiceLines check={shown} fillEmpty={fillEmpty} onFillEmpty={setFillEmpty} />
                 </div>
               );

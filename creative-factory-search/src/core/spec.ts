@@ -63,5 +63,7 @@ export function buildSpec(
     // first the provider offers", resolved at synthesis where the list is.
     voiceId: project.voiceId,
     modelId: project.modelId,
+    voiceOn: project.voiceOn,
+    music: project.music,
   };
 }

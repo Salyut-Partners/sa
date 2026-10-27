@@ -77,6 +77,12 @@ export function ExportPanel({ project, dispatch, run, onExportOne, translator }:
 
   /** Asked first when what the languages will say is not what the panel shows — see `voiceCheck`. */
   const go = (planOf: (project: Project) => BatchPlan | null): void => {
+    // Nobody speaks with the voice off: nothing to check, nothing to translate for the export.
+    if (!project.voiceOn) {
+      const plan = planOf(project);
+      if (plan !== null) run.start(plan, project.duration, project.fitToVoice);
+      return;
+    }
     if (check.ask) {
       setFillEmpty(true);
       setAsking(() => planOf);
@@ -130,6 +136,9 @@ export function ExportPanel({ project, dispatch, run, onExportOne, translator }:
         </select>
         {subsNote !== '' ? <div className="error">{subsNote}</div> : null}
         {subs !== null && subs.styles === null ? <div className="error">{subs.notes.join(' · ')}</div> : null}
+        {project.subtitles !== null && !project.voiceOn ? (
+          <div className="warn">Озвучку вимкнено — без озвучки субтитрів немає: слова нема по чому розставити в часі.</div>
+        ) : null}
         {project.subtitles === null ? (
           <div className="note">Слова скрипта в кадрі, синхронно з озвучкою — той самий пайплайн, що у вотчера.</div>
         ) : (

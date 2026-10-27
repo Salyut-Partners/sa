@@ -53,7 +53,7 @@ export type ButtonPatch =
   & Partial<Omit<ButtonLayer, 'id' | 'rect' | 'timing'>>
   & { rect?: Partial<Rect>; timing?: Partial<Timing> };
 export type ProjectPatch =
-  Partial<Pick<Project, 'duration' | 'fps' | 'canvas' | 'voiceId' | 'modelId' | 'fitToVoice' | 'subtitles'>>;
+  Partial<Pick<Project, 'duration' | 'fps' | 'canvas' | 'voiceId' | 'modelId' | 'fitToVoice' | 'voiceOn' | 'music' | 'subtitles'>>;
 export type TemplatePatch = { timing?: Partial<Timing>; offsetY?: number };
 /**
  * Which of a photo's two template layers a command is about: the layout, or
@@ -127,6 +127,8 @@ export function createProject(): Project {
     voiceId: '',
     modelId: DEFAULT_MODEL_ID,
     fitToVoice: true,
+    voiceOn: true,
+    music: null,
     subtitles: null,
   };
 }

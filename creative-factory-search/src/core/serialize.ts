@@ -32,6 +32,10 @@ export interface ProjectFile {
   voiceId: string;
   modelId: string;
   fitToVoice: boolean;
+  /** Absent in a file from before the switch: it was spoken whenever it had a script. */
+  voiceOn: boolean;
+  /** Absent in a file from before music: none. */
+  music: string | null;
   /**
    * Absent in every file written before subtitles existed, and ignored by
    * the editor that wrote them — which is why this is a field and not a new
@@ -61,6 +65,8 @@ export function toFile(project: Project): ProjectFile {
     voiceId: project.voiceId,
     modelId: project.modelId,
     fitToVoice: project.fitToVoice,
+    voiceOn: project.voiceOn,
+    music: project.music,
     subtitles: project.subtitles,
   };
 }
@@ -179,6 +185,8 @@ export function fromFile(data: unknown): LoadResult {
       voiceId: isText(data['voiceId']) ? data['voiceId'] : '',
       modelId: isText(data['modelId']) ? data['modelId'] : DEFAULT_MODEL_ID,
       fitToVoice: data['fitToVoice'] !== false,
+      voiceOn: data['voiceOn'] !== false,
+      music: isText(data['music']) && data['music'] !== '' ? data['music'] : null,
       subtitles: isText(data['subtitles']) && data['subtitles'] !== '' ? data['subtitles'] : null,
     },
   };

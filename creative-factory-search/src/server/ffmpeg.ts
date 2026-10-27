@@ -136,3 +136,58 @@ export async function mux(video: string, audio: string, outFile: string): Promis
     '-movflags', '+faststart', outFile,
   ]);
 }
+
+/** One sound under a video: what file, how loud. */
+export interface Track {
+  file: string;
+  /** How long the file runs, so a short one can be repeated to cover the video. */
+  seconds: number;
+}
+
+/**
+ * Lay a voice, music, or both over a finished video — the video copied, as in
+ * `mux`, and its length still the file's.
+ *
+ * The music starts with the video and fades out over its last `fade` seconds.
+ * A track shorter than the video plays again, each repeat crossing over the
+ * last for `fade` seconds rather than cutting in. Under a voice it plays at
+ * `underVoice`; alone, at full.
+ */
+export async function mix(
+  video: string,
+  voice: string | null,
+  music: Track | null,
+  outFile: string,
+  { fade, underVoice, repeats }: { fade: number; underVoice: number; repeats: (track: number, file: number) => number },
+): Promise<void> {
+  if (music === null) {
+    if (voice === null) throw new Error('нічого накладати');
+    return mux(video, voice, outFile);
+  }
+  const length = await probeDuration(video);
+  const copies = repeats(music.seconds, length);
+  const same = 'aformat=sample_rates=44100:channel_layouts=stereo';
+  const inputs = ['-i', video, ...(voice === null ? [] : ['-i', voice]), ...Array.from({ length: copies }, () => ['-i', music.file]).flat()];
+  const first = voice === null ? 1 : 2;
+  const parts: string[] = [];
+  for (let i = 0; i < copies; i++) parts.push(`[${first + i}:a]${same}[m${i}]`);
+  let joined = 'm0';
+  for (let i = 1; i < copies; i++) {
+    parts.push(`[${joined}][m${i}]acrossfade=d=${fade}:c1=tri:c2=tri[x${i}]`);
+    joined = `x${i}`;
+  }
+  const level = voice === null ? 1 : underVoice;
+  const fadeAt = Math.max(0, length - fade);
+  parts.push(`[${joined}]atrim=0:${length},afade=t=out:st=${fadeAt}:d=${Math.min(fade, length)},volume=${level}[mus]`);
+  if (voice !== null) {
+    parts.push(`[1:a]${same},apad,atrim=0:${length}[voi]`);
+    parts.push('[voi][mus]amix=inputs=2:duration=first:normalize=0[a]');
+  }
+  await run('ffmpeg', [
+    '-y', ...inputs,
+    '-filter_complex', parts.join(';'),
+    '-map', '0:v:0', '-map', voice === null ? '[mus]' : '[a]',
+    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-t', String(length),
+    '-movflags', '+faststart', outFile,
+  ]);
+}

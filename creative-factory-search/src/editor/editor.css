@@ -370,6 +370,8 @@ textarea.mixed::placeholder { color: var(--warn); font-style: italic; }
 .launch-campaigns th, .launch-campaigns td { padding: 3px 6px 3px 0; border-bottom: 1px solid var(--line); }
 .launch-campaigns tfoot td { border-bottom: none; color: var(--muted); }
 .launch-compact { font-size: 11px; line-height: 1.5; color: var(--muted); }
+.launch-ad-scripts { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.launch-ad-script .row { gap: 12px; }
 .launch-edit-toggle { margin-top: 8px; font-size: 12px; padding: 6px 10px; }
 .launch-edit { display: flex; flex-direction: column; gap: 8px; }
 .launch-edit label:not(.check) { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }

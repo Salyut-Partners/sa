@@ -7,7 +7,7 @@ import { templateById, templateFields } from '../core/templates.ts';
 import type { Locale, Spec, Timing } from '../core/types.ts';
 
 /** A chip is not a video. Nothing in it is spoken, so its sound is all empty. */
-const SILENT = { script: '', voiceId: '', modelId: '' } as const;
+const SILENT = { script: '', voiceId: '', modelId: '', voiceOn: true, music: null } as const;
 
 /** Chip proportions: wide enough for a real label, short enough to sit in a card. */
 export const PREVIEW_CANVAS = { width: 560, height: 96 };

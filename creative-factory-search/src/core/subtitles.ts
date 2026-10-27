@@ -72,10 +72,11 @@ export function parseSetupCheck(printed: string): SetupCheck | null {
 
 /**
  * The style one language's files are burned with, or null for clean files.
- * The batch names the style; a language may only say no to it.
+ * The batch names the style; a language may only say no to it. With the voice
+ * switched off there is nothing to time the words by, and every file is clean.
  */
 export const subtitleStyleFor = (project: Project, localeId: LocaleId): string | null => {
-  if (project.subtitles === null) return null;
+  if (project.subtitles === null || !project.voiceOn) return null;
   const locale = localeById(project, localeId);
   return locale !== null && locale.subtitles ? project.subtitles : null;
 };

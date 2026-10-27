@@ -14,13 +14,18 @@ import { visualKey } from './visual-key.ts';
 /**
  * All that separates one file in a group from the one beside it: its sound.
  *
- * The three fields the server needs to synthesize speech, and no more. The
- * picture lives on the group, once, because that is what a group is.
+ * The fields the server needs to synthesize speech and lay the music under it,
+ * and no more. The picture lives on the group, once, because that is what a
+ * group is.
  */
 export interface Sound {
   script: string;
   voiceId: string;
   modelId: string;
+  /** False: the script stays — it is the `ad_script` — and nobody speaks it. */
+  voiceOn: boolean;
+  /** The track under the file, by id from `core/music.ts`, or null. */
+  music: string | null;
 }
 
 /** One file that will come out of the export. */
@@ -122,13 +127,13 @@ const itemFor = (
 ): Planned | null => {
   const spec = buildSpec(project, photoId, locale);
   if (spec === null) return null;
-  const { script, voiceId, modelId } = spec;
+  const { script, voiceId, modelId, voiceOn, music } = spec;
   return {
     item: {
       photoId,
       locale,
       name: archiveName(index, photoName, locale),
-      sound: { script, voiceId, modelId },
+      sound: { script, voiceId, modelId, voiceOn, music },
       subtitles: subtitleStyleFor(project, locale),
     },
     spec,

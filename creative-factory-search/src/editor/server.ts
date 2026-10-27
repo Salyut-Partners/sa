@@ -84,6 +84,9 @@ export const describeTranslator = (catalogue: VoiceCatalogue | null): string =>
     : 'Автопереклад вимкнений: у .env немає ані DEEPL_API_KEY, ані ANTHROPIC_API_KEY. ' +
       'Тексти для кожної мови доведеться вписати вручну.';
 
+/** Where the panel plays a track of the team's music from — the file the export mixes. */
+export const musicUrl = (id: string): string => `/api/music/${encodeURIComponent(id)}`;
+
 // --------------------------------------------------------------- translate --
 
 export type TranslationResult = Translations;

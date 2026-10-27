@@ -348,6 +348,9 @@ Three build units and one rule.
   through the same routes; a launch takes its files from finished export jobs.
   ElevenLabs and the translators sit behind two thin modules; a missing key is
   a state each of them explains rather than an error the server starts with.
+  Music is the team's own list — `core/music.ts` and the files in
+  `assets/music/` — mixed under the voice by `mix` in `ffmpeg.ts`; adding a
+  track is a file and a line.
   `subs.ts` runs `../subs` as a subprocess and knows nothing about styles
   beyond what the pipeline prints — for a dropped video with Whisper, for an
   exported creative with the words the export already has (`--words`), the

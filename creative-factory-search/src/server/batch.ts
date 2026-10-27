@@ -9,10 +9,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { groupDuration, type BatchGroup, type BatchItem, type Sound } from '../core/batch.ts';
 import { clamp } from '../core/canvas.ts';
 import { wordsFromAlignment, type Word } from '../core/subtitles.ts';
-import { mux, probeDuration } from './ffmpeg.ts';
+import { MUSIC_FADE, MUSIC_UNDER_VOICE, musicById, musicRepeats } from '../core/music.ts';
+import { mix, probeDuration, type Track } from './ffmpeg.ts';
 import {
   BadRequestError, createJob, explain, settleJob, working, type Job,
 } from './jobs.ts';
@@ -27,6 +29,24 @@ import { synthesize } from './tts.ts';
  * smaller. So two, and `RENDER_CONCURRENCY=4` for a machine that can take it.
  */
 const CONCURRENCY = readConcurrency();
+
+/** Where the team's tracks are, beside the code — see `core/music.ts`. */
+export const MUSIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'music');
+
+/** A track by id as a file to mix, measured once per server. */
+const tracks = new Map<string, Promise<Track>>();
+function trackFor(id: string): Promise<Track> {
+  let pending = tracks.get(id);
+  if (pending === undefined) {
+    const known = musicById(id);
+    if (known === null) return Promise.reject(new Error(`музики «${id}» немає в добірці`));
+    const file = path.join(MUSIC_DIR, known.file);
+    pending = probeDuration(file).then(seconds => ({ file, seconds }));
+    pending.catch(() => tracks.delete(id));
+    tracks.set(id, pending);
+  }
+  return pending;
+}
 
 function readConcurrency(): number {
   const asked = Number(process.env['RENDER_CONCURRENCY'] ?? 2);
@@ -72,6 +92,8 @@ function validate(request: unknown): BatchRequest {
         || typeof sound?.script !== 'string'
         || typeof sound.voiceId !== 'string'
         || typeof sound.modelId !== 'string'
+        || typeof sound.voiceOn !== 'boolean'
+        || (sound.music !== null && typeof sound.music !== 'string')
         || (item.subtitles !== null && typeof item.subtitles !== 'string')
       ) {
         throw new BadRequestError('пошкоджений план експорту');
@@ -200,8 +222,9 @@ async function renderGroup(job: Job, group: BatchGroup, ctx: GroupContext): Prom
     const made = path.join(job.dir, item.name);
     try {
       await working(job, item.name, async () => {
-        if (clip === null) await fs.promises.copyFile(silent, made);
-        else await mux(silent, clip.file, made);
+        const music = item.sound.music === null ? null : await trackFor(item.sound.music);
+        if (clip === null && music === null) await fs.promises.copyFile(silent, made);
+        else await mix(silent, clip?.file ?? null, music, made, { fade: MUSIC_FADE, underVoice: MUSIC_UNDER_VOICE, repeats: musicRepeats });
         // The burn is a step after the mux, on this one file: the video was
         // drawn once for the group, and the words differ per language. A
         // silent creative has nothing to say and stays clean, without a
@@ -224,10 +247,11 @@ async function renderGroup(job: Job, group: BatchGroup, ctx: GroupContext): Prom
 
 /** The speech for one item, or null when it has nothing to say. */
 async function voiceFor(job: Job, item: BatchItem, ctx: GroupContext): Promise<Clip | null> {
-  const { script, voiceId, modelId } = item.sound;
+  const { script, voiceId, modelId, voiceOn } = item.sound;
   // An empty script is a silent video, not a missing one — no key needed, no
-  // charge, no separate mode.
-  if (script.trim() === '') return null;
+  // charge, no separate mode. So is one with the voice switched off: the script
+  // stays for the `ad_script`, and nobody speaks it.
+  if (!voiceOn || script.trim() === '') return null;
 
   const key = `${modelId} ${voiceId} ${script}`;
   let pending = ctx.voices.get(key);

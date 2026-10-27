@@ -26,6 +26,8 @@ const spec = (over: Partial<Spec> = {}): Spec => ({
   script: 'Airport staff wanted.',
   voiceId: 'george',
   modelId: 'eleven_multilingual_v2',
+  voiceOn: true,
+  music: null,
   ...over,
 });
 
@@ -40,7 +42,7 @@ describe('visualKey', () => {
     // JSON.stringify over whatever order the fields happened to be in would
     // split a group the moment a spec arrived over the wire.
     const b: Spec = {
-      modelId: a.modelId, voiceId: a.voiceId, script: a.script, locale: a.locale,
+      music: a.music, voiceOn: a.voiceOn, modelId: a.modelId, voiceId: a.voiceId, script: a.script, locale: a.locale,
       buttons: a.buttons, overlay: a.overlay, template: a.template, glare: a.glare, pushIn: a.pushIn,
       image: a.image, fps: a.fps, duration: a.duration, canvas: a.canvas,
     };
@@ -55,6 +57,10 @@ describe('visualKey', () => {
     it('over the voice and the model', () => {
       expect(visualKey(spec({ voiceId: 'lily', modelId: 'eleven_flash_v2_5' })))
         .toBe(visualKey(spec()));
+    });
+
+    it('over the music and the voice switch', () => {
+      expect(visualKey(spec({ music: 'life-in-motion', voiceOn: false }))).toBe(visualKey(spec()));
     });
 
     it('over which language it is, once the words on the frame are the same', () => {

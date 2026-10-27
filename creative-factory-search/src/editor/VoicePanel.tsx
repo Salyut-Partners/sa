@@ -3,9 +3,10 @@ import { activeLocale, LOCALE_NAMES } from '../core/locales.ts';
 import type { Command } from '../core/project.ts';
 import { just } from '../core/selection.ts';
 import type { Project } from '../core/types.ts';
+import { MUSIC, musicById } from '../core/music.ts';
 import { voiceEstimate } from '../core/voice.ts';
 import { CheckField, SelectField, TextAreaField } from './fields.tsx';
-import { describeTranslator, describeVoiceSource, type VoiceCatalogue } from './server.ts';
+import { describeTranslator, describeVoiceSource, musicUrl, type VoiceCatalogue } from './server.ts';
 import type { Translator } from './translate.ts';
 
 interface Props {
@@ -47,6 +48,11 @@ export function VoicePanel({ project, dispatch, catalogue, translator }: Props) 
   if (voiceId !== '' && voice === null) voiceOptions.push({ id: voiceId, label: 'голос не з цього акаунта' });
 
   const sample = useSample(voice?.previewUrl ?? null);
+  // A track the project names but this editor does not list — a file from a newer list — stays shown.
+  const track = musicById(project.music);
+  const musicOptions = [{ id: NO_MUSIC, label: '— без музики —' }, ...MUSIC.map(t => ({ id: t.id, label: `${t.name} · ${t.seconds} с` }))];
+  if (project.music !== null && track === null) musicOptions.push({ id: project.music, label: `${project.music} · немає в добірці` });
+  const listen = useSample(track === null ? null : musicUrl(track.id));
 
   return (
     <>
@@ -71,6 +77,39 @@ export function VoicePanel({ project, dispatch, catalogue, translator }: Props) 
           Перекласти скрипт на решту мов
         </button>
         {noTranslator === '' ? null : <div className="warn">{noTranslator}</div>}
+      </div>
+
+      <div className="group">
+        <CheckField
+          label="Озвучка"
+          value={just(project.voiceOn)}
+          onChange={voiceOn => dispatch({ type: 'project/patch', patch: { voiceOn } })}
+        />
+        <div className="note">
+          {project.voiceOn
+            ? 'Вимкніть, щоб креатив ішов без голосу: скрипт лишиться — він піде в ad_script при заливі.'
+            : 'Озвучку вимкнено: голосу у відео немає, ElevenLabs не викликається, субтитрів немає. Скрипт піде в ad_script.'}
+        </div>
+      </div>
+
+      <div className="group">
+        <div className="lab">Музика</div>
+        <div className="row">
+          <SelectField
+            value={just(project.music ?? NO_MUSIC)}
+            options={musicOptions}
+            onChange={id => dispatch({ type: 'project/patch', patch: { music: id === NO_MUSIC ? null : id } })}
+          />
+          <button
+            disabled={track === null}
+            title={track === null ? 'Оберіть трек' : listen.playing ? 'Зупинити' : 'Прослухати трек'}
+            onClick={listen.toggle}
+          >
+            {listen.playing ? '■' : '▶'}
+          </button>
+        </div>
+        <div className="note">Одна на всі мови. Під озвучкою — на 20% гучності, без озвучки — на повну; в кінці ролика затихає.</div>
+        {listen.failed ? <div className="error">Трек не відтворився — перевірте, що сервер запущено.</div> : null}
       </div>
 
       <div className="group">
@@ -104,7 +143,9 @@ export function VoicePanel({ project, dispatch, catalogue, translator }: Props) 
         <div className="note">
           {/* Once per language, not once per photo: the export synthesises each
               line one time and lays it over every creative that wants it. */}
-          {estimate.chars === 0
+          {!project.voiceOn
+            ? 'Озвучку вимкнено — синтезу не буде, $0.'
+            : estimate.chars === 0
             ? 'Скриптів ще немає — експорт буде німим.'
             : `${estimate.chars} символів у ${estimate.syntheses} мов${
                 estimate.syntheses === 1 ? 'і' : 'ах'} · ≈ $${estimate.usd.toFixed(2)}`}
@@ -124,6 +165,9 @@ export function VoicePanel({ project, dispatch, catalogue, translator }: Props) 
     </>
   );
 }
+
+/** The music select's value for "no music" — a select cannot hold null. */
+const NO_MUSIC = ' none';
 
 /**
  * A voice's sample, played and stopped from one button. Changing the voice
