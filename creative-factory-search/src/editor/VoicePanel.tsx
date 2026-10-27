@@ -92,6 +92,60 @@ export function VoicePanel({ project, dispatch, catalogue, translator }: Props) 
         </div>
       </div>
 
+      {/* What the voice is: nothing to choose while nobody speaks. */}
+      <fieldset className="voice-settings" disabled={!project.voiceOn}>
+        <div className="group">
+          <div className="lab">Голос</div>
+          <div className="row">
+            <SelectField
+              value={just(voiceId)}
+              options={voiceOptions}
+              onChange={id => dispatch({ type: 'project/patch', patch: { voiceId: id } })}
+            />
+            <button
+              disabled={voice?.previewUrl == null}
+              title={voice?.previewUrl == null ? 'Для цього голосу немає семплу' : sample.playing ? 'Зупинити' : 'Прослухати семпл ElevenLabs'}
+              onClick={sample.toggle}
+            >
+              {sample.playing ? '■' : '▶'}
+            </button>
+          </div>
+          <div className="note">Один голос на всі мови. Семпл — англійська фраза від ElevenLabs, безкоштовно.</div>
+          {sample.failed ? <div className="error">Семпл не відтворився — перевірте з'єднання.</div> : null}
+          {source === '' ? null : <div className="note">{source}</div>}
+        </div>
+
+        <div className="group">
+          <div className="lab">Модель синтезу</div>
+          <SelectField
+            value={just(project.modelId)}
+            options={models.map(m => ({ id: m.id, label: m.label }))}
+            onChange={modelId => dispatch({ type: 'project/patch', patch: { modelId } })}
+          />
+          <div className="note">
+            {/* Once per language, not once per photo: the export synthesises each
+                line one time and lays it over every creative that wants it. */}
+            {!project.voiceOn
+              ? 'Озвучку вимкнено — синтезу не буде, $0.'
+              : estimate.chars === 0
+              ? 'Скриптів ще немає — експорт буде німим.'
+              : `${estimate.chars} символів у ${estimate.syntheses} мов${
+                  estimate.syntheses === 1 ? 'і' : 'ах'} · ≈ $${estimate.usd.toFixed(2)}`}
+          </div>
+        </div>
+
+        <div className="group">
+          <CheckField
+            label="Тягнути тривалість під озвучку"
+            value={just(project.fitToVoice)}
+            onChange={fitToVoice => dispatch({ type: 'project/patch', patch: { fitToVoice } })}
+          />
+          <div className="note">
+            Вимкніть, щоб тримати жорсткий хронометраж — тоді довша фраза обріжеться.
+          </div>
+        </div>
+      </fieldset>
+
       <div className="group">
         <div className="lab">Музика</div>
         <div className="row">
@@ -110,57 +164,6 @@ export function VoicePanel({ project, dispatch, catalogue, translator }: Props) 
         </div>
         <div className="note">Одна на всі мови. Під озвучкою — на 20% гучності, без озвучки — на повну; в кінці ролика затихає.</div>
         {listen.failed ? <div className="error">Трек не відтворився — перевірте, що сервер запущено.</div> : null}
-      </div>
-
-      <div className="group">
-        <div className="lab">Голос</div>
-        <div className="row">
-          <SelectField
-            value={just(voiceId)}
-            options={voiceOptions}
-            onChange={id => dispatch({ type: 'project/patch', patch: { voiceId: id } })}
-          />
-          <button
-            disabled={voice?.previewUrl == null}
-            title={voice?.previewUrl == null ? 'Для цього голосу немає семплу' : sample.playing ? 'Зупинити' : 'Прослухати семпл ElevenLabs'}
-            onClick={sample.toggle}
-          >
-            {sample.playing ? '■' : '▶'}
-          </button>
-        </div>
-        <div className="note">Один голос на всі мови. Семпл — англійська фраза від ElevenLabs, безкоштовно.</div>
-        {sample.failed ? <div className="error">Семпл не відтворився — перевірте з'єднання.</div> : null}
-        {source === '' ? null : <div className="note">{source}</div>}
-      </div>
-
-      <div className="group">
-        <div className="lab">Модель синтезу</div>
-        <SelectField
-          value={just(project.modelId)}
-          options={models.map(m => ({ id: m.id, label: m.label }))}
-          onChange={modelId => dispatch({ type: 'project/patch', patch: { modelId } })}
-        />
-        <div className="note">
-          {/* Once per language, not once per photo: the export synthesises each
-              line one time and lays it over every creative that wants it. */}
-          {!project.voiceOn
-            ? 'Озвучку вимкнено — синтезу не буде, $0.'
-            : estimate.chars === 0
-            ? 'Скриптів ще немає — експорт буде німим.'
-            : `${estimate.chars} символів у ${estimate.syntheses} мов${
-                estimate.syntheses === 1 ? 'і' : 'ах'} · ≈ $${estimate.usd.toFixed(2)}`}
-        </div>
-      </div>
-
-      <div className="group">
-        <CheckField
-          label="Тягнути тривалість під озвучку"
-          value={just(project.fitToVoice)}
-          onChange={fitToVoice => dispatch({ type: 'project/patch', patch: { fitToVoice } })}
-        />
-        <div className="note">
-          Вимкніть, щоб тримати жорсткий хронометраж — тоді довша фраза обріжеться.
-        </div>
       </div>
     </>
   );
