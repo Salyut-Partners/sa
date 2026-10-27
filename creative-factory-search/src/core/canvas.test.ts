@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampRect, nudgeRect, toPixels } from './canvas.ts';
+import { clampRect, clampShift, nudgeRect, shiftRange, toPixels } from './canvas.ts';
 import type { CanvasSize, Rect } from './types.ts';
 
 const CANVAS: CanvasSize = { width: 1080, height: 1920 };
@@ -74,5 +74,27 @@ describe('nudgeRect', () => {
       .toEqual({ x: 0, y: 0, w: 30, h: 10 });
     expect(nudgeRect({ x: 70, y: 90, w: 30, h: 10 }, { x: 200, y: 200 }, CANVAS, MIN))
       .toEqual({ x: 70, y: 90, w: 30, h: 10 });
+  });
+});
+
+describe('shiftRange', () => {
+  it('gives a panel the room between it and each edge of the frame', () => {
+    expect(shiftRange({ x: 10, y: 60, w: 80, h: 30 })).toEqual({ x: [-10, 10], y: [-60, 10] });
+  });
+
+  it('lets a layout that bleeds past an edge stay put, and not go further', () => {
+    // The guide sheet is drawn wider than the frame and flush with its foot:
+    // it may rise, and that is all.
+    const sheet = { x: -11, y: 53, w: 122, h: 47 };
+    expect(shiftRange(sheet)).toEqual({ x: [0, 0], y: [-53, 0] });
+    expect(clampShift(sheet, { x: 20, y: 30 })).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe('clampShift', () => {
+  it('stops the content at the edge it is pushed against', () => {
+    const box = { x: 10, y: 60, w: 80, h: 30 };
+    expect(clampShift(box, { x: -40, y: 50 })).toEqual({ x: -10, y: 10 });
+    expect(clampShift(box, { x: 5, y: -20 })).toEqual({ x: 5, y: -20 });
   });
 });

@@ -4,9 +4,11 @@
 // Every frame is a pure function of `t`: no CSS transitions, no rAF, no clock.
 // The frame walk sets a time and screenshots; anything time-dependent that is
 // not derived from `t` would desync the export from what was on screen.
+import { clampShift } from '../core/canvas.ts';
 import { localeDir } from '../core/locales.ts';
+import type { TemplateSlot } from '../core/project.ts';
 import { layerStateAt } from '../core/timing.ts';
-import type { ButtonSpec, EnterAnimation, Spec, TemplateSpec } from '../core/types.ts';
+import type { ButtonSpec, EnterAnimation, Rect, Spec, TemplateSpec } from '../core/types.ts';
 import { styleById, type ButtonStyle } from './button-styles.ts';
 import { accent, type Accent } from './color.ts';
 import { ensureRendererStyle } from './css.ts';
@@ -19,6 +21,19 @@ export interface CreativeHandle {
   /** Draw the frame at `t` seconds. */
   render: (t: number) => void;
   spec: Spec;
+  /** How far each template layer's content reaches, once it has been measured. */
+  reach: () => Partial<Record<TemplateSlot, TemplateReach>>;
+}
+
+/**
+ * Where a template's content sits, for the editor to draw a handle round and
+ * hold a drag inside the frame with.
+ */
+export interface TemplateReach {
+  /** The content where it draws itself, before any move, in percent of the frame. */
+  box: Rect;
+  /** The frame on the canvas, in percent of the canvas: all of it for a 9:16 photo. */
+  frame: Rect;
 }
 
 // `currentColor` rather than white: the arrow is part of the label, and a style
@@ -29,9 +44,16 @@ const ARROW_SVG =
 
 /** A template layer — the photo's layout, or the overlay drawn over it. */
 interface TemplatePlace {
+  slot: TemplateSlot;
   spec: TemplateSpec;
   layer: HTMLElement;
   parts: TemplateParts;
+  /** The 1080x1920 frame, scaled to the canvas. Holds the scrims. */
+  frame: HTMLElement;
+  /** Everything on the frame but the scrims: what a move moves. */
+  mover: HTMLElement;
+  /** Where the content draws itself, in percent of the frame; null until measured. */
+  box: Rect | null;
 }
 
 /** One button's DOM, plus everything about it that does not change per frame. */
@@ -48,7 +70,12 @@ interface ButtonParts {
   riseBy: number;
 }
 
-export function build(root: HTMLElement, spec: Spec): CreativeHandle {
+/**
+ * Build a creative on `root`. `onFit` hears each time the templates were
+ * measured afresh — on build, when the webfonts land, and when a stage built
+ * hidden is first drawn visible — which is when their reach may have changed.
+ */
+export function build(root: HTMLElement, spec: Spec, onFit?: () => void): CreativeHandle {
   ensureRendererStyle(root.ownerDocument);
 
   root.className = 'cf-stage';
@@ -87,41 +114,80 @@ export function build(root: HTMLElement, spec: Spec): CreativeHandle {
   if (spec.image) base.src = spec.image;
 
   const slots = [...root.querySelectorAll<HTMLElement>('.cf-tpl')];
-  const templates = [spec.template, spec.overlay]
-    .filter((t): t is TemplateSpec => t !== null)
-    .map((t, i) => dressTemplate(t, spec, slots[i]!))
+  const templates = ([['template', spec.template], ['overlay', spec.overlay]] as const)
+    .filter((t): t is readonly [TemplateSlot, TemplateSpec] => t[1] !== null)
+    .map(([slot, t], i) => dressTemplate(slot, t, spec, slots[i]!))
     .filter((t): t is TemplatePlace => t !== null);
+  // Measuring draws the layer once more, so a layer nobody moved and nobody
+  // holds a handle to — a library chip — is left where it draws itself.
+  const measured = (t: TemplatePlace): boolean =>
+    onFit !== undefined || t.spec.offsetX !== 0 || t.spec.offsetY !== 0;
   const layers = [...root.querySelectorAll<HTMLElement>('.cf-btn-layer')];
   const parts: ButtonParts[] = spec.buttons.map((b, i) => dressButton(b, layers[i]!));
 
+  /** The last time drawn, to come back to after a measurement. */
+  let now = 0;
+
   const fitAll = (): void => {
     parts.forEach(fitText);
-    for (const template of templates) template.parts.fit();
+    for (const template of templates) {
+      template.parts.fit();
+      if (measured(template)) settle(template);
+    }
+    onFit?.();
   };
   fitAll();
   // Text measured before the webfont lands is measured against a fallback face,
   // so a label can end up a size too large and a panel a line too tall. Re-fit
   // once the real fonts are in.
-  root.ownerDocument.fonts?.ready.then(fitAll).catch(() => {});
+  root.ownerDocument.fonts?.ready.then(() => { fitAll(); render(now); }).catch(() => {});
 
   function render(t: number): void {
+    now = t;
+    // A stage built inside a hidden tab measured nothing; the first frame it is
+    // drawn visible is the first one it can.
+    const late = templates.filter(x => x.box === null && measured(x) && settle(x));
+    if (late.length > 0) onFit?.();
     wrap.style.transform = 'scale(' + (spec.pushIn ? 1 + 0.022 * (t / spec.duration) : 1) + ')';
     for (const template of templates) renderTemplate(template, t, spec);
     for (const p of parts) renderButton(p, t, spec);
   }
 
+  const reach = (): Partial<Record<TemplateSlot, TemplateReach>> => {
+    const fit = Math.min(spec.canvas.width / DESIGN.width, spec.canvas.height / DESIGN.height);
+    const w = (100 * DESIGN.width * fit) / spec.canvas.width;
+    const h = (100 * DESIGN.height * fit) / spec.canvas.height;
+    const frame: Rect = { x: (100 - w) / 2, y: (100 - h) / 2, w, h };
+    return Object.fromEntries(templates
+      .filter(t => t.box !== null)
+      .map(t => [t.slot, { box: t.box!, frame }]));
+  };
+
   render(0);
-  return { render, spec };
+  return { render, spec, reach };
 }
 
 const TEMPLATE_HTML = '<div class="cf-layer cf-tpl"><div class="cf-tpl-frame"></div></div>';
+
+/**
+ * What a layout lays over the whole picture rather than on part of it. A move
+ * leaves these where they are: dragged along, a scrim would bare one edge of
+ * the photo and push its shading off the other.
+ */
+const SCRIMS = '.cf-t-tint, .cf-na-dim';
+
+/**
+ * A time every layout has long since built itself by, at which its content is
+ * measured: where it rests is where the viewer reads it.
+ */
+const REST = 30;
 
 /**
  * Put a template on the frame, or answer nothing when it names one this build
  * does not carry, which a project saved against an older library can. A
  * creative short a panel beats one that refuses to build.
  */
-function dressTemplate(template: TemplateSpec, spec: Spec, layer: HTMLElement): TemplatePlace | null {
+function dressTemplate(slot: TemplateSlot, template: TemplateSpec, spec: Spec, layer: HTMLElement): TemplatePlace | null {
   const definition = definitionById(template.definitionId);
   if (definition === null) {
     layer.remove();
@@ -134,26 +200,140 @@ function dressTemplate(template: TemplateSpec, spec: Spec, layer: HTMLElement): 
   // A canvas of another shape than 9:16 — a square or landscape photo — gets
   // the frame whole, as large as fits and centred: a layout cut off at the
   // edges loses its words, and a squashed one is not the layout any more.
-  //
-  // The nudge is written after the scale, which puts it in the frame's own
-  // 1080x1920 units: the same figure then means the same place on the picture
-  // whatever size the canvas turns out to be. Percent of the frame rather than
-  // pixels for the same reason.
   const fit = Math.min(spec.canvas.width / DESIGN.width, spec.canvas.height / DESIGN.height);
   const dx = (spec.canvas.width - DESIGN.width * fit) / 2;
   const dy = (spec.canvas.height - DESIGN.height * fit) / 2;
-  const lift = DESIGN.height * (template.offsetY / 100);
-  frame.style.transform = `translate(${dx}px, ${dy}px) scale(${fit}) translateY(${lift}px)`;
+  frame.style.transform = `translate(${dx}px, ${dy}px) scale(${fit})`;
 
-  return {
+  const parts = definition.build({
     spec: template,
-    layer,
-    parts: definition.build({
-      spec: template,
-      frame,
-      rtl: localeDir(spec.locale) === 'rtl',
-    }),
+    frame,
+    rtl: localeDir(spec.locale) === 'rtl',
+  });
+
+  // The layout drew itself straight onto the frame. Everything but its scrims
+  // goes one level down, into a box the size of the frame, so a move is one
+  // transform on that box: the layout's own positions, its measurements and
+  // its animations all read the same inside it as they did on the frame.
+  const mover = frame.ownerDocument.createElement('div');
+  mover.className = 'cf-tpl-move';
+  for (const child of [...frame.children]) if (!child.matches(SCRIMS)) mover.appendChild(child);
+  frame.appendChild(mover);
+  moveContent(mover, template, null);
+
+  return { slot, spec: template, layer, parts, frame, mover, box: null };
+}
+
+/**
+ * Put the content where the user moved it, held inside the frame once its
+ * reach is known.
+ *
+ * Written in the frame's own 1080x1920 units, so the same figure means the
+ * same place on the picture whatever size the canvas turns out to be. Held
+ * here as well as in the editor's drag: a move made on one photo reaches every
+ * selected one, and one of those may carry longer copy and a taller panel.
+ */
+function moveContent(mover: HTMLElement, template: TemplateSpec, box: Rect | null): void {
+  const wanted = { x: template.offsetX, y: template.offsetY };
+  const { x, y } = box === null ? wanted : clampShift(box, wanted);
+  mover.style.transform = x === 0 && y === 0
+    ? ''
+    : `translate(${(DESIGN.width * x) / 100}px, ${(DESIGN.height * y) / 100}px)`;
+}
+
+interface Edges { left: number; top: number; right: number; bottom: number }
+
+/**
+ * Measure how far a layout's content reaches, and hold its move to the frame.
+ * Answers whether there was anything laid out to measure.
+ *
+ * The content is drawn at rest for the measurement and left that way: every
+ * caller draws the frame it wants straight after. Only what paints counts —
+ * text, a background, a border, a picture — so a column a layout spans the
+ * full width to centre a headline in does not pin the headline to that width.
+ */
+function settle(place: TemplatePlace): boolean {
+  const { layer, frame, mover } = place;
+  const hidden = layer.style.display;
+  const entrance = layer.style.transform;
+  layer.style.display = '';
+  layer.style.transform = '';
+  mover.style.transform = '';
+  place.parts.render(REST, 1);
+
+  const origin = frame.getBoundingClientRect();
+  const k = origin.width / DESIGN.width;
+  let edges: Edges | null = null;
+  const add = (r: Edges): void => {
+    if (r.right <= r.left || r.bottom <= r.top) return;
+    const next: Edges = {
+      left: (r.left - origin.left) / k, top: (r.top - origin.top) / k,
+      right: (r.right - origin.left) / k, bottom: (r.bottom - origin.top) / k,
+    };
+    edges = edges === null ? next : {
+      left: Math.min(edges.left, next.left), top: Math.min(edges.top, next.top),
+      right: Math.max(edges.right, next.right), bottom: Math.max(edges.bottom, next.bottom),
+    };
   };
+  if (k > 0) visit(mover, add, null);
+
+  layer.style.display = hidden;
+  layer.style.transform = entrance;
+  const found = edges as Edges | null;
+  if (found === null) {
+    moveContent(mover, place.spec, null);
+    return false;
+  }
+  place.box = {
+    x: (100 * found.left) / DESIGN.width,
+    y: (100 * found.top) / DESIGN.height,
+    w: (100 * (found.right - found.left)) / DESIGN.width,
+    h: (100 * (found.bottom - found.top)) / DESIGN.height,
+  };
+  moveContent(mover, place.spec, place.box);
+  return true;
+}
+
+const BLANK = new Set(['rgba(0, 0, 0, 0)', 'transparent']);
+const SIDES = ['top', 'right', 'bottom', 'left'] as const;
+
+/** The part of `r` inside `clip`, in the page's own pixels. */
+const within = (r: DOMRect | Edges, clip: Edges | null): Edges => clip === null ? r : {
+  left: Math.max(r.left, clip.left), top: Math.max(r.top, clip.top),
+  right: Math.min(r.right, clip.right), bottom: Math.min(r.bottom, clip.bottom),
+};
+
+/**
+ * Hand `add` the box of everything under `el` that puts paint on the frame,
+ * cut to what the boxes around it let show. A button's sheen waits thousands
+ * of pixels to one side of the button it crosses, hidden by that button's own
+ * edges; counted whole, it would pin the layout it belongs to in place.
+ */
+function visit(el: Element, add: (r: Edges) => void, clip: Edges | null): void {
+  const view = el.ownerDocument.defaultView;
+  if (view === null) return;
+  const style = view.getComputedStyle(el);
+  if (style.display === 'none') return;
+  const own = el.getBoundingClientRect();
+  if (el.namespaceURI === 'http://www.w3.org/2000/svg' || el.tagName === 'IMG' || el.tagName === 'CANVAS') {
+    add(within(own, clip));
+    return;
+  }
+  const paints = !BLANK.has(style.backgroundColor) || style.backgroundImage !== 'none'
+    || SIDES.some(side => parseFloat(style.getPropertyValue(`border-${side}-width`)) > 0
+      && !BLANK.has(style.getPropertyValue(`border-${side}-color`)));
+  if (paints) add(within(own, clip));
+  const inner = style.overflowX === 'visible' && style.overflowY === 'visible' ? clip : within(own, clip);
+  for (const node of el.childNodes) {
+    if (node.nodeType === 3) {
+      if ((node.textContent ?? '').trim() === '') continue;
+      const range = el.ownerDocument.createRange();
+      range.selectNodeContents(node);
+      add(within(range.getBoundingClientRect(), inner));
+    } else if (node.nodeType === 1) {
+      visit(node as Element, add, inner);
+    }
+  }
 }
 
 function renderTemplate(place: TemplatePlace, t: number, spec: Spec): void {

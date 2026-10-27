@@ -2,7 +2,7 @@
 // undo and persistence each need to understand one thing, not one per control.
 import { clamp, clampRect, nudgeRect } from './canvas.ts';
 import { newLocale } from './locales.ts';
-import { templateById, templateMoves } from './templates.ts';
+import { templateById } from './templates.ts';
 import { DEFAULT_MODEL_ID } from './voice.ts';
 import type {
   ButtonLayer, CanvasSize, FieldValue, Locale, LocaleId, Photo, Project, Rect, Timing, TranslatedFrom,
@@ -17,16 +17,16 @@ export const DEFAULT_ACCENT = '#1fa94b';
 export const MIN_BUTTON_SIZE = { w: 12, h: 3 };
 
 /**
- * How far a movable layout may be slid, in percent of frame height.
+ * The widest a layout's content may be moved, in percent of the frame, on
+ * either axis.
  *
- * Lopsided because the strip it was built for rests near the foot of the frame:
- * almost all the room it has is above it. The downward end is measured rather
- * than picked — the stack sits 118px off the foot of a 1920 frame, which is
- * 6 per cent, so six takes it flush to the bottom edge and no further. Seven
- * would start cutting the last row off, and a control whose far end hides the
- * thing it moves is one the user has to be rescued from.
+ * Only a sanity bound. Where the content may really go depends on how far it
+ * reaches, which depends on its words, so the editor holds a drag to the room
+ * the renderer measured and the renderer holds the frame to it again — a move
+ * made on one photo and broadcast to another with longer copy cannot push that
+ * one's panel off the edge either.
  */
-export const TEMPLATE_LIFT = { min: -70, max: 6 };
+export const TEMPLATE_SHIFT = { min: -100, max: 100 };
 
 /**
  * How many photos one project holds. Images live inside the project as data
@@ -54,7 +54,7 @@ export type ButtonPatch =
   & { rect?: Partial<Rect>; timing?: Partial<Timing> };
 export type ProjectPatch =
   Partial<Pick<Project, 'duration' | 'fps' | 'canvas' | 'voiceId' | 'modelId' | 'fitToVoice' | 'subtitles'>>;
-export type TemplatePatch = { timing?: Partial<Timing>; offsetY?: number };
+export type TemplatePatch = { timing?: Partial<Timing>; offsetX?: number; offsetY?: number };
 /**
  * Which of a photo's two template layers a command is about: the layout, or
  * the one drawn over it. Absent means the layout, which is what every command
@@ -392,6 +392,7 @@ export function apply(project: Project, command: Command): Project {
           // Not carried across the swap, unlike the window and the text: an
           // offset is a place on the frame that one layout has and the next
           // one may not, so a layout arrives where it draws itself.
+          offsetX: 0,
           offsetY: 0,
           timing: p[slot]?.timing ?? { ...info.defaultTiming },
         },
@@ -403,16 +404,12 @@ export function apply(project: Project, command: Command): Project {
       return mapPhotos(project, command.ids, p => {
         const layer = p[slot];
         if (layer === null) return p;
-        const { timing, offsetY } = command.patch;
-        if (timing === undefined && offsetY === undefined) return p;
+        const { timing, offsetX, offsetY } = command.patch;
+        if (timing === undefined && offsetX === undefined && offsetY === undefined) return p;
         const template = { ...layer };
         if (timing !== undefined) template.timing = { ...template.timing, ...timing };
-        // Refused rather than clamped for a layout that does not move: a figure
-        // stored on one is a nudge nothing in the panel can show and nothing on
-        // the frame can explain.
-        if (offsetY !== undefined && templateMoves(template.definitionId)) {
-          template.offsetY = clamp(offsetY, TEMPLATE_LIFT.min, TEMPLATE_LIFT.max);
-        }
+        if (offsetX !== undefined) template.offsetX = clamp(offsetX, TEMPLATE_SHIFT.min, TEMPLATE_SHIFT.max);
+        if (offsetY !== undefined) template.offsetY = clamp(offsetY, TEMPLATE_SHIFT.min, TEMPLATE_SHIFT.max);
         return { ...p, [slot]: template };
       });
     }

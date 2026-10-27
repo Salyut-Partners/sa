@@ -35,6 +35,37 @@ export function clampRect(rect: Rect, min: { w: number; h: number }): Rect {
   };
 }
 
+/** How far a template's content may go each way, in percent of the frame. */
+export interface ShiftRange {
+  x: readonly [number, number];
+  y: readonly [number, number];
+}
+
+/**
+ * The room a template's content has to move without leaving the frame.
+ *
+ * `box` is where the content draws itself, in percent of the frame — measured
+ * by the renderer, because how far a panel reaches depends on the words in it.
+ * A side the content already bleeds past at rest, like the sheet drawn wider
+ * than the frame on purpose, gives no room that way and takes none either: the
+ * layout may always stay where it was drawn.
+ */
+export function shiftRange(box: Rect): ShiftRange {
+  return {
+    x: [Math.min(0, -box.x), Math.max(0, 100 - box.x - box.w)],
+    y: [Math.min(0, -box.y), Math.max(0, 100 - box.y - box.h)],
+  };
+}
+
+/** A move held to the room `shiftRange` gives. */
+export function clampShift(box: Rect, shift: { x: number; y: number }): { x: number; y: number } {
+  const room = shiftRange(box);
+  return {
+    x: clamp(shift.x, room.x[0], room.x[1]),
+    y: clamp(shift.y, room.y[0], room.y[1]),
+  };
+}
+
 /**
  * Move a rect by whole canvas pixels.
  *

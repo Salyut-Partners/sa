@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  apply, createProject, defaultButton, MAX_PHOTOS, nextSlot, photoTimings, TEMPLATE_LIFT,
+  apply, createProject, defaultButton, MAX_PHOTOS, nextSlot, photoTimings, TEMPLATE_SHIFT,
 } from './project.ts';
 import { templateById } from './templates.ts';
 import type { Project } from './types.ts';
@@ -535,35 +535,31 @@ describe('template commands', () => {
       .toBe(before);
   });
 
-  it('slides a movable layout up and down the frame', () => {
+  it('moves any layout across and down the frame', () => {
+    // Scrim and all: the renderer leaves a full-frame scrim where it is and
+    // moves only what sits on it, so no layout is refused a place.
+    for (const definitionId of ['tier-rows', 'donor-tiers']) {
+      let p = apply(withPhotos('a'), { type: 'template/set', ids: ['a'], definitionId });
+      expect(p.photos[0]!.template).toMatchObject({ offsetX: 0, offsetY: 0 });
+      p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetX: 12, offsetY: -32 } });
+      expect(p.photos[0]!.template).toMatchObject({ offsetX: 12, offsetY: -32 });
+      p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: 5 } });
+      expect(p.photos[0]!.template).toMatchObject({ offsetX: 12, offsetY: 5 });
+    }
+  });
+
+  it('holds a move to the sanity bound, leaving the frame edges to the renderer', () => {
     let p = apply(withPhotos('a'), {
       type: 'template/set', ids: ['a'], definitionId: 'tier-rows',
     });
-    expect(p.photos[0]!.template!.offsetY).toBe(0);
-    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: -32 } });
-    expect(p.photos[0]!.template!.offsetY).toBe(-32);
+    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetX: -900, offsetY: 900 } });
+    expect(p.photos[0]!.template).toMatchObject({ offsetX: TEMPLATE_SHIFT.min, offsetY: TEMPLATE_SHIFT.max });
   });
 
-  it('holds the nudge inside the room the frame has', () => {
-    // Past the ends the stack leaves the picture, and a control whose far end
-    // hides the thing it moves is one the user has to be rescued from.
-    let p = apply(withPhotos('a'), {
-      type: 'template/set', ids: ['a'], definitionId: 'tier-rows',
-    });
-    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: -900 } });
-    expect(p.photos[0]!.template!.offsetY).toBe(TEMPLATE_LIFT.min);
-    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: 900 } });
-    expect(p.photos[0]!.template!.offsetY).toBe(TEMPLATE_LIFT.max);
-  });
-
-  it('refuses to nudge a layout that darkens the whole frame', () => {
-    // Not clamped to zero but ignored: a figure stored on one of these is a
-    // nudge the panel never shows and the frame never explains.
-    let p = apply(withPhotos('a'), {
-      type: 'template/set', ids: ['a'], definitionId: 'donor-tiers',
-    });
-    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: -30 } });
-    expect(p.photos[0]!.template!.offsetY).toBe(0);
+  it('moves every selected photo\'s layout by the same figure', () => {
+    let p = apply(withPhotos('a', 'b'), { type: 'template/set', ids: ['a', 'b'], definitionId: 'news-tab' });
+    p = apply(p, { type: 'template/patch', ids: ['a', 'b'], patch: { offsetX: 4, offsetY: -10 } });
+    for (const photo of p.photos) expect(photo.template).toMatchObject({ offsetX: 4, offsetY: -10 });
   });
 
   it('puts a swapped layout back where it draws itself', () => {
@@ -572,9 +568,9 @@ describe('template commands', () => {
     let p = apply(withPhotos('a'), {
       type: 'template/set', ids: ['a'], definitionId: 'tier-rows',
     });
-    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetY: -40 } });
+    p = apply(p, { type: 'template/patch', ids: ['a'], patch: { offsetX: 8, offsetY: -40 } });
     p = apply(p, { type: 'template/set', ids: ['a'], definitionId: 'donor-tiers' });
-    expect(p.photos[0]!.template!.offsetY).toBe(0);
+    expect(p.photos[0]!.template).toMatchObject({ offsetX: 0, offsetY: 0 });
   });
 });
 

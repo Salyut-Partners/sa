@@ -16,6 +16,7 @@ export const TEMPLATE_CSS = `
 
 .cf-tpl{position:absolute;inset:0;overflow:hidden}
 .cf-tpl-frame{position:absolute;left:0;top:0;width:1080px;height:1920px;transform-origin:0 0}
+.cf-tpl-move{position:absolute;left:0;top:0;width:1080px;height:1920px}
 .cf-t-tint{position:absolute;inset:0;pointer-events:none}
 .cf-t-ic{flex:none}
 

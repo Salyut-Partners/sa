@@ -144,7 +144,25 @@ describe('a project file carrying templates', () => {
     };
     const result = fromFile(older);
     expect(result.ok).toBe(true);
-    expect((result as { project: Project }).project.photos[0]!.template!.offsetY).toBe(0);
+    expect((result as { project: Project }).project.photos[0]!.template).toMatchObject({ offsetX: 0, offsetY: 0 });
+  });
+
+  it('keeps a layout slid up and down where it was, and adds no sideways move', () => {
+    // Written when a layout could only be lifted: `offsetY` alone. The lift is
+    // the same figure in the same unit now, so the creative opens unchanged.
+    const file = toFile(saved()) as unknown as Record<string, unknown>;
+    const lifted = {
+      ...file,
+      photos: (file['photos'] as Record<string, unknown>[]).map(p => {
+        const template = p['template'] as Record<string, unknown> | null;
+        if (template === null) return p;
+        const { offsetX: _dropped, ...rest } = template;
+        return { ...p, template: { ...rest, offsetY: -18 } };
+      }),
+    };
+    const result = fromFile(lifted);
+    expect(result.ok).toBe(true);
+    expect((result as { project: Project }).project.photos[0]!.template).toMatchObject({ offsetX: 0, offsetY: -18 });
   });
 
   it('comes back with the overlay drawn over the template', () => {

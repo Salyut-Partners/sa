@@ -116,6 +116,7 @@ describe('visualKey', () => {
           definitionId: 'rates',
           fields: { ratesHead: 'Find this', rates: ['200 €', '500 €'] },
           color: '#1fa94b',
+          offsetX: 0,
           offsetY: 0,
           timing: { appearAt: 0, hideAt: null, enter: 'none', enterDuration: 0.6 },
           ...over,
@@ -137,6 +138,10 @@ describe('visualKey', () => {
       // ship with the other's stack halfway up the photograph.
       expect(visualKey(withTemplate({ offsetY: -24 })))
         .not.toBe(visualKey(withTemplate()));
+      expect(visualKey(withTemplate({ offsetX: 10 })))
+        .not.toBe(visualKey(withTemplate()));
+      expect(visualKey(withTemplate({ offsetX: 10 })))
+        .not.toBe(visualKey(withTemplate({ offsetY: 10 })));
     });
 
     it('by what it says — a line and a list alike', () => {

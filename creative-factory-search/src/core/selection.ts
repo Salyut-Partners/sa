@@ -145,16 +145,6 @@ const templatesOf = (
   return layers.every((l): l is TemplateLayer => l != null) ? layers : null;
 };
 
-/** How far the layout on the selected photos is nudged, if they agree. */
-export function templateOffsetField(
-  project: Project,
-  ids: readonly string[],
-  slot: TemplateSlot = 'template',
-): Shared<number> {
-  const layers = templatesOf(project, ids, slot);
-  return layers === null ? MIXED : shared(layers.map(l => l.offsetY));
-}
-
 export function templateTimingField<K extends FlatKeys<Timing>>(
   project: Project,
   ids: readonly string[],

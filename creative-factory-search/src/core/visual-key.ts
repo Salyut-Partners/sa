@@ -40,6 +40,7 @@ const templateParts = (template: TemplateSpec | null): unknown[] | null =>
     template.color,
     // Where on the frame it sits. Two photos identical but for this are two
     // pictures, and leaving it out would have them share one frame walk.
+    template.offsetX,
     template.offsetY,
     timingParts(template.timing),
     // Sorted, because a field bag is a map and a map has no order — the same

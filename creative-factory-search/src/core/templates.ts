@@ -20,16 +20,6 @@ export interface TemplateInfo {
    * unlike a button, which is there from the start unless told not to be.
    */
   defaultTiming: Timing;
-  /**
-   * Whether the user may slide the layout up and down the frame.
-   *
-   * Absent means no, which is the answer for every layout that darkens the
-   * whole picture behind itself. Their scrim is the frame, so moving them
-   * drags the shading off one edge and leaves the other bare — a control that
-   * only breaks the thing it moves. A strip that carries its own background
-   * and no scrim can sit anywhere over the photo, and says so here.
-   */
-  movable?: boolean;
 }
 
 /**
@@ -340,10 +330,6 @@ export const TEMPLATES: readonly TemplateInfo[] = [
     // Rows and nothing else, so they build themselves in from the first beat
     // like the other stacks rather than making the viewer wait for a panel.
     defaultTiming: { ...OPENS },
-    // The one layout in the library that carries no scrim: each row is its own
-    // opaque strip, so the picture around it is untouched and the stack can sit
-    // wherever on the frame the photograph leaves room for it.
-    movable: true,
   },
   {
     id: 'rate-slider',
@@ -354,28 +340,24 @@ export const TEMPLATES: readonly TemplateInfo[] = [
     defaultTiming: { ...OPENS },
   },
   // The news strips. Each is pulled across the frame from the first beat, the
-  // way a lower third arrives on a broadcast, and each carries its own ground
-  // and no scrim, so each can be slid to wherever the photo leaves room.
+  // way a lower third arrives on a broadcast, and each carries its own ground.
   {
     id: 'news-tab',
     label: 'Новини · плашка',
     schema: NEWS_FIELDS,
     defaultTiming: { ...OPENS },
-    movable: true,
   },
   {
     id: 'news-tv',
     label: 'Новини · ефір',
     schema: NEWS_FIELDS,
     defaultTiming: { ...OPENS },
-    movable: true,
   },
   {
     id: 'news-box',
     label: 'Новини · блок',
     schema: NEWS_FIELDS,
     defaultTiming: { ...OPENS },
-    movable: true,
   },
   {
     id: 'headline-blocks',
@@ -393,21 +375,19 @@ export const TEMPLATES: readonly TemplateInfo[] = [
     defaultTiming: { ...OPENS },
   },
   // Each of these four is its own ground — pills, tiles, gauges on a plate —
-  // and stands low on the frame, so each can be slid up to where the photo
-  // leaves room. All of them build themselves in from the first beat.
+  // and stands low on the frame. All of them build themselves in from the
+  // first beat.
   {
     id: 'verdict-pills',
     label: 'Хибне / правильне',
     schema: VERDICT_FIELDS,
     defaultTiming: { ...OPENS },
-    movable: true,
   },
   {
     id: 'option-tiles',
     label: 'Плитки варіантів',
     schema: TILE_FIELDS,
     defaultTiming: { ...OPENS },
-    movable: true,
   },
   {
     id: 'steps-card',
@@ -420,10 +400,8 @@ export const TEMPLATES: readonly TemplateInfo[] = [
     label: 'Було → стало',
     schema: GAUGE_FIELDS,
     defaultTiming: { ...OPENS },
-    movable: true,
   },
-  // The notifications hang from the top or sit on the middle of the frame, and
-  // a nudge only lifts, so none of them is offered for moving.
+  // The notifications hang from the top or sit on the middle of the frame.
   {
     id: 'notice-push',
     label: 'Сповіщення · банер',
@@ -453,14 +431,6 @@ export const TEMPLATES: readonly TemplateInfo[] = [
 
 export const templateById = (id: string): TemplateInfo | null =>
   TEMPLATES.find(t => t.id === id) ?? null;
-
-/**
- * Whether this layout may be slid up and down the frame. A layout the library
- * no longer carries answers no, which is the safe answer: an offset nobody can
- * see to undo is worse than a layout that simply sits where it was drawn.
- */
-export const templateMoves = (id: string): boolean => templateById(id)?.movable === true;
-
 
 /**
  * What one field says, in one language.
