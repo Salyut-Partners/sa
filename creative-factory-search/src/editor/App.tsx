@@ -457,7 +457,7 @@ export function App() {
               ))}
             </div>
           )}
-          {cells.length > 0 ? <LocaleBar project={project} dispatch={dispatch} /> : null}
+          {cells.length > 0 ? <LocaleBar project={project} dispatch={dispatch} translator={translator} /> : null}
           {cells.length > 0 ? <Timeline clock={clock} duration={project.duration} /> : null}
         </section>
 

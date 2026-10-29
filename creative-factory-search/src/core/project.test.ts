@@ -34,14 +34,23 @@ describe('photo commands', () => {
   });
 
   it('removes a photo and falls back to the first one left', () => {
-    const p = apply(withPhotos('a', 'b'), { type: 'photo/remove', id: 'b' });
+    const p = apply(withPhotos('a', 'b'), { type: 'photo/remove', ids: ['b'] });
     expect(p.photos.map(x => x.id)).toEqual(['a']);
     expect(p.activeId).toBe('a');
     expect(p.selection).toEqual(['a']);
   });
 
+  it('removes every photo named in one step, and the first one left takes over', () => {
+    let p = apply(withPhotos('a', 'b', 'c', 'd'), { type: 'photo/activate', id: 'b' });
+    p = apply(p, { type: 'photo/toggle', id: 'c' });
+    p = apply(p, { type: 'photo/remove', ids: p.selection });
+    expect(p.photos.map(x => x.id)).toEqual(['a', 'd']);
+    expect(p.activeId).toBe('a');
+    expect(p.selection).toEqual(['a']);
+  });
+
   it('leaves nothing active when the last photo goes', () => {
-    const p = apply(withPhotos('a'), { type: 'photo/remove', id: 'a' });
+    const p = apply(withPhotos('a'), { type: 'photo/remove', ids: ['a'] });
     expect(p.activeId).toBeNull();
     expect(p.selection).toEqual([]);
   });
@@ -468,7 +477,7 @@ describe('selection', () => {
 
   it('drops a removed photo out of a wide selection', () => {
     const p = apply(apply(withPhotos('a', 'b'), { type: 'selection/all' }), {
-      type: 'photo/remove', id: 'a',
+      type: 'photo/remove', ids: ['a'],
     });
     expect(p.selection).toEqual(['b']);
   });

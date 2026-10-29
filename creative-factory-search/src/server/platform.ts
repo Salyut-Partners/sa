@@ -65,17 +65,27 @@ export class PlatformClient {
   ): Promise<Answer> {
     const headers = { ...this.headers(), ...extra };
     if (contentType !== undefined) headers['content-type'] = contentType;
+    // A streamed body has to say it is sent before the answer is read: `duplex`, which the DOM types do not know yet.
+    const streamed = body instanceof ReadableStream ? { duplex: 'half' } : {};
+    const send = (): Promise<Response> => fetch(this.url(path, query), {
+      method, headers, ...(body === undefined ? {} : { body }), ...streamed, signal: AbortSignal.timeout(timeoutMs),
+    } as RequestInit);
     let response: Response;
     try {
-      // A streamed body has to say it is sent before the answer is read: `duplex`, which the DOM types do not know yet.
-      const streamed = body instanceof ReadableStream ? { duplex: 'half' } : {};
-      response = await fetch(this.url(path, query), {
-        method, headers, ...(body === undefined ? {} : { body }), ...streamed, signal: AbortSignal.timeout(timeoutMs),
-      } as RequestInit);
+      response = await send();
     } catch (e) {
-      // A network that dropped mid-request is as uncertain as a timeout: the
-      // request may have arrived.
-      return { status: 'timeout' };
+      // A read that dropped before any answer is sent once more. After the Mac
+      // has slept, the pooled connection to the platform is dead and the first
+      // request on it fails at once; the second gets a fresh one. Only a read:
+      // a write may have arrived, and sending it again could make it twice.
+      if (method !== 'GET' || isTimeout(e)) return { status: 'timeout' };
+      try {
+        response = await send();
+      } catch {
+        // A network that dropped mid-request is as uncertain as a timeout: the
+        // request may have arrived.
+        return { status: 'timeout' };
+      }
     }
     const text = await response.text();
     let parsed: unknown = null;
@@ -138,6 +148,9 @@ export class PlatformClient {
     return this.call('POST', path, {}, stream, `multipart/form-data; boundary=${boundary}`, UPLOAD_TIMEOUT_MS, { 'content-length': String(body.length) });
   }
 }
+
+/** Whether a failed fetch ran out of time, rather than losing its connection. */
+const isTimeout = (e: unknown): boolean => e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
 
 // ---------------------------------------------------------------- reads --
 

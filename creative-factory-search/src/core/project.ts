@@ -30,10 +30,10 @@ export const TEMPLATE_SHIFT = { min: -100, max: 100 };
 
 /**
  * How many photos one project holds. Images live inside the project as data
- * URLs, so the ceiling is memory, not taste: a dozen 1080x1920 JPEGs is already
- * tens of megabytes to keep in the store, autosave and export.
+ * URLs, so the ceiling is memory, not taste: two dozen 1080x1920 JPEGs are
+ * already tens of megabytes to keep in the store, autosave and export.
  */
-export const MAX_PHOTOS = 12;
+export const MAX_PHOTOS = 24;
 
 export interface NewPhoto {
   id: string;
@@ -84,7 +84,8 @@ export interface LocaleWrite {
  */
 export type Command =
   | { type: 'photo/add'; photos: readonly NewPhoto[] }
-  | { type: 'photo/remove'; id: string }
+  // Every photo named goes in one step — the selection, from «Прибрати фото».
+  | { type: 'photo/remove'; ids: readonly string[] }
   | { type: 'photo/replace'; id: string; name: string; image: string; canvas: CanvasSize }
   | { type: 'photo/activate'; id: string }
   | { type: 'photo/toggle'; id: string }
@@ -244,16 +245,13 @@ export function apply(project: Project, command: Command): Project {
     }
 
     case 'photo/remove': {
-      const photos = project.photos.filter(p => p.id !== command.id);
+      const gone = new Set(command.ids);
+      const photos = project.photos.filter(p => !gone.has(p.id));
       if (photos.length === project.photos.length) return project;
-      const stillActive = project.activeId !== null && project.activeId !== command.id;
-      const activeId = stillActive ? project.activeId : (photos[0]?.id ?? null);
-      const left = new Set(photos.map(p => p.id));
-      const kept = project.selection.filter(id => left.has(id));
-      // The active photo is always part of the selection — the side panel edits
-      // the selection, so an active photo outside it would be uneditable.
-      const selection = kept.length > 0 ? kept : activeId === null ? [] : [activeId];
-      return { ...project, photos, activeId, selection };
+      // The first photo left takes over, alone: what was selected is gone, and
+      // a selection carried over from it would be a guess at what comes next.
+      const activeId = photos[0]?.id ?? null;
+      return { ...project, photos, activeId, selection: activeId === null ? [] : [activeId] };
     }
 
     case 'photo/replace':

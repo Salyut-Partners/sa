@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { photoById, type Command, type TemplateSlot } from '../core/project.ts';
 import { activeLocale } from '../core/locales.ts';
 import { templateChoice, templateTimingField } from '../core/selection.ts';
@@ -11,6 +11,8 @@ interface Props {
   project: Project;
   dispatch: (command: Command) => void;
   slot: TemplateSlot;
+  /** Under the fields, once there are fields: what acts on them. */
+  footer?: ReactNode;
 }
 
 const TITLES: Record<TemplateSlot, string> = {
@@ -28,7 +30,7 @@ const TITLES: Record<TemplateSlot, string> = {
  * second full catalogue of moving thumbnails under the first is a lot of panel
  * for a choice most batches never make.
  */
-export function TemplateSlotPanel({ project, dispatch, slot }: Props) {
+export function TemplateSlotPanel({ project, dispatch, slot, footer }: Props) {
   const photo = photoById(project, project.activeId);
   const targets = project.selection;
   const layer = photo?.[slot] ?? null;
@@ -99,6 +101,7 @@ export function TemplateSlotPanel({ project, dispatch, slot }: Props) {
           </div>
 
           <TemplateFields project={project} definitionId={layer.definitionId} dispatch={dispatch} />
+          {footer}
         </div>
       ) : null}
     </>

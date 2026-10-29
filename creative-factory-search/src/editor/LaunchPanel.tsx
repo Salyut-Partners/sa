@@ -202,7 +202,9 @@ export function LaunchPanel({ project, translator }: Props) {
       .then(list => { topicsCache = list; setTopics(list); setTopicsNote(''); })
       .catch(e => { if (topicsCache === null) setTopics([]); setTopicsNote((e as Error).message); });
   };
-  useEffect(() => { if (topicsCache === null) loadTopics(); }, []);
+  // Read again on every visit and every time the field is entered, the held list shown meanwhile:
+  // a topic made in the admin a minute ago must be there without restarting anything.
+  useEffect(loadTopics, []);
 
   // The topic: from what this session already read, or off the platform — on a first visit, a new
   // source (the cabinets and pixels are the source's), or «Оновити з платформи». The first read asks
@@ -401,11 +403,17 @@ export function LaunchPanel({ project, translator }: Props) {
           type="search" list="launch-topics" value={topicQuery} disabled={busy}
           placeholder={topics === null ? 'Читаю топіки…' : 'почніть вводити назву топіка'}
           onChange={e => pickTopic(e.target.value)}
+          onFocus={loadTopics}
         />
         <datalist id="launch-topics">
           {topics?.map(t => <option key={t.id} value={topicLabel(t, topics)} />)}
         </datalist>
-        {topicsNote !== '' ? <div className="error">{topicsNote}</div> : null}
+        {topicsNote !== '' ? (
+          <div className="error">
+            {topicsNote}{' '}
+            <button type="button" className="link" disabled={busy} onClick={loadTopics}>Спробувати ще</button>
+          </div>
+        ) : null}
         {reading ? <div className="note">Читаю топік з платформи…</div> : null}
         {topicId !== null && !reading ? (
           <button type="button" className="link launch-refresh" disabled={busy} title="Прочитати топік з платформи ще раз — якщо щось змінили в адмінці"
@@ -413,7 +421,12 @@ export function LaunchPanel({ project, translator }: Props) {
             ↻ Оновити з платформи
           </button>
         ) : null}
-        {dataNote !== '' ? <div className="error">{dataNote}</div> : null}
+        {dataNote !== '' ? (
+          <div className="error">
+            {dataNote}{' '}
+            <button type="button" className="link" disabled={busy} onClick={() => setRefresh(n => n + 1)}>Спробувати ще</button>
+          </div>
+        ) : null}
         {data?.missing != null ? <div className="warn">{data.missing} або через Claude.</div> : null}
       </div>
 

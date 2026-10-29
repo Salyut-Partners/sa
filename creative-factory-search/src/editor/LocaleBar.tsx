@@ -2,10 +2,12 @@ import { availableLocales, LOCALE_NAMES } from '../core/locales.ts';
 import { FLAGS } from '../core/phrasebook.ts';
 import type { Command } from '../core/project.ts';
 import type { LocaleId, Project } from '../core/types.ts';
+import type { Translator } from './translate.ts';
 
 interface Props {
   project: Project;
   dispatch: (command: Command) => void;
+  translator: Translator;
 }
 
 /**
@@ -19,7 +21,7 @@ interface Props {
  * whether it goes out in the next export. They are separate because checking a
  * translation you are not shipping yet is exactly the case worth supporting.
  */
-export function LocaleBar({ project, dispatch }: Props) {
+export function LocaleBar({ project, dispatch, translator }: Props) {
   const spare = availableLocales(project);
   const going = project.locales.filter(l => l.include).length;
 
@@ -75,7 +77,7 @@ export function LocaleBar({ project, dispatch }: Props) {
         <select
           className="add-locale"
           value=""
-          onChange={e => dispatch({ type: 'locale/add', id: e.target.value as LocaleId })}
+          onChange={e => translator.addLocale(e.target.value as LocaleId)}
         >
           <option value="" disabled>+ мова</option>
           {spare.map(id => (

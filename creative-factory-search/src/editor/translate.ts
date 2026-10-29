@@ -18,8 +18,16 @@ export interface Translator {
   note: string;
   /** Whether the last thing that happened was a failure. */
   failed: boolean;
+  /** Which button the note is about: the script's, or the template fields'. */
+  topic: 'script' | 'fields';
   translateScript: () => void;
   translateFields: () => void;
+  /**
+   * Add a language, and carry the template fields written by hand in the one
+   * on screen into it — the buyer's wording, not the dictionary's, is what the
+   * new language should open with.
+   */
+  addLocale: (id: LocaleId) => void;
   /**
    * Before an export: the script into every language going out whose
    * translation is stale, and — when the buyer said so — into every one
@@ -39,6 +47,7 @@ export function useTranslator(
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
   const [failed, setFailed] = useState(false);
+  const [topic, setTopic] = useState<'script' | 'fields'>('script');
 
   // The buttons are bound once but must act on the project as it is when
   // pressed, not as it was when they were bound.
@@ -51,9 +60,14 @@ export function useTranslator(
       // What to make of the answers. Returns one write per language.
       absorb: (result: TranslationResult, targets: readonly LocaleId[]) => LocaleWrite[],
       nothingToDo: string,
+      about: 'script' | 'fields',
+      // Every other language the project carries, unless named.
+      only?: readonly LocaleId[],
+      from: LocaleId = latest.current.activeLocale,
     ): Promise<void> => {
       const current = latest.current;
-      const targets = current.locales.map(l => l.id).filter(id => id !== current.activeLocale);
+      const targets = only ?? current.locales.map(l => l.id).filter(id => id !== from);
+      setTopic(about);
       if (texts.length === 0 || targets.length === 0) {
         setFailed(false);
         setNote(nothingToDo);
@@ -66,7 +80,7 @@ export function useTranslator(
         const result = await translate(texts, targets);
         const writes = absorb(result, targets);
         if (writes.length > 0) dispatch({ type: 'locale/write', writes });
-        setNote(describe(result, current.activeLocale, targets.length));
+        setNote(describe(result, from, targets.length));
       } catch (e) {
         setFailed(true);
         setNote((e as Error).message);
@@ -87,6 +101,7 @@ export function useTranslator(
         .map(id => ({ id, script: result.out[id]?.[0], translatedFrom: from }))
         .filter((w): w is { id: LocaleId; script: string; translatedFrom: typeof from } => w.script !== undefined),
       'Спершу впишіть скрипт для цієї мови.',
+      'script',
     );
   }, [run]);
 
@@ -95,6 +110,7 @@ export function useTranslator(
     const pending = pendingTranslation(current, { fillEmpty });
     if (pending === null) return current;
     const names = pending.targets.map(id => LOCALE_NAMES[id]).join(', ');
+    setTopic('script');
     setBusy(true);
     setFailed(false);
     setNote(`Перекладаю скрипт перед експортом: ${names}…`);
@@ -126,12 +142,15 @@ export function useTranslator(
     }
   }, [dispatch]);
 
-  const translateFields = useCallback(() => {
-    // Only the fields written by hand. Everything else follows the dictionary,
-    // which is translated by people and says exactly what legal signed off on —
-    // sending it through a machine would be trading that away for nothing.
-    const edits = Object.entries(activeLocale(latest.current).overrides);
-    void run(
+  /**
+   * The hand-written fields of one language into others. Only those: everything
+   * else follows the dictionary, which is translated by people and says exactly
+   * what legal signed off on — sending it through a machine would be trading
+   * that away for nothing.
+   */
+  const fieldsFrom = useCallback((from: LocaleId, only?: readonly LocaleId[]): Promise<void> => {
+    const edits = Object.entries(latest.current.locales.find(l => l.id === from)?.overrides ?? {});
+    return run(
       edits.map(([, value]) => toText(value)),
       (result, targets) => targets.flatMap(id => {
         const lines = result.out[id];
@@ -148,17 +167,33 @@ export function useTranslator(
         return [{ id, overrides }];
       }),
       'Немає ручних правок — решта тексту й так словникова.',
+      'fields',
+      only,
+      from,
     );
   }, [run]);
+
+  const translateFields = useCallback(() => {
+    void fieldsFrom(latest.current.activeLocale);
+  }, [fieldsFrom]);
+
+  const addLocale = useCallback((id: LocaleId) => {
+    const from = latest.current.activeLocale;
+    const edited = Object.keys(activeLocale(latest.current).overrides).length > 0;
+    dispatch({ type: 'locale/add', id });
+    // Nothing written by hand: the dictionary already speaks the new language.
+    if (edited) void fieldsFrom(from, [id]);
+  }, [dispatch, fieldsFrom]);
 
   const clearScripts = useCallback(() => {
     const writes = latest.current.locales.map(l => ({ id: l.id, script: '', translatedFrom: null }));
     dispatch({ type: 'locale/write', writes });
+    setTopic('script');
     setFailed(false);
     setNote('Озвучку прибрано з усіх мов.');
   }, [dispatch]);
 
-  return { busy, note, failed, translateScript, translateFields, beforeExport, clearScripts };
+  return { busy, note, failed, topic, translateScript, translateFields, addLocale, beforeExport, clearScripts };
 }
 
 /**

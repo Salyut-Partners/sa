@@ -49,6 +49,34 @@ export function SidePanel(props: Props) {
   /** Empty unless the server has told us there is no translator key at all. */
   const noTranslator = describeTranslator(props.catalogue);
 
+  // Under the last fields on the panel — the overlay's when there is one: the
+  // hand edits are the language's, both layouts' at once, so one button.
+  const applyToAll = (
+    <div className="group">
+      <div className="lab">
+        Тексти
+        <span className="val">{LOCALE_NAMES[project.activeLocale]}</span>
+      </div>
+      <div className="note">
+        Текст належить мові, не фото: правка лягає на всю пачку в цій мові.
+      </div>
+      <button
+        className="wide"
+        style={{ marginTop: 8 }}
+        disabled={props.translator.busy || project.locales.length < 2 || noTranslator !== ''}
+        onClick={props.translator.translateFields}
+        title="Перекласти правки цієї мови на решту мов проєкту — їхні поля стануть такими ж"
+      >
+        Застосувати до всіх мов
+        <span className="val"> {editedFieldCount(project)}</span>
+      </button>
+      {noTranslator === '' ? null : <div className="warn">{noTranslator}</div>}
+      {props.translator.topic !== 'fields' || props.translator.note === '' ? null : (
+        <div className={props.translator.failed ? 'error' : 'note'}>{props.translator.note}</div>
+      )}
+    </div>
+  );
+
   const patchButton = (patch: ButtonPatch): void => {
     if (activeButton === null) return;
     dispatch({ type: 'button/patch', ids: targets, index: activeButton, patch });
@@ -131,46 +159,23 @@ export function SidePanel(props: Props) {
               <button
                 className="wide"
                 onClick={() => {
-                  dispatch({ type: 'photo/remove', id: photo.id });
+                  dispatch({ type: 'photo/remove', ids: targets });
                   setActiveButton(null);
                 }}
               >
-                Прибрати фото
+                {many ? `Прибрати ${targets.length} фото` : 'Прибрати фото'}
               </button>
             </div>
           </div>
 
           <hr />
 
-          <TemplateSlotPanel project={project} dispatch={dispatch} slot="template" />
+          <TemplateSlotPanel project={project} dispatch={dispatch} slot="template"
+            footer={photo.overlay ? null : applyToAll} />
 
           <hr />
 
-          <TemplateSlotPanel project={project} dispatch={dispatch} slot="overlay" />
-
-          {photo.template || photo.overlay ? (
-            <div className="group">
-              <div className="lab">
-                Тексти
-                <span className="val">{LOCALE_NAMES[project.activeLocale]}</span>
-              </div>
-              <div className="note">
-                Текст належить мові, не фото: правка лягає на всю пачку в цій мові.
-              </div>
-              <button
-                className="wide"
-                style={{ marginTop: 8 }}
-                disabled={
-                  props.translator.busy || project.locales.length < 2 || noTranslator !== ''
-                }
-                onClick={props.translator.translateFields}
-              >
-                Перекласти правки на решту мов
-                <span className="val"> {editedFieldCount(project)}</span>
-              </button>
-              {noTranslator === '' ? null : <div className="warn">{noTranslator}</div>}
-            </div>
-          ) : null}
+          <TemplateSlotPanel project={project} dispatch={dispatch} slot="overlay" footer={applyToAll} />
 
           <hr />
 
@@ -363,7 +368,7 @@ export function SidePanel(props: Props) {
             catalogue={props.catalogue}
             translator={props.translator}
           />
-          {props.translator.note === '' ? null : (
+          {props.translator.topic !== 'script' || props.translator.note === '' ? null : (
             <div className={props.translator.failed ? 'error' : 'note'}>
               {props.translator.note}
             </div>

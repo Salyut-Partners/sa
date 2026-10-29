@@ -122,7 +122,7 @@ describe('coalesceKey', () => {
   });
 
   it('gives adding a button its own step, since it is one gesture already', () => {
-    expect(coalesceKey({ type: 'photo/remove', id: 'p' })).toBeNull();
+    expect(coalesceKey({ type: 'photo/remove', ids: ['p'] })).toBeNull();
   });
 });
 
@@ -137,7 +137,7 @@ describe('what is worth undoing', () => {
 
   it('puts everything that changes a creative in it', () => {
     expect(isUndoable({ type: 'photo/patch', ids: ['a'], patch: { glare: false } })).toBe(true);
-    expect(isUndoable({ type: 'photo/remove', id: 'a' })).toBe(true);
+    expect(isUndoable({ type: 'photo/remove', ids: ['a'] })).toBe(true);
     expect(isUndoable({ type: 'button/remove', ids: ['a'], index: 0 })).toBe(true);
   });
 });
